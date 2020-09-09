@@ -1,3 +1,4 @@
+// Copyright 2020 Gareth Cross
 #include "assertions.hpp"
 
 #include <stdarg.h>

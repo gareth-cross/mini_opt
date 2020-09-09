@@ -1,3 +1,4 @@
+// Copyright 2020 Gareth Cross
 #pragma once
 #define ASSERTS_ENABLED
 
