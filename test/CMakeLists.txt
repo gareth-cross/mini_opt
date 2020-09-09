@@ -42,8 +42,7 @@ foreach(test_file ${${PROJECT_NAME}_TEST_SOURCES})
   endif()
 
   if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message("Building ${test_name} with -DNDEBUG (build type = ${CMAKE_BUILD_TYPE})")
-    target_compile_definitions(${test_name} PUBLIC NDEBUG)
+    target_compile_definitions(${test_name} PUBLIC EIGEN_NO_DEBUG)
   endif()
 
   add_test(${test_name} ${test_name})

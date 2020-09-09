@@ -36,6 +36,10 @@ else()
 	target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -pedantic -Werror)
 endif()
 
+if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC EIGEN_NO_DEBUG)
+endif()
+
 # Specify both build and install include location
 # TODO(gareth): Not sure this is correct
 target_include_directories(${PROJECT_NAME} 

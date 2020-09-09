@@ -27,9 +27,11 @@ void printImpl(const std::string& name, Xpr xpr) {
   TEST_F(object, function) { function(); }
 
 // Macro to compare eigen matrices and print a nice error.
-#define EXPECT_EIGEN_NEAR(a, b, tol) EXPECT_PRED_FORMAT3(math::expectEigenNear, a, b, tol)
-#define ASSERT_EIGEN_NEAR(a, b, tol) ASSERT_PRED_FORMAT3(math::expectEigenNear, a, b, tol)
+#define EXPECT_EIGEN_NEAR(a, b, tol) EXPECT_PRED_FORMAT3(test_utils::expectEigenNear, a, b, tol)
+#define ASSERT_EIGEN_NEAR(a, b, tol) ASSERT_PRED_FORMAT3(test_utils::expectEigenNear, a, b, tol)
 
+// TODO(gareth): This is all copy-pasta from other repos I have. Should put it in a
+// common place.
 namespace test_utils {
 
 // Compare two eigen matrices. Use EXPECT_EIGEN_NEAR()
