@@ -27,6 +27,7 @@ foreach(test_file ${${PROJECT_NAME}_TEST_SOURCES})
   get_filename_component(test_name ${test_file} NAME_WE)
 
   # add test executable for every file
+  message(STATUS "Discovered test: ${test_name}")
   add_executable(${test_name} ${test_file})
 
   # make sure it depends on the test utils
