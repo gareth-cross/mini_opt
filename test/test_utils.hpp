@@ -47,7 +47,7 @@ testing::AssertionResult ExpectEigenNear(const std::string& name_a, const std::s
   for (int i = 0; i < a.rows(); ++i) {
     for (int j = 0; j < a.cols(); ++j) {
       const double delta = a(i, j) - b(i, j);
-      if (std::abs(delta) > tolerance) {
+      if (std::abs(delta) > tolerance || std::isnan(delta)) {
         const std::string index_str = "(" + std::to_string(i) + ", " + std::to_string(j) + ")";
         return testing::AssertionFailure()
                << "Matrix equality " << name_a << " == " << name_b << " failed because:\n"
