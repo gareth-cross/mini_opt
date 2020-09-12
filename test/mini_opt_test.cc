@@ -144,4 +144,43 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
   ASSERT_EIGEN_NEAR(MatrixXd::Zero(7, 7), H_empty, 0.0);
 }
 
+// Test solving a simple linear least squares w/ inequality constraints.
+TEST(MiniOptTest, TestSolveLinearWithInequalities) {
+  using ScalarMatrix = Matrix<double, 1, 1>;
+
+  // simple quadratic residual: f_0(x) = ||x - 5||^2, h(x) = x - 5
+  Residual<1, 1> res;
+  res.index = {{0}};
+  res.function = [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
+    if (J) {
+      J->setIdentity();
+    }
+    return x.array() - 5.0;
+  };
+
+  // initialize at x=-2
+  const VectorXd initial_values = VectorXd::Constant(1, -2.0);
+
+  // add inequality constraint on x: 2*x >= 20
+  LinearInequalityConstraint c{};
+  c.variable = 0;
+  c.a = 2.0;
+  c.b = 20.0;
+
+  // Set up problem
+  QP qp{};
+  qp.G = Matrix<double, 1, 1>::Zero();
+  qp.c = Matrix<double, 1, 1>::Zero();
+  res.UpdateSystem(initial_values, &qp.G, &qp.c);
+  qp.constraints.push_back(c);
+
+  QPInteriorPointSolver solver(qp, VectorXd::Zero(1));
+
+  // start with sigma=1
+  solver.Iterate(1.0);
+  solver.Iterate(0.5);
+  //solver.Iterate(0.1);
+  //solver.Iterate(0.001);
+}
+
 }  // namespace mini_opt

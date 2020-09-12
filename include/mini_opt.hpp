@@ -55,6 +55,83 @@ struct Residual : public ResidualBase {
   ParamType GetParamSlice(const Eigen::VectorXd& params) const;
 };
 
+/*
+ * Describes a linear (technically affine) inequality constraint.
+ * The constraint is specified in the form:
+ *
+ *    a * x[variable] - b >= 0
+ *
+ * TODO(gareth): Generalize beyond diagonal A-matrix?
+ */
+struct LinearInequalityConstraint {
+  // Index of the variable this refers to.
+  int variable;
+  // Constraint coefficients.
+  double a;
+  double b;
+
+  // True if x is feasible.
+  bool IsFeasible(double x) const;
+};
+
+/*
+ * Describes a simple [non-]linear least squares problem. The primary cost is a sum-of
+ * squares.
+ *
+ * Supports simple linear inequality constraints on the variables.
+ *
+ * More formally:
+ *
+ *  min: f_0(x)  [where f_0(x) = (1/2) * h(x)^T * h(x)]
+ *
+ *  Subject to: diag(a) * x >= b
+ *
+ * Note that we actually iteratively minimize the first order approximation of f(x):
+ *
+ *  h(x + dx) = h(x) + J * dx
+ *
+ * Such that: f_0(x) = (1/2) * h(x)^T * h(x) + (J * dx)^T * h(x) + (J * dx)^T * (J * dx)
+ *
+ * So in effect, we are solving a quadratic approximation of the nonlinear cost
+ * with diagonal inequality constraints on the decision variables.
+ */
+struct Problem {
+  using unique_ptr = std::unique_ptr<Problem>;
+
+  // The errors that form the sum of squares part of the cost function.
+  std::vector<ResidualBase::unique_ptr> costs;
+
+  // Linear inequality constraints.
+  std::vector<LinearInequalityConstraint> inequality_constraints;
+};
+
+/*
+ *
+ */
+struct QP {
+  Eigen::MatrixXd G;
+  Eigen::VectorXd c;
+
+  // Diagonal inequality constraints.
+  std::vector<LinearInequalityConstraint> constraints;
+};
+
+/*
+ * Minimize quadratic cost function with inequality constraints using interior point method.
+ */
+struct QPInteriorPointSolver {
+  // Note we don't copy the problem, it must remain in scope for the duration of the solver.
+  QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess);
+
+  void Iterate(const double sigma);
+
+ private:
+  const QP& problem_;
+
+  Eigen::VectorXd primal_variables_;
+  Eigen::VectorXd dual_variables_;
+};
+
 //
 // Template implementations.
 // TODO(gareth): Could put these in a separate header.
@@ -82,6 +159,9 @@ double Residual<ResidualDim, NumParams>::Error(const Eigen::VectorXd& params) co
   return err.squaredNorm();
 }
 
+// TODO(gareth): Probably faster to associate a dimension to each variable,
+// in the style of GTSAM, so that we can do block-wise updates. For now this
+// suits the small problem size I am doing.
 template <size_t ResidualDim, size_t NumParams>
 void Residual<ResidualDim, NumParams>::UpdateSystem(const Eigen::VectorXd& params,
                                                     Eigen::MatrixXd* const H,
