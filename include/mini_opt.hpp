@@ -8,7 +8,15 @@
 
 #include "assertions.hpp"
 
-// TODO(gareth): Template these for double or float? For now double suits me.
+/*
+ * The reference for this implementation is:
+ *
+ *   "Numerical Optimization, Second Edition", Jorge Nocedal and Stephen J. Wright
+ *
+ * Any equation numbers you see refer to this book, unless otherwise stated.
+ *
+ * TODO(gareth): Template everything for double or float? For now double suits me.
+ */
 namespace mini_opt {
 
 // Base type for residuals in case we want more than one.
@@ -75,6 +83,62 @@ struct LinearInequalityConstraint {
 };
 
 /*
+ *
+ */
+struct QP {
+  Eigen::MatrixXd G;
+  Eigen::VectorXd c;
+
+  // Diagonal inequality constraints.
+  std::vector<LinearInequalityConstraint> constraints;
+};
+
+// Method of solving the linear system.
+enum class SolveMethod {
+  /*
+   * Build and solve the full linear system (required to take the newton step) directly.
+   * This directly solves equation 16.58.
+   */
+  FULL_SYSTEM_PARTIAL_PIV_LU = 0,
+  /*
+   * Create the compact "augmented system" (equation 16.61) and solve that instead using
+   * cholesky factorization. Dual variables eliminated, and we solve for delta-x first.
+   */
+  ELIMINATE_DUAL_CHOLESKY = 1,
+};
+
+/*
+ * Minimize quadratic cost function with inequality constraints using interior point method.
+ */
+struct QPInteriorPointSolver {
+  // Note we don't copy the problem, it must remain in scope for the duration of the solver.
+  QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess,
+                        const SolveMethod& solve_method);
+
+  void Iterate(const double sigma);
+
+ private:
+  const QP& problem_;
+  const SolveMethod solve_method_;
+
+  // Storage for the primal variables (x)
+  Eigen::VectorXd primal_variables_;
+
+  // Storage for dual variables, langrange multipliers, etc
+  Eigen::VectorXd dual_variables_;
+
+  // Re-usable storage for the linear system and residuals
+  Eigen::MatrixXd H_;
+  Eigen::VectorXd r_;
+
+  // Implement FULL_SYSTEM_PARTIAL_PIV_LU
+  void IterateFullPivLU(const double sigma);
+
+  // Implement ELIMINATE_DUAL_CHOLESKY
+  void IterateEliminateDualCholesky();
+};
+
+/*
  * Describes a simple [non-]linear least squares problem. The primary cost is a sum-of
  * squares.
  *
@@ -103,33 +167,6 @@ struct Problem {
 
   // Linear inequality constraints.
   std::vector<LinearInequalityConstraint> inequality_constraints;
-};
-
-/*
- *
- */
-struct QP {
-  Eigen::MatrixXd G;
-  Eigen::VectorXd c;
-
-  // Diagonal inequality constraints.
-  std::vector<LinearInequalityConstraint> constraints;
-};
-
-/*
- * Minimize quadratic cost function with inequality constraints using interior point method.
- */
-struct QPInteriorPointSolver {
-  // Note we don't copy the problem, it must remain in scope for the duration of the solver.
-  QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess);
-
-  void Iterate(const double sigma);
-
- private:
-  const QP& problem_;
-
-  Eigen::VectorXd primal_variables_;
-  Eigen::VectorXd dual_variables_;
 };
 
 //

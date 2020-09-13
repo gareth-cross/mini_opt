@@ -158,29 +158,39 @@ TEST(MiniOptTest, TestSolveLinearWithInequalities) {
     return x.array() - 5.0;
   };
 
-  // initialize at x=-2
-  const VectorXd initial_values = VectorXd::Constant(1, -2.0);
+  // linearize at x=0 (it's already linear, in reality)
+  const double initial_x = 0.0;
+  const VectorXd initial_values = VectorXd::Constant(1, initial_x);
 
-  // add inequality constraint on x: 2*x >= 20
-  LinearInequalityConstraint c{};
-  c.variable = 0;
-  c.a = 2.0;
-  c.b = 20.0;
+  // add inequality constraint on x: 2x >= 1 --> 2x - 1 >= 0
+  LinearInequalityConstraint c1{};
+  c1.variable = 0;
+  c1.a = 2.0;
+  c1.b = 1.0;
+
+  // inequality constraint 2: x <= 4 --> -x >= -4 --> -x + 4 >= 0
+  LinearInequalityConstraint c2{};
+  c2.variable = 0;
+  c2.a = -1.0;
+  c2.b = 4;
 
   // Set up problem
   QP qp{};
   qp.G = Matrix<double, 1, 1>::Zero();
   qp.c = Matrix<double, 1, 1>::Zero();
   res.UpdateSystem(initial_values, &qp.G, &qp.c);
-  qp.constraints.push_back(c);
+  qp.constraints.push_back(c1);
+  qp.constraints.push_back(c2);
 
-  QPInteriorPointSolver solver(qp, VectorXd::Zero(1));
+  QPInteriorPointSolver solver(qp, VectorXd::Zero(1), SolveMethod::FULL_SYSTEM_PARTIAL_PIV_LU);
 
   // start with sigma=1
   solver.Iterate(1.0);
   solver.Iterate(0.5);
-  //solver.Iterate(0.1);
-  //solver.Iterate(0.001);
+  solver.Iterate(0.1);
+  solver.Iterate(0.001);
+  solver.Iterate(0.00001);
+  solver.Iterate(0.0);
 }
 
 }  // namespace mini_opt
