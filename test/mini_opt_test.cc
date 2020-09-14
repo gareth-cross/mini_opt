@@ -176,41 +176,14 @@ class QPSolverTest : public ::testing::Test {
     return constant;
   }
 
-  // Test the cholesky solve of the augmented system against
-  void TestCholeskySolveAgainstFullSolveAllConstraints() {
-    QP qp{};
-    const double constant = BuildQuadratic(
-        // make a quadratic in 7 variables
-        {Root(0.5, 2.0), Root(5.0, 25.0), Root(3.0, 9.0), Root(4.0, 1.0), Root(1.2, 2.4),
-         Root(-1.0, 2.0), Root(-0.5, 2.0)},
-        &qp);
+  // Check that the solution of the 'augmented system' (which leverages sparsity)
+  // matches the full 'brute force' solve that uses LU decomposition.
+  void CheckAugmentedSolveAgainstPartialPivot(const QP& qp, const VectorXd& x_guess) {
     const Index N = qp.G.rows();
-
-    // check that the root is what we think it is
-    const VectorXd x_sol =
-        (Matrix<double, 7, 1>() << 4.0, 5.0, 3.0, 0.25, 2.0, -2.0, -4.0).finished();
-    const double cost = x_sol.transpose() * qp.G * x_sol + x_sol.dot(qp.c) + constant;
-    ASSERT_NEAR(0.0, cost, tol::kPico);
-
-    // set up equality constraints on three variables (0, 1 and 4)
-    // 2*x1 - x4 = -0.5
-    // 3*x0 = 2.0
-    const Index K = 2;
-    qp.A_eq = MatrixXd::Zero(K, N);
-    qp.A_eq(0, 1) = 2.0;
-    qp.A_eq(0, 4) = -1.0;
-    qp.A_eq(1, 0) = 3.0;
-    qp.b_eq = Vector2d(0.5, -2.0);
-
-    // set up inequality constraints on three more variables (3, 5 and 6)
-    qp.constraints.emplace_back(3, 4.0, -8.0);  // 4x >= 8  -->  4x - 8 >= 0 (x >= 0.5)
-    qp.constraints.emplace_back(5, 2.0, 1.0);   // 2x >= -1.0  -->  2x + 1 >= 0 (x >= -0.5)
-    qp.constraints.emplace_back(6, 1.0, 0.0);   // x >= 0
+    const Index K = qp.A_eq.rows();
     const Index M = static_cast<Index>(qp.constraints.size());
 
     // construct the solver
-    const VectorXd x_guess =
-        (Matrix<double, 7, 1>() << 0.0, 0.1, 0.2, 0.55, 0.3, 0.7, 1.0).finished();
     QPInteriorPointSolver solver(qp, x_guess);
 
     // Give all the multipliers different positive non-zero values.
@@ -256,10 +229,81 @@ class QPSolverTest : public ::testing::Test {
     ASSERT_EIGEN_NEAR(update, solver.delta_, tol::kPico);
   }
 
+  void TestSolveNoConstraints() {
+    QP qp{};
+    BuildQuadratic({Root(0.5, 2.0), Root(5.0, 25.0), Root(3.0, 9.0)}, &qp);
+
+    const VectorXd x_guess = (Matrix<double, 3, 1>() << 0.0, -0.1, -0.3).finished();
+    CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
+  }
+
+  void TestSolveEqualityConstraints() {
+    QP qp{};
+    BuildQuadratic({Root(1.0, -0.5), Root(2.0, -2.0), Root(-4.0, 5.0)}, &qp);
+
+    // add one equality constraint
+    qp.A_eq.resize(1, 3);
+    qp.b_eq.resize(1);
+    qp.A_eq(0, 1) = 1.0;
+    qp.A_eq(0, 2) = -1.0;
+    qp.b_eq(0) = -0.5;
+
+    const VectorXd x_guess = (Matrix<double, 3, 1>() << 0.3, -0.1, -0.3).finished();
+    CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
+  }
+
+  void TestSolveInequalityConstraints() {
+    QP qp{};
+    BuildQuadratic({Root(1.5, 3.0), Root(-1.0, 4.0)}, &qp);
+
+    // set up inequality constraint
+    qp.constraints.emplace_back(1, 1.0, 0.0);  // x >= 0
+
+    const VectorXd x_guess = (Matrix<double, 2, 1>() << 0.0, 2.0).finished();
+    CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
+  }
+
+  void TestSolveAllConstraints() {
+    QP qp{};
+    const double constant = BuildQuadratic(
+        // make a quadratic in 7 variables
+        {Root(0.5, 2.0), Root(5.0, 25.0), Root(3.0, 9.0), Root(4.0, 1.0), Root(1.2, 2.4),
+         Root(-1.0, 2.0), Root(-0.5, 2.0)},
+        &qp);
+
+    // set up equality constraints on three variables (0, 1 and 4)
+    // 2*x1 - x4 = -0.5
+    // 3*x0 = 2.0
+    const Index K = 2;
+    qp.A_eq = MatrixXd::Zero(K, qp.G.rows());
+    qp.A_eq(0, 1) = 2.0;
+    qp.A_eq(0, 4) = -1.0;
+    qp.A_eq(1, 0) = 3.0;
+    qp.b_eq = Vector2d(0.5, -2.0);
+
+    // set up inequality constraints on three more variables (3, 5 and 6)
+    qp.constraints.emplace_back(3, 4.0, -8.0);  // 4x >= 8  -->  4x - 8 >= 0 (x >= 0.5)
+    qp.constraints.emplace_back(5, 2.0, 1.0);   // 2x >= -1.0  -->  2x + 1 >= 0 (x >= -0.5)
+    qp.constraints.emplace_back(6, 1.0, 0.0);   // x >= 0
+
+    // check that the root is what we think it is
+    const VectorXd x_sol =
+        (Matrix<double, 7, 1>() << 4.0, 5.0, 3.0, 0.25, 2.0, -2.0, -4.0).finished();
+    const double cost = x_sol.transpose() * qp.G * x_sol + x_sol.dot(qp.c) + constant;
+    ASSERT_NEAR(0.0, cost, tol::kPico);
+
+    const VectorXd x_guess =
+        (Matrix<double, 7, 1>() << 0.0, 0.1, 0.2, 0.55, 0.3, 0.7, 1.0).finished();
+    CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
+  }
+
  private:
 };
 
-TEST_FIXTURE(QPSolverTest, TestCholeskySolveAgainstFullSolveAllConstraints)
+TEST_FIXTURE(QPSolverTest, TestSolveNoConstraints)
+TEST_FIXTURE(QPSolverTest, TestSolveEqualityConstraints)
+TEST_FIXTURE(QPSolverTest, TestSolveInequalityConstraints)
+TEST_FIXTURE(QPSolverTest, TestSolveAllConstraints)
 
 //// Test solving a simple linear least squares w/ inequality constraints.
 // TEST(MiniOptTest, TestSolveLinearWithInequalities) {
