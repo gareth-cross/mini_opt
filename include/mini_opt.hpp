@@ -83,10 +83,17 @@ struct LinearInequalityConstraint {
 
   // Ctor
   LinearInequalityConstraint(int variable, double a, double b) : variable(variable), a(a), b(b) {}
+
+  LinearInequalityConstraint() = default;
 };
 
 /*
+ * Problem specification for a QP:
  *
+ *  minimize x^T * G * x + c^T * c
+ *
+ *  st. A_e * x + b_e == 0
+ *  st. a_i * x + b)_i >= 0
  */
 struct QP {
   Eigen::MatrixXd G;
@@ -107,7 +114,10 @@ struct QPInteriorPointSolver {
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
   QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess);
 
-  void Iterate(const double sigma);
+  void Iterate();
+
+  // Print state to a string, for unit tests.
+  std::string StateToString() const;
 
  private:
   const QP& p_;
@@ -123,11 +133,16 @@ struct QPInteriorPointSolver {
   // Solution vector at each iteration
   Eigen::VectorXd delta_;
 
-  // Implement FULL_SYSTEM_PARTIAL_PIV_LU
-  void IterateFullPivLU(const double sigma);
+  // Solve the augmented linear system, which is done by eliminating p_s, and p_z and then
+  // solving for p_x and p_y.
+  void SolveForUpdate(const double mu);
 
-  // Implement ELIMINATE_DUAL_CHOLESKY
-  void IterateEliminateCholesky();
+  double ComputeAlpha() const;
+
+  // Compute the `alpha` step size.
+  // Returns alpha such that (val[i] + d_val[i]) >= val[i] * (1 - tau)
+  double ComputeAlpha(const Eigen::VectorBlock<const Eigen::VectorXd>& val,
+                      const Eigen::VectorBlock<const Eigen::VectorXd>& d_val) const;
 
   // For unit test, allow construction of the full linear system required for Newton step.
   void BuildFullSystem(Eigen::MatrixXd* const H, Eigen::VectorXd* const r) const;

@@ -53,44 +53,55 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
   delta_.resizeLike(variables_);
 }
 
-void QPInteriorPointSolver::Iterate(const double sigma) {
-  (void)sigma;
-  // const std::size_t N = primal_variables_.size();
-  // const std::size_t M = dual_variables_.size() / 2;
+void QPInteriorPointSolver::Iterate() {
+  const std::size_t N = p_.G.rows();
+  const std::size_t M = p_.constraints.size();
 
-  //// get const blocks to access the dual variables
-  // const auto y = dual_variables_.head(M);
-  // const auto lambda = dual_variables_.tail(M);
+  // const-block expressions for these, for convenience
+  double mu = 0;
+  if (M > 0) {
+    // Compute `mu` using equation (19.19), the 'Fiacco-McCormick' strategy.
+    const auto s = variables_.segment(N, M);
+    const auto z = variables_.tail(M);
+    mu = 0.1 * s.dot(z) / static_cast<double>(M);
+  }
 
-  //// compute the residuals, these are shared
-  // auto r_dual = r_.head(N);
-  // auto r_primal = r_.segment(N, M);
-  // auto r_complementary = r_.tail(M);
+  // solve the system
+  SolveForUpdate(mu);
 
-  //// contribution from the quadratic cost
-  // r_dual.noalias() = p_.G * primal_variables_ + p_.c;
+  // compute step size
+  const double alpha = ComputeAlpha();
 
-  //// contribution from inequality constraints
-  // for (std::size_t i = 0; i < p_.constraints.size(); ++i) {
-  //  const LinearInequalityConstraint& c = p_.constraints[i];
-  //  // add to dual `r_d`:
-  //  r_dual[c.variable] -= c.a * lambda[i];
-  //  // add to primal `r_p`:
-  //  r_primal[i] = c.a * primal_variables_[c.variable] + c.b - y[i];
-  //}
+  std::cout << "r " << r_.transpose().format(kMatrixFmt) << std::endl;
+  std::cout << "mu " << mu << std::endl;
+  std::cout << "delta " << delta_.transpose().format(kMatrixFmt) << std::endl;
+  std::cout << "alpha " << alpha << std::endl;
 
-  //// diag(y) * lambda = diag(lambda) * y
-  //// we don't subtract the mu * sigma component yet
-  // r_complementary = y.array() * lambda.array();
+  // update
+  variables_.noalias() += delta_ * alpha;
+}
 
-  //// initialize top left to the quadratic term
-  // H_.topLeftCorner(N, N) = p_.G;
+// TODO(gareth): Use libfmt for this.
+std::string QPInteriorPointSolver::StateToString() const {
+  const std::size_t N = p_.G.rows();
+  const std::size_t M = p_.constraints.size();
+  const std::size_t K = p_.A_eq.rows();
 
-  // if (solve_method_ == SolveMethod::FULL_SYSTEM_PARTIAL_PIV_LU) {
-  //  IterateFullPivLU(sigma);
-  //} else if (solve_method_ == SolveMethod::ELIMINATE_DUAL_CHOLESKY) {
-  //  IterateEliminateCholesky();
-  //}
+  const auto x = variables_.head(N);
+  const auto s = variables_.segment(N, M);
+  const auto y = variables_.segment(N + M, K);
+  const auto z = variables_.tail(M);
+
+  std::stringstream ss;
+  ss << "x = " << x.transpose().format(kMatrixFmt) << "\n";
+  if (M > 0) {
+    ss << "s = " << s.transpose().format(kMatrixFmt) << "\n";
+    ss << "z = " << z.transpose().format(kMatrixFmt) << "\n";
+  }
+  if (K > 0) {
+    ss << "y = " << y.transpose().format(kMatrixFmt) << "\n";
+  }
+  return ss.str();
 }
 
 /*
@@ -135,7 +146,7 @@ void QPInteriorPointSolver::Iterate(const double sigma) {
  * Then we solve this system, and substitute for the other variables. We leverage the fact
  * that \Sigma, diag(s), I, etc are diagonal matrices.
  */
-void QPInteriorPointSolver::IterateEliminateCholesky() {
+void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   const std::size_t N = p_.G.rows();
   const std::size_t M = p_.constraints.size();
   const std::size_t K = p_.A_eq.rows();
@@ -175,10 +186,8 @@ void QPInteriorPointSolver::IterateEliminateCholesky() {
     const LinearInequalityConstraint& c = p_.constraints[i];
     r_d[c.variable] -= c.a * z[i];
     r_pi[i] = c.a * x[c.variable] + c.b - s[i];
-    r_comp[i] = s[i] * z[i];  //  don't subtract mu, yet
+    r_comp[i] = s[i] * z[i] - mu;
   }
-
-  //std::cout << r_.transpose() << std::endl;
 
   // apply the variable elimination, which updates r_d
   for (std::size_t i = 0; i < M; ++i) {
@@ -187,12 +196,12 @@ void QPInteriorPointSolver::IterateEliminateCholesky() {
     r_d[c.variable] += c.a * r_comp[i] / s[i];
   }
 
-  //std::cout << "\n" << H_.format(kMatrixFmt) << std::endl;
-
   // factorize
-  LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
+  const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
-    throw std::runtime_error("Failed to solve");  // todo more detail
+    std::stringstream ss;
+    ss << "Failed to solve:\n" << H_.format(kMatrixFmt) << "\n";
+    throw std::runtime_error(ss.str());
   }
 
   // compute H^-1
@@ -208,7 +217,8 @@ void QPInteriorPointSolver::IterateEliminateCholesky() {
   dx.noalias() = H_inv_.block(0, 0, N, N) * -r_d;
   if (K > 0) {
     dx.noalias() += H_inv_.block(0, N, N, K) * -r_pe;
-    // negate here since py is negative in the solution vector (this flips the sign back to normal)
+    // negate here since py is negative in the solution vector (this flips the sign back to
+    // normal)
     dy.noalias() = H_inv_.block(N, 0, K, N) * r_d;
     dy.noalias() += H_inv_.block(N, N, K, K) * r_pe;
   }
@@ -219,6 +229,37 @@ void QPInteriorPointSolver::IterateEliminateCholesky() {
     ds[i] = c.a * dx[c.variable] + r_pi[i];
     dz[i] = -(z[i] / s[i]) * (ds[i]) - (1 / s[i]) * r_comp[i];
   }
+}
+
+// TODO(gareth): Should implement selection of alphas to minimize objective.
+// See formula 16.66
+double QPInteriorPointSolver::ComputeAlpha() const {
+  const std::size_t N = p_.G.rows();
+  const std::size_t M = p_.constraints.size();
+  if (M > 0) {
+    const double alpha_s = ComputeAlpha(variables_.segment(N, M), delta_.segment(N, M));
+    const double alpha_z = ComputeAlpha(variables_.tail(M), delta_.tail(M));
+    return std::min(alpha_s, alpha_z);
+  }
+  return 1.0;
+}
+
+double QPInteriorPointSolver::ComputeAlpha(
+    const Eigen::VectorBlock<const Eigen::VectorXd>& val,
+    const Eigen::VectorBlock<const Eigen::VectorXd>& d_val) const {
+  ASSERT(val.rows() == d_val.rows());
+  double alpha = 1.0;
+  constexpr double tau = .995;
+  for (int i = 0; i < val.rows(); ++i) {
+    const double updated_val = val[i] + d_val[i];
+    if (updated_val <= 0.0 && std::abs(d_val[i]) > 0) {
+      const double candidate_alpha = -tau * val[i] / d_val[i];
+      if (candidate_alpha < alpha) {
+        alpha = candidate_alpha;
+      }
+    }
+  }
+  return alpha;
 }
 
 /*
