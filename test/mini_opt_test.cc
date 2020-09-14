@@ -4,7 +4,12 @@
 #include "test_utils.hpp"
 
 namespace mini_opt {
+
 using namespace Eigen;
+const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
+
+#define PRINT_MATRIX(x) \
+  { std::cout << #x << ":\n" << (x).eval().format(kMatrixFmt) << "\n"; }
 
 // our test function, two polynomials
 //    f(x, y, z) = [
@@ -144,53 +149,165 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
   ASSERT_EIGEN_NEAR(MatrixXd::Zero(7, 7), H_empty, 0.0);
 }
 
-// Test solving a simple linear least squares w/ inequality constraints.
-TEST(MiniOptTest, TestSolveLinearWithInequalities) {
-  using ScalarMatrix = Matrix<double, 1, 1>;
-
-  // simple quadratic residual: f_0(x) = ||x - 5||^2, h(x) = x - 5
-  Residual<1, 1> res;
-  res.index = {{0}};
-  res.function = [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
-    if (J) {
-      J->setIdentity();
-    }
-    return x.array() - 5.0;
+class QPSolverTest : public ::testing::Test {
+ public:
+  // Specify the root of a polynominal: (a * x - b)^2
+  struct Root {
+    double a;
+    double b;
+    Root(double a, double b) : a(a), b(b) {}
   };
 
-  // linearize at x=0 (it's already linear, in reality)
-  const double initial_x = 0.0;
-  const VectorXd initial_values = VectorXd::Constant(1, initial_x);
+  double BuildQuadratic(const std::vector<Root>& roots, QP* const output) {
+    const std::size_t N = roots.size();
+    output->G.resize(N, N);
+    output->G.setZero();
+    output->c.resize(N);
+    output->c.setZero();
 
-  // add inequality constraint on x: 2x >= 1 --> 2x - 1 >= 0
-  LinearInequalityConstraint c1{};
-  c1.variable = 0;
-  c1.a = 2.0;
-  c1.b = 1.0;
+    std::size_t i = 0;
+    double constant = 0;
+    for (const Root& root : roots) {
+      output->G(i, i) = root.a * root.a;
+      output->c[i] = -2 * root.a * root.b;
+      constant += root.b * root.b;
+      ++i;
+    }
+    return constant;
+  }
 
-  // inequality constraint 2: x <= 4 --> -x >= -4 --> -x + 4 >= 0
-  LinearInequalityConstraint c2{};
-  c2.variable = 0;
-  c2.a = -1.0;
-  c2.b = 4;
+  // Test the cholesky solve of the augmented system against
+  void TestCholeskySolveAgainstFullSolveAllConstraints() {
+    QP qp{};
+    const double constant = BuildQuadratic(
+        // make a quadratic in 7 variables
+        {Root(0.5, 2.0), Root(5.0, 25.0), Root(3.0, 9.0), Root(4.0, 1.0), Root(1.2, 2.4),
+         Root(-1.0, 2.0), Root(-0.5, 2.0)},
+        &qp);
+    const Index N = qp.G.rows();
 
-  // Set up problem
-  QP qp{};
-  qp.G = Matrix<double, 1, 1>::Zero();
-  qp.c = Matrix<double, 1, 1>::Zero();
-  res.UpdateSystem(initial_values, &qp.G, &qp.c);
-  qp.constraints.push_back(c1);
-  qp.constraints.push_back(c2);
+    // check that the root is what we think it is
+    const VectorXd x_sol =
+        (Matrix<double, 7, 1>() << 4.0, 5.0, 3.0, 0.25, 2.0, -2.0, -4.0).finished();
+    const double cost = x_sol.transpose() * qp.G * x_sol + x_sol.dot(qp.c) + constant;
+    ASSERT_NEAR(0.0, cost, tol::kPico);
 
-  QPInteriorPointSolver solver(qp, VectorXd::Zero(1), SolveMethod::FULL_SYSTEM_PARTIAL_PIV_LU);
+    // set up equality constraints on three variables (0, 1 and 4)
+    // 2*x1 - x4 = -0.5
+    // 3*x0 = 2.0
+    const Index K = 2;
+    qp.A_eq = MatrixXd::Zero(K, N);
+    qp.A_eq(0, 1) = 2.0;
+    qp.A_eq(0, 4) = -1.0;
+    qp.A_eq(1, 0) = 3.0;
+    qp.b_eq = Vector2d(0.5, -2.0);
 
-  // start with sigma=1
-  solver.Iterate(1.0);
-  solver.Iterate(0.5);
-  solver.Iterate(0.1);
-  solver.Iterate(0.001);
-  solver.Iterate(0.00001);
-  solver.Iterate(0.0);
-}
+    // set up inequality constraints on three more variables (3, 5 and 6)
+    qp.constraints.emplace_back(3, 4.0, -8.0);  // 4x >= 8  -->  4x - 8 >= 0 (x >= 0.5)
+    qp.constraints.emplace_back(5, 2.0, 1.0);   // 2x >= -1.0  -->  2x + 1 >= 0 (x >= -0.5)
+    qp.constraints.emplace_back(6, 1.0, 0.0);   // x >= 0
+    const Index M = static_cast<Index>(qp.constraints.size());
+
+    // construct the solver
+    const VectorXd x_guess =
+        (Matrix<double, 7, 1>() << 0.0, 0.1, 0.2, 0.55, 0.3, 0.7, 1.0).finished();
+    QPInteriorPointSolver solver(qp, x_guess);
+
+    // Give all the multipliers different positive non-zero values.
+    // The exact values aren't actually important, we just want to validate indexing.
+    auto s = solver.variables_.segment(N, M);
+    auto y = solver.variables_.segment(N + M, K);
+    auto z = solver.variables_.tail(M);
+    for (Index i = 0; i < M; ++i) {
+      s[i] = 2.0 / (i + 1);
+      z[i] = 0.5 * (i + 1);
+    }
+    for (Index k = 0; k < K; ++k) {
+      y[k] = static_cast<double>((k + 1) * (k + 1));
+    }
+
+    // check the dimensions
+    const Index total_dims = N + M * 2 + K;
+    ASSERT_EQ(total_dims, solver.variables_.rows());
+    ASSERT_EQ(total_dims, solver.delta_.rows());
+    ASSERT_EQ(total_dims, solver.r_.rows());
+    ASSERT_EQ(N + K, solver.H_.rows());  //  only x and y
+
+    // build the full system
+    MatrixXd H_full;
+    VectorXd r_full;
+    solver.BuildFullSystem(&H_full, &r_full);
+
+    const PartialPivLU<MatrixXd> piv_lu(H_full);
+    ASSERT_GT(std::abs(piv_lu.determinant()), tol::kMicro);
+
+    // compute the update (w/ signs)
+    const VectorXd signed_update = piv_lu.solve(-r_full);
+
+    // flip the signs
+    VectorXd update = signed_update;
+    update.segment(N + M, K).array() *= -1.0;  // flip dy
+    update.tail(M).array() *= -1.0;            // flip dz
+
+    // now solve w/ cholesky
+    solver.IterateEliminateCholesky();
+
+    // must match the full system
+    ASSERT_EIGEN_NEAR(update, solver.delta_, tol::kPico);
+  }
+
+ private:
+};
+
+TEST_FIXTURE(QPSolverTest, TestCholeskySolveAgainstFullSolveAllConstraints)
+
+//// Test solving a simple linear least squares w/ inequality constraints.
+// TEST(MiniOptTest, TestSolveLinearWithInequalities) {
+//  using ScalarMatrix = Matrix<double, 1, 1>;
+//
+//  // simple quadratic residual: f_0(x) = ||x - 5||^2, h(x) = x - 5
+//  Residual<1, 1> res;
+//  res.index = {{0}};
+//  res.function = [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
+//    if (J) {
+//      J->setIdentity();
+//    }
+//    return x.array() - 5.0;
+//  };
+//
+//  // linearize at x=0 (it's already linear, in reality)
+//  const double initial_x = 0.0;
+//  const VectorXd initial_values = VectorXd::Constant(1, initial_x);
+//
+//  // add inequality constraint on x: 2x >= 1 --> 2x - 1 >= 0
+//  LinearInequalityConstraint c1{};
+//  c1.variable = 0;
+//  c1.a = 2.0;
+//  c1.b = 1.0;
+//
+//  // inequality constraint 2: x <= 4 --> -x >= -4 --> -x + 4 >= 0
+//  LinearInequalityConstraint c2{};
+//  c2.variable = 0;
+//  c2.a = -1.0;
+//  c2.b = 4;
+//
+//  // Set up problem
+//  QP qp{};
+//  qp.G = Matrix<double, 1, 1>::Zero();
+//  qp.c = Matrix<double, 1, 1>::Zero();
+//  res.UpdateSystem(initial_values, &qp.G, &qp.c);
+//  qp.constraints.push_back(c1);
+//  qp.constraints.push_back(c2);
+//
+//  QPInteriorPointSolver solver(qp, VectorXd::Zero(1), SolveMethod::FULL_SYSTEM_PARTIAL_PIV_LU);
+//
+//  // start with sigma=1
+//  solver.Iterate(1.0);
+//  solver.Iterate(0.5);
+//  solver.Iterate(0.1);
+//  solver.Iterate(0.001);
+//  solver.Iterate(0.00001);
+//  solver.Iterate(0.0);
+//}
 
 }  // namespace mini_opt

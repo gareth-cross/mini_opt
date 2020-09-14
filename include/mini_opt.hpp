@@ -67,7 +67,7 @@ struct Residual : public ResidualBase {
  * Describes a linear (technically affine) inequality constraint.
  * The constraint is specified in the form:
  *
- *    a * x[variable] - b >= 0
+ *    a * x[variable] + b >= 0
  *
  * TODO(gareth): Generalize beyond diagonal A-matrix?
  */
@@ -80,6 +80,9 @@ struct LinearInequalityConstraint {
 
   // True if x is feasible.
   bool IsFeasible(double x) const;
+
+  // Ctor
+  LinearInequalityConstraint(int variable, double a, double b) : variable(variable), a(a), b(b) {}
 };
 
 /*
@@ -89,22 +92,12 @@ struct QP {
   Eigen::MatrixXd G;
   Eigen::VectorXd c;
 
+  // Optional equality constraints in form Ax + b = 0
+  Eigen::MatrixXd A_eq;
+  Eigen::VectorXd b_eq;
+
   // Diagonal inequality constraints.
   std::vector<LinearInequalityConstraint> constraints;
-};
-
-// Method of solving the linear system.
-enum class SolveMethod {
-  /*
-   * Build and solve the full linear system (required to take the newton step) directly.
-   * This directly solves equation 16.58.
-   */
-  FULL_SYSTEM_PARTIAL_PIV_LU = 0,
-  /*
-   * Create the compact "augmented system" (equation 16.61) and solve that instead using
-   * cholesky factorization. Dual variables eliminated, and we solve for delta-x first.
-   */
-  ELIMINATE_DUAL_CHOLESKY = 1,
 };
 
 /*
@@ -112,30 +105,34 @@ enum class SolveMethod {
  */
 struct QPInteriorPointSolver {
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
-  QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess,
-                        const SolveMethod& solve_method);
+  QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess);
 
   void Iterate(const double sigma);
 
  private:
-  const QP& problem_;
-  const SolveMethod solve_method_;
+  const QP& p_;
 
-  // Storage for the primal variables (x)
-  Eigen::VectorXd primal_variables_;
-
-  // Storage for dual variables, langrange multipliers, etc
-  Eigen::VectorXd dual_variables_;
+  // Storage for the variables: (x, s, y, z)
+  Eigen::VectorXd variables_;
 
   // Re-usable storage for the linear system and residuals
   Eigen::MatrixXd H_;
   Eigen::VectorXd r_;
+  Eigen::MatrixXd H_inv_;
+
+  // Solution vector at each iteration
+  Eigen::VectorXd delta_;
 
   // Implement FULL_SYSTEM_PARTIAL_PIV_LU
   void IterateFullPivLU(const double sigma);
 
   // Implement ELIMINATE_DUAL_CHOLESKY
-  void IterateEliminateDualCholesky();
+  void IterateEliminateCholesky();
+
+  // For unit test, allow construction of the full linear system required for Newton step.
+  void BuildFullSystem(Eigen::MatrixXd* const H, Eigen::VectorXd* const r) const;
+
+  friend class QPSolverTest;
 };
 
 /*
