@@ -8,7 +8,7 @@
 namespace mini_opt {
 
 using namespace Eigen;
-const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
+static const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
 
 #define PRINT_MATRIX(x) \
   { std::cout << #x << ":\n" << (x).eval().format(kMatrixFmt) << "\n"; }
@@ -301,6 +301,18 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
+  // TODO(gareth): Would really like to use libfmt for this instead...
+  static void ProgressPrinter(const QPInteriorPointSolver* const solver, const double kkt_2,
+                              const double mu, const double alpha) {
+    std::cout << "Iteration summary: ";
+    std::cout << "||kkt||^2 = " << kkt_2 << ", mu = " << mu << ",  alpha = " << alpha << "\n";
+    // dump the state with labels
+    std::cout << "  x = " << solver->x_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  s = " << solver->s_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  y = " << solver->y_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  z = " << solver->z_block().transpose().format(kMatrixFmt) << "\n";
+  }
+
   // Scalar quadratic equation with a single inequality constraint.
   void TestScalarQuadraticWithInequality() {
     using ScalarMatrix = Matrix<double, 1, 1>;
@@ -326,19 +338,16 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(/* variable index = */ 0, -1.0, 4.0);
 
     QPInteriorPointSolver solver(qp, VectorXd::Zero(1));
-    std::cout << solver.StateToString() << std::endl;
+    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
+                                       std::placeholders::_1, std::placeholders::_2,
+                                       std::placeholders::_3));
 
     // start with sigma=1
-    solver.Iterate(0.1);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
+    double sigma_initial = 0.1;
+    for (int i = 0; i < 10; ++i) {
+      solver.Iterate(sigma_initial);
+      sigma_initial *= 0.1;
+    }
   }
 
   // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
@@ -367,22 +376,16 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(0, -1.0, 1.0);  // x0 <= 1.0
     qp.constraints.emplace_back(1, 1.0, 3.0);   // x1 >= -3.0
 
-    QPInteriorPointSolver solver(qp, Vector2d::Zero());
-    std::cout << solver.StateToString() << std::endl;
-
+    QPInteriorPointSolver solver(qp);
+    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
+                                       std::placeholders::_1, std::placeholders::_2,
+                                       std::placeholders::_3));
     // start with sigma=1
-    solver.Iterate(0.1);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
-    solver.Iterate(0.0000001);
-    std::cout << solver.StateToString() << std::endl;
+    double sigma_initial = 0.1;
+    for (int i = 0; i < 10; ++i) {
+      solver.Iterate(sigma_initial);
+      sigma_initial *= 0.1;
+    }
   }
 
  private:

@@ -19,25 +19,33 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
     : p_(problem) {
   ASSERT(p_.G.rows() == p_.G.cols());
   ASSERT(p_.G.rows() == p_.c.rows());
-  ASSERT(p_.c.rows() == x_guess.rows());
   ASSERT(p_.A_eq.rows() == p_.b_eq.rows());
 
   // If equality constraints were specified, we must be able to multiply A*x
   if (p_.A_eq.size() > 0) {
-    ASSERT(p_.A_eq.cols() == x_guess.rows());
+    ASSERT(p_.A_eq.cols() == p_.G.rows());
   } else {
     ASSERT(p_.A_eq.rows() == 0);
     ASSERT(p_.b_eq.rows() == 0);
   }
 
   // Order is [slacks (s), equality multipliers(y), inequality multiplers (lambda)]
-  const std::size_t x_size = x_guess.rows();
+  const std::size_t x_size = p_.G.rows();
   const std::size_t num_slacks = p_.constraints.size();
   const std::size_t num_multipliers = p_.constraints.size() + p_.A_eq.rows();
   variables_.resize(x_size + num_slacks + num_multipliers);
-  variables_.head(x_size) = x_guess;
+
+  // if a guess was provided, copy it in
+  if (x_guess.size() > 0) {
+    ASSERT(x_guess.rows() == p_.G.rows());
+    variables_.head(x_size) = x_guess;
+  } else {
+    // otherwise guess zero
+    variables_.head(x_size).setZero();
+  }
 
   // TODO(gareth): A better initialization strategy for these?
+  // Could assume constraints are active, in which case we compute lambda from the KKT conditions.
   variables_.tail(num_slacks + num_multipliers).setConstant(1);
 
   // Allocate space for solving
@@ -68,44 +76,44 @@ void QPInteriorPointSolver::Iterate(const double sigma) {
     mu = r_comp.sum() / static_cast<double>(M);
   }
 
-  // solve the system
+  // solve the system, multiply by sigma to get equation 19.19
   SolveForUpdate(sigma * mu);
 
   // compute step size
   const double alpha = ComputeAlpha();
 
-#if 1
-  std::cout << "r " << r_.transpose().format(kMatrixFmt) << std::endl;
-  std::cout << "mu " << mu << std::endl;
-  std::cout << "delta " << delta_.transpose().format(kMatrixFmt) << std::endl;
-  std::cout << "alpha " << alpha << std::endl;
-#endif
+  if (logger_callback_) {
+    // pass progress to the logger callback, TODO(gareth): More relevant things here?
+    logger_callback_(r_.squaredNorm(), mu, alpha);
+  }
 
   // update
   variables_.noalias() += delta_ * alpha;
 }
 
-// TODO(gareth): Use libfmt for this.
-std::string QPInteriorPointSolver::StateToString() const {
+// TODO(gareth): All the accessing by index is a little gross, could maybe split
+// up the variables into separate vectors? I do like having the full state as one object.
+QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::x_block() const {
+  const std::size_t N = p_.G.rows();
+  return variables_.head(N);
+}
+
+QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::s_block() const {
+  const std::size_t N = p_.G.rows();
+  const std::size_t M = p_.constraints.size();
+  return variables_.segment(N, M);
+}
+
+QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::y_block() const {
   const std::size_t N = p_.G.rows();
   const std::size_t M = p_.constraints.size();
   const std::size_t K = p_.A_eq.rows();
+  return variables_.segment(N + M, K);
+}
 
-  const auto x = variables_.head(N);
-  const auto s = variables_.segment(N, M);
-  const auto y = variables_.segment(N + M, K);
-  const auto z = variables_.tail(M);
-
-  std::stringstream ss;
-  ss << "x = " << x.transpose().format(kMatrixFmt) << "\n";
-  if (M > 0) {
-    ss << "s = " << s.transpose().format(kMatrixFmt) << "\n";
-    ss << "z = " << z.transpose().format(kMatrixFmt) << "\n";
-  }
-  if (K > 0) {
-    ss << "y = " << y.transpose().format(kMatrixFmt) << "\n";
-  }
-  return ss.str();
+QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::z_block() const {
+  const std::size_t M = p_.constraints.size();
+  return variables_.tail(M);
 }
 
 /*

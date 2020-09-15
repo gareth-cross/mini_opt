@@ -2,7 +2,7 @@
 #pragma once
 #include <Eigen/Core>
 #include <Eigen/Dense>
-#include <Vector>
+#include <vector>
 #include <array>
 #include <memory>
 
@@ -118,13 +118,25 @@ struct QP {
  * Minimize quadratic cost function with inequality constraints using interior point method.
  */
 struct QPInteriorPointSolver {
-  // Note we don't copy the problem, it must remain in scope for the duration of the solver.
-  QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess);
+  using ConstVectorBlock = Eigen::VectorBlock<const Eigen::VectorXd>;
 
+  // Note we don't copy the problem, it must remain in scope for the duration of the solver.
+  QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess = {});
+
+  // Take a single step.
   void Iterate(const double sigma);
 
-  // Print state to a string, for unit tests.
-  std::string StateToString() const;
+  // Set the logger callback to a function pointer, lambda, etc.
+  template <typename T>
+  void SetLoggerCallback(T cb) {
+    logger_callback_ = cb;
+  }
+
+  // Const block accessors for state.
+  ConstVectorBlock x_block() const;
+  ConstVectorBlock s_block() const;
+  ConstVectorBlock y_block() const;
+  ConstVectorBlock z_block() const;
 
  private:
   const QP& p_;
@@ -140,6 +152,9 @@ struct QPInteriorPointSolver {
 
   // Solution vector at each iteration
   Eigen::VectorXd delta_;
+
+  // Optional iteration logger.
+  std::function<void(double kkt_2, double mu, double alpha)> logger_callback_;
 
   // Solve the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
