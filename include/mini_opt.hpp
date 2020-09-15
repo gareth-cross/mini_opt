@@ -1,7 +1,6 @@
 // Copyright 2020 Gareth Cross
 #pragma once
 #include <Eigen/Core>
-#include <Eigen/Dense>
 #include <array>
 #include <memory>
 #include <vector>
@@ -149,30 +148,37 @@ struct QPInteriorPointSolver {
     // we are applying to the KKT conditions. This is the initial value for sigma.
     double initial_sigma{0.1};
 
+    // Amount to reduce sigma on each iteration.
+    double sigma_reduction{0.1};
+
     // If ||kkt||^2 < termination_kkt2_tol, we terminate optimization.
-    double termination_kkt2_tol{1.0e-4};
+    double termination_kkt2_tol{1.0e-8};
 
     // Max # of iterations.
     int max_iterations{10};
   };
 
+  // List of possible termination criteria.
+  enum class TerminationState {
+    SATISFIED_KKT_TOL = 0,
+    BAD_STEP,
+    MAX_ITERATIONS,
+  };
+
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
   QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess = {});
-
-  // Take a single step.
-  void Iterate(const double sigma);
 
   /*
    * Iterate until one of the following conditions is met:
    *
    *   - The norm of the first order KKT conditions is less than the tolerance.
-   *   - Newton step does not reduce the error.
-   *   - We get `alpha ~= 0` (ie. cannot apply an update).
+   *   - Newton step does not get us closer to satisfying the first order KKT conditions.
    *   - The fixed max number if iterations is hit.
    *
-   * We don't implement any smart recovery
+   * I don't implement any smart recovery in the second case. There's likely a better option
+   * here than just bailing.
    */
-  void Solve(const Params& params);
+  TerminationState Solve(const Params& params);
 
   // Set the logger callback to a function pointer, lambda, etc.
   template <typename T>
@@ -191,6 +197,7 @@ struct QPInteriorPointSolver {
 
   // Storage for the variables: (x, s, y, z)
   Eigen::VectorXd variables_;
+  Eigen::VectorXd prev_variables_;
 
   // Re-usable storage for the linear system and residuals
   Eigen::MatrixXd H_;
@@ -203,6 +210,11 @@ struct QPInteriorPointSolver {
 
   // Optional iteration logger.
   std::function<void(double kkt_2, double mu, double alpha)> logger_callback_;
+
+  // Take a single step.
+  // Computes mu, solves for the update, and takes the longest step we can while satisfying
+  // constraints. Returns {mu = s^T * z, alpha}, where alpha is min(alpha_z, alpha_s).
+  std::pair<double, double> Iterate(const double sigma);
 
   // Solve the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
@@ -225,6 +237,10 @@ struct QPInteriorPointSolver {
 
   friend class QPSolverTest;
 };
+
+// ostream for termination states
+std::ostream& operator<<(std::ostream& stream,
+                         const QPInteriorPointSolver::TerminationState& state);
 
 /*
  * Describes a simple [non-]linear least squares problem. The primary cost is a sum-of

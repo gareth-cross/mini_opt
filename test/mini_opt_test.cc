@@ -154,6 +154,8 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
 // Tests for the QP interior point solver.
 class QPSolverTest : public ::testing::Test {
  public:
+  using TerminationState = QPInteriorPointSolver::TerminationState;
+
   // Specify the root of a polynominal: (a * x - b)^2
   struct Root {
     double a;
@@ -340,12 +342,9 @@ class QPSolverTest : public ::testing::Test {
                                        std::placeholders::_1, std::placeholders::_2,
                                        std::placeholders::_3));
 
-    // start with sigma=1
-    double sigma_initial = 0.1;
-    for (int i = 0; i < 10; ++i) {
-      solver.Iterate(sigma_initial);
-      sigma_initial *= 0.1;
-    }
+    QPInteriorPointSolver::Params params{};
+    const auto term_state = solver.Solve(params);
+    PRINT(term_state);
   }
 
   // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
@@ -378,12 +377,10 @@ class QPSolverTest : public ::testing::Test {
     solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
                                        std::placeholders::_1, std::placeholders::_2,
                                        std::placeholders::_3));
-    // start with sigma=1
-    double sigma_initial = 1.0;
-    for (int i = 0; i < 10; ++i) {
-      solver.Iterate(sigma_initial);
-      sigma_initial *= 0.1;
-    }
+    // solve it
+    QPInteriorPointSolver::Params params{};
+    const auto term_state = solver.Solve(params);
+    PRINT(term_state);
   }
 
  private:

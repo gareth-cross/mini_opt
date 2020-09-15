@@ -1,7 +1,6 @@
 #include "mini_opt.hpp"
 
-// temp
-#include <iostream>
+#include <Eigen/Dense>
 
 using namespace Eigen;
 namespace mini_opt {
@@ -34,6 +33,7 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
   const std::size_t num_slacks = p_.constraints.size();
   const std::size_t num_multipliers = p_.constraints.size() + p_.A_eq.rows();
   variables_.resize(x_size + num_slacks + num_multipliers);
+  prev_variables_.resizeLike(variables_);
 
   // if a guess was provided, copy it in
   if (x_guess.size() > 0) {
@@ -55,14 +55,69 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
   H_inv_.resizeLike(H_);
 
   // Use the total size here
-  r_.resize(variables_.size());
+  r_.resizeLike(variables_);
   r_dual_aug_.resize(x_size);
 
   // Space for the output of all variables
   delta_.resizeLike(variables_);
 }
 
-void QPInteriorPointSolver::Iterate(const double sigma) {
+// Assert params are in valid range.
+static void CheckParams(const QPInteriorPointSolver::Params& params) {
+  ASSERT(params.initial_sigma > 0);
+  ASSERT(params.initial_sigma <= 1.0);
+  ASSERT(params.sigma_reduction > 0);
+  ASSERT(params.sigma_reduction <= 1.0);
+  ASSERT(params.termination_kkt2_tol > 0);
+  ASSERT(params.max_iterations > 0);
+}
+
+QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(const Params& params) {
+  CheckParams(params);
+
+  // on the first iteration, the residual needs to be filled first
+  EvaluateKKTConditions();
+
+  double sigma{params.initial_sigma};
+  for (int iter = 0; iter < params.max_iterations; ++iter) {
+    // copy current state
+    prev_variables_ = variables_;
+
+    // compute squared norm of the residual, prior to any updates
+    const double kkt2 = r_.squaredNorm();
+
+    // solve for the update
+    const auto mu_and_alpha = Iterate(sigma);
+
+    // evaluate the residual again, which fills `r_` for the next iteration
+    EvaluateKKTConditions();
+    const double kkt2_after = r_.squaredNorm();
+
+    if (logger_callback_) {
+      // pass progress to the logger callback for printing in the test
+      logger_callback_(kkt2_after, mu_and_alpha.first, mu_and_alpha.second);
+    }
+
+    // check for termination
+    if (kkt2_after > kkt2) {
+      // newton step took us in a bad direction, roll back the update
+      // if we want to try to recover, we need to reset `r_` here as well
+      variables_ = prev_variables_;
+      return TerminationState::BAD_STEP;
+    }
+    if (kkt2_after < params.termination_kkt2_tol) {
+      // error is low enough, stop
+      return TerminationState::SATISFIED_KKT_TOL;
+    }
+
+    // TODO(gareth): Impleent one of the smarter strategies here.
+    sigma *= params.sigma_reduction;
+  }
+
+  return TerminationState::MAX_ITERATIONS;
+}
+
+std::pair<double, double> QPInteriorPointSolver::Iterate(const double sigma) {
   const std::size_t N = p_.G.rows();
   const std::size_t M = p_.constraints.size();
 
@@ -82,13 +137,11 @@ void QPInteriorPointSolver::Iterate(const double sigma) {
   // compute step size
   const double alpha = ComputeAlpha();
 
-  if (logger_callback_) {
-    // pass progress to the logger callback, TODO(gareth): More relevant things here?
-    logger_callback_(r_.squaredNorm(), mu, alpha);
-  }
-
   // update
   variables_.noalias() += delta_ * alpha;
+
+  // return mu and alpha
+  return std::make_pair(mu, alpha);
 }
 
 // TODO(gareth): All the accessing by index is a little gross, could maybe split
@@ -382,6 +435,23 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
     s_inv_r_comp = z;  //  mu = 0
     r_pi = A_i * x + b_i - s;
   }
+}
+
+std::ostream& operator<<(std::ostream& stream,
+                         const QPInteriorPointSolver::TerminationState& state) {
+  using TerminationState = QPInteriorPointSolver::TerminationState;
+  switch (state) {
+    case TerminationState::SATISFIED_KKT_TOL:
+      stream << "SATISFIED_KKT_TOL";
+      break;
+    case TerminationState::BAD_STEP:
+      stream << "BAD_STEP";
+      break;
+    case TerminationState::MAX_ITERATIONS:
+      stream << "MAX_ITERATIONS";
+      break;
+  }
+  return stream;
 }
 
 }  // namespace mini_opt
