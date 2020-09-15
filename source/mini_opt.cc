@@ -58,22 +58,21 @@ void QPInteriorPointSolver::Iterate(const double sigma) {
   const std::size_t N = p_.G.rows();
   const std::size_t M = p_.constraints.size();
 
-  // const-block expressions for these, for convenience
+  // fill out `r_`
+  EvaluateKKTConditions();
+
+  // evaluate the complementarity condition
   double mu = 0;
   if (M > 0) {
-    // Compute `mu` using equation (19.19), the 'Fiacco-McCormick' strategy.
-    const auto s = variables_.segment(N, M);
-    const auto z = variables_.tail(M);
-    mu = sigma * s.dot(z) / static_cast<double>(M);
+    const auto r_comp = r_.segment(N, M);
+    mu = r_comp.sum() / static_cast<double>(M);
   }
 
   // solve the system
-  SolveForUpdate(mu);
+  SolveForUpdate(sigma * mu);
 
   // compute step size
   const double alpha = ComputeAlpha();
-
-  // Evaluate the KKT conditions.
 
 #if 1
   std::cout << "r " << r_.transpose().format(kMatrixFmt) << std::endl;
@@ -126,7 +125,7 @@ std::string QPInteriorPointSolver::StateToString() const {
  *  r_comp = diag(s)*z - \mu * e
  *  r_pe = c_e(x) = (A_e * x + b_e)
  *  r_pi = c_i(x) - s = (A_i * x + b_i) - s
- * 
+ *
  * Note that in the code below, we subtract `mu` from r_comp inline where it is
  * used, rather than putting it in `r_` directly.
  *
@@ -153,6 +152,8 @@ std::string QPInteriorPointSolver::StateToString() const {
  *
  * Then we solve this system, and substitute for the other variables. We leverage the fact
  * that \Sigma, diag(s), I, etc are diagonal matrices.
+ *
+ * It is assumed that `EvaluateKKTConditions` was called first.
  */
 void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   const std::size_t N = p_.G.rows();
@@ -165,6 +166,14 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   const auto y = variables_.segment(N + M, K);
   const auto z = variables_.tail(M);
 
+  // shouldn't happen due to selection of alpha, but double check
+  const bool any_non_positive_s = (s.array() <= 0.0).any();
+  if (any_non_positive_s) {
+    std::stringstream ss;
+    ss << "Some slack variables s <= 0: " << s.transpose().format(kMatrixFmt);
+    throw std::runtime_error(ss.str());
+  }
+
   // build the left-hand side (we only need lower triangular)
   H_.topLeftCorner(N, N).triangularView<Eigen::Lower>() = p_.G.triangularView<Eigen::Lower>();
   if (K > 0) {
@@ -175,37 +184,21 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
     H_(c.variable, c.variable) += c.a * (z[i] / s[i]) * c.a;
   }
 
-  // create the right-hand side
-  auto r_d = r_.head(N);
-  auto r_comp = r_.segment(N, M);
-  auto r_pe = r_.segment(N + M, K);
-  auto r_pi = r_.tail(M);
-
-  // build the dual objective first
-  r_d.noalias() = p_.G.selfadjointView<Eigen::Lower>() * x + p_.c;
-  if (K > 0) {
-    r_d.noalias() -= p_.A_eq.transpose() * y;
-    // equality constraints
-    r_pe.noalias() = p_.A_eq * x + p_.b_eq;
-  }
-
-  // contributions from inequality constraints, there is some redundant work here
-  for (std::size_t i = 0; i < M; ++i) {
-    const LinearInequalityConstraint& c = p_.constraints[i];
-    r_d[c.variable] -= c.a * z[i];
-    r_pi[i] = c.a * x[c.variable] + c.b - s[i];
-    r_comp[i] = s[i] * z[i];
-  }
+  // create the right-hand side (const because these were filled out already)
+  const auto r_d = r_.head(N);
+  const auto r_comp = r_.segment(N, M);
+  const auto r_pe = r_.segment(N + M, K);
+  const auto r_pi = r_.tail(M);
 
   // apply the variable elimination, which updates r_d (make a copy to save the original)
-  r_dual_aug_ = r_d;
+  r_dual_aug_.noalias() = r_d;
   for (std::size_t i = 0; i < M; ++i) {
     const LinearInequalityConstraint& c = p_.constraints[i];
     r_dual_aug_[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
     r_dual_aug_[c.variable] += c.a * (r_comp[i] - mu) / s[i];
   }
 
-  // factorize
+  // factorize, TODO(gareth): preallocate ldlt.
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
     std::stringstream ss;
@@ -239,6 +232,43 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   }
 }
 
+/*
+ * Build the right hand side of the system illustrated in the comment on SolveForUpdate.
+ */
+void QPInteriorPointSolver::EvaluateKKTConditions() {
+  const std::size_t N = p_.G.rows();
+  const std::size_t M = p_.constraints.size();
+  const std::size_t K = p_.A_eq.rows();
+
+  // TODO(gareth): Some shorthand for getting these blocks?
+  const auto x = variables_.head(N);
+  const auto s = variables_.segment(N, M);
+  const auto y = variables_.segment(N + M, K);
+  const auto z = variables_.tail(M);
+
+  // create the right-hand side
+  auto r_d = r_.head(N);
+  auto r_comp = r_.segment(N, M);
+  auto r_pe = r_.segment(N + M, K);
+  auto r_pi = r_.tail(M);
+
+  // build the dual objective first
+  r_d.noalias() = p_.G.selfadjointView<Eigen::Lower>() * x + p_.c;
+  if (K > 0) {
+    r_d.noalias() -= p_.A_eq.transpose() * y;
+    // equality constraints
+    r_pe.noalias() = p_.A_eq * x + p_.b_eq;
+  }
+
+  // contributions from inequality constraints, there is some redundant work here
+  for (std::size_t i = 0; i < M; ++i) {
+    const LinearInequalityConstraint& c = p_.constraints[i];
+    r_d[c.variable] -= c.a * z[i];
+    r_pi[i] = c.a * x[c.variable] + c.b - s[i];
+    r_comp[i] = s[i] * z[i];
+  }
+}
+
 // TODO(gareth): Should implement selection of alphas to minimize objective.
 // See formula 16.66 in Nocedal and Wright
 double QPInteriorPointSolver::ComputeAlpha() const {
@@ -258,6 +288,7 @@ double QPInteriorPointSolver::ComputeAlpha(
     const Eigen::VectorBlock<const Eigen::VectorXd>& d_val) const {
   ASSERT(val.rows() == d_val.rows());
   double alpha = 1.0;
+  // TODO(gareth): Make this value adjustable for possibly faster convergence?
   constexpr double tau = .995;
   for (int i = 0; i < val.rows(); ++i) {
     const double updated_val = val[i] + d_val[i];

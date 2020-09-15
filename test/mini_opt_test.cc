@@ -226,6 +226,7 @@ class QPSolverTest : public ::testing::Test {
     update.tail(M).array() *= -1.0;            // flip dz
 
     // now solve w/ cholesky
+    solver.EvaluateKKTConditions();
     solver.SolveForUpdate(0.0 /* mu = 0 */);
 
     // must match the full system
@@ -300,7 +301,8 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
-  void TestQuadraticWithInequalities() {
+  // Scalar quadratic equation with a single inequality constraint.
+  void TestScalarQuadraticWithInequality() {
     using ScalarMatrix = Matrix<double, 1, 1>;
 
     // simple quadratic residual: f_0(x) = ||x - 5||^2, h(x) = x - 5
@@ -314,27 +316,64 @@ class QPSolverTest : public ::testing::Test {
     };
 
     // linearize at x=0 (it's already linear, in reality)
-    const double initial_x = 0.0;
-    const VectorXd initial_values = VectorXd::Constant(1, initial_x);
-
-    // inequality constraint 2: x <= 4 --> -x >= -4 --> -x + 4 >= 0
-    LinearInequalityConstraint c{};
-    c.variable = 0;
-    c.a = -1.0;
-    c.b = 4;
+    const VectorXd initial_values = VectorXd::Constant(1, 0.0);
 
     // Set up problem
-    QP qp{};
-    qp.G = Matrix<double, 1, 1>::Zero();
-    qp.c = Matrix<double, 1, 1>::Zero();
+    QP qp{1};
     res.UpdateSystem(initial_values, &qp.G, &qp.c);
-    qp.constraints.push_back(c);
+
+    // inequality constraint: x <= 4 --> -x >= -4 --> -x + 4 >= 0
+    qp.constraints.emplace_back(/* variable index = */ 0, -1.0, 4.0);
 
     QPInteriorPointSolver solver(qp, VectorXd::Zero(1));
     std::cout << solver.StateToString() << std::endl;
 
     // start with sigma=1
     solver.Iterate(0.1);
+    std::cout << solver.StateToString() << std::endl;
+    solver.Iterate(0.0000001);
+    std::cout << solver.StateToString() << std::endl;
+    solver.Iterate(0.0000001);
+    std::cout << solver.StateToString() << std::endl;
+    solver.Iterate(0.0000001);
+    std::cout << solver.StateToString() << std::endl;
+    solver.Iterate(0.0000001);
+    std::cout << solver.StateToString() << std::endl;
+  }
+
+  // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
+  void TestQuadraticWithInequalities() {
+    using ScalarMatrix = Matrix<double, 1, 1>;
+
+    // Quadratic in two variables. Has a PD diagonal hessian.
+    Residual<2, 2> res;
+    res.index = {{0, 1}};
+    res.function = [](const Matrix<double, 2, 1>& x,
+                      Matrix<double, 2, 2>* const J) -> Matrix<double, 2, 1> {
+      if (J) {
+        J->setZero();
+        J->diagonal() = Matrix<double, 2, 1>(1.0, -4.0);
+      }
+      // solution at (2, -4)
+      return Matrix<double, 2, 1>{x[0] - 2.0, -4 * x[1] - 16.0};
+    };
+
+    // linearize at x=0
+    const VectorXd initial_values = VectorXd::Constant(2, .0);
+
+    // Set up problem
+    QP qp{2};
+    res.UpdateSystem(initial_values, &qp.G, &qp.c);
+    qp.constraints.emplace_back(0, -1.0, 1.0);  // x0 <= 1.0
+    qp.constraints.emplace_back(1, 1.0, 3.0);   // x1 >= -3.0
+
+    QPInteriorPointSolver solver(qp, Vector2d::Zero());
+    std::cout << solver.StateToString() << std::endl;
+
+    // start with sigma=1
+    solver.Iterate(0.1);
+    std::cout << solver.StateToString() << std::endl;
+    solver.Iterate(0.0000001);
     std::cout << solver.StateToString() << std::endl;
     solver.Iterate(0.0000001);
     std::cout << solver.StateToString() << std::endl;
@@ -353,6 +392,7 @@ TEST_FIXTURE(QPSolverTest, TestSolveNoConstraints)
 TEST_FIXTURE(QPSolverTest, TestSolveEqualityConstraints)
 TEST_FIXTURE(QPSolverTest, TestSolveInequalityConstraints)
 TEST_FIXTURE(QPSolverTest, TestSolveAllConstraints)
+TEST_FIXTURE(QPSolverTest, TestScalarQuadraticWithInequality)
 TEST_FIXTURE(QPSolverTest, TestQuadraticWithInequalities)
 
 }  // namespace mini_opt

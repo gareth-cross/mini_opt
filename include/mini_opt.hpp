@@ -93,9 +93,16 @@ struct LinearInequalityConstraint {
  *  minimize x^T * G * x + c^T * c
  *
  *  st. A_e * x + b_e == 0
- *  st. a_i * x + b)_i >= 0
+ *  st. a_i * x + b_i >= 0  (A_i is diagonal)
  */
 struct QP {
+  // Default initialize empty.
+  QP() = default;
+
+  // Convenience constructor for unit tests. Initializes to zero.
+  explicit QP(const Eigen::Index x_dim)
+      : G(Eigen::MatrixXd::Zero(x_dim, x_dim)), c(Eigen::VectorXd::Zero(x_dim)) {}
+
   Eigen::MatrixXd G;
   Eigen::VectorXd c;
 
@@ -137,6 +144,10 @@ struct QPInteriorPointSolver {
   // Solve the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
   void SolveForUpdate(const double mu);
+
+  // Fill out the matrix `r_` with the KKT conditions (equations 19.2a-d).
+  // Does not apply the `mu` term, which is added later. (ie. mu = 0)
+  void EvaluateKKTConditions();
 
   // Compute the largest step size we can execute that satisfies constraints.
   double ComputeAlpha() const;
