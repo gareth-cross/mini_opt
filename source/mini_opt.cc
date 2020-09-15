@@ -48,12 +48,13 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
 
   // Use the total size here
   r_.resize(variables_.size());
+  r_dual_aug_.resize(x_size);
 
   // Space for the output of all variables
   delta_.resizeLike(variables_);
 }
 
-void QPInteriorPointSolver::Iterate() {
+void QPInteriorPointSolver::Iterate(const double sigma) {
   const std::size_t N = p_.G.rows();
   const std::size_t M = p_.constraints.size();
 
@@ -63,7 +64,7 @@ void QPInteriorPointSolver::Iterate() {
     // Compute `mu` using equation (19.19), the 'Fiacco-McCormick' strategy.
     const auto s = variables_.segment(N, M);
     const auto z = variables_.tail(M);
-    mu = 0.1 * s.dot(z) / static_cast<double>(M);
+    mu = sigma * s.dot(z) / static_cast<double>(M);
   }
 
   // solve the system
@@ -72,10 +73,14 @@ void QPInteriorPointSolver::Iterate() {
   // compute step size
   const double alpha = ComputeAlpha();
 
+  // Evaluate the KKT conditions.
+
+#if 1
   std::cout << "r " << r_.transpose().format(kMatrixFmt) << std::endl;
   std::cout << "mu " << mu << std::endl;
   std::cout << "delta " << delta_.transpose().format(kMatrixFmt) << std::endl;
   std::cout << "alpha " << alpha << std::endl;
+#endif
 
   // update
   variables_.noalias() += delta_ * alpha;
@@ -121,10 +126,13 @@ std::string QPInteriorPointSolver::StateToString() const {
  *  r_comp = diag(s)*z - \mu * e
  *  r_pe = c_e(x) = (A_e * x + b_e)
  *  r_pi = c_i(x) - s = (A_i * x + b_i) - s
+ * 
+ * Note that in the code below, we subtract `mu` from r_comp inline where it is
+ * used, rather than putting it in `r_` directly.
  *
  * We first eliminate the second row using:
  *
- * p_s = \Sigma^-1 * (-diag(s)^-1 * r_comp - I * p_z)
+ *  p_s = \Sigma^-1 * (-diag(s)^-1 * r_comp - I * p_z)
  *
  * Which reduces the system to:
  *
@@ -134,7 +142,7 @@ std::string QPInteriorPointSolver::StateToString() const {
  *
  * Then we reduce it again using:
  *
- * p_z = \Sigma * (-A_i * -p_x - r_pi) - diag(s)^-1 * r_comp
+ *  p_z = \Sigma * (-A_i * -p_x - r_pi) - diag(s)^-1 * r_comp
  *
  * Such that:
  *
@@ -186,14 +194,15 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
     const LinearInequalityConstraint& c = p_.constraints[i];
     r_d[c.variable] -= c.a * z[i];
     r_pi[i] = c.a * x[c.variable] + c.b - s[i];
-    r_comp[i] = s[i] * z[i] - mu;
+    r_comp[i] = s[i] * z[i];
   }
 
-  // apply the variable elimination, which updates r_d
+  // apply the variable elimination, which updates r_d (make a copy to save the original)
+  r_dual_aug_ = r_d;
   for (std::size_t i = 0; i < M; ++i) {
     const LinearInequalityConstraint& c = p_.constraints[i];
-    r_d[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
-    r_d[c.variable] += c.a * r_comp[i] / s[i];
+    r_dual_aug_[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
+    r_dual_aug_[c.variable] += c.a * (r_comp[i] - mu) / s[i];
   }
 
   // factorize
@@ -214,12 +223,11 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   auto dy = delta_.segment(N + M, K);
   auto dz = delta_.tail(M);
 
-  dx.noalias() = H_inv_.block(0, 0, N, N) * -r_d;
+  dx.noalias() = H_inv_.block(0, 0, N, N) * -r_dual_aug_;
   if (K > 0) {
     dx.noalias() += H_inv_.block(0, N, N, K) * -r_pe;
-    // negate here since py is negative in the solution vector (this flips the sign back to
-    // normal)
-    dy.noalias() = H_inv_.block(N, 0, K, N) * r_d;
+    // Negate here since py is negative in the solution vector.
+    dy.noalias() = H_inv_.block(N, 0, K, N) * r_dual_aug_;
     dy.noalias() += H_inv_.block(N, N, K, K) * r_pe;
   }
 
@@ -227,18 +235,19 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   for (std::size_t i = 0; i < M; ++i) {
     const LinearInequalityConstraint& c = p_.constraints[i];
     ds[i] = c.a * dx[c.variable] + r_pi[i];
-    dz[i] = -(z[i] / s[i]) * (ds[i]) - (1 / s[i]) * r_comp[i];
+    dz[i] = -(z[i] / s[i]) * ds[i] - (1 / s[i]) * (r_comp[i] - mu);
   }
 }
 
 // TODO(gareth): Should implement selection of alphas to minimize objective.
-// See formula 16.66
+// See formula 16.66 in Nocedal and Wright
 double QPInteriorPointSolver::ComputeAlpha() const {
   const std::size_t N = p_.G.rows();
   const std::size_t M = p_.constraints.size();
   if (M > 0) {
     const double alpha_s = ComputeAlpha(variables_.segment(N, M), delta_.segment(N, M));
     const double alpha_z = ComputeAlpha(variables_.tail(M), delta_.tail(M));
+    // We just take the min, although having separate alphas can supposedly improve convergence.
     return std::min(alpha_s, alpha_z);
   }
   return 1.0;
@@ -263,12 +272,15 @@ double QPInteriorPointSolver::ComputeAlpha(
 }
 
 /*
- * Just build this directly
+ * Just build this matrix directly:
  *
  * [[G       0        A_e^T     A_i^T]                 [r_d;
  *  [0       \Sigma   0        -I    ]     * delta = -  diag(s)^-1 * r_comp;
  *  [A_e     0        0         0    ]                  r_pe;
  *  [A_i    -I        0         0    ]]                 r_pi]
+ *
+ * We don't solve this system since it has a lot of empty blocks, and many of the
+ * sub blocks are diagonal (I, \Sigma, diag(s)^-1, etc).
  */
 void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
                                             Eigen::VectorXd* const r) const {

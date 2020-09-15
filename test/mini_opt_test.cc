@@ -1,6 +1,8 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt.hpp"
 
+#include <chrono>
+
 #include "test_utils.hpp"
 
 namespace mini_opt {
@@ -149,6 +151,7 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
   ASSERT_EIGEN_NEAR(MatrixXd::Zero(7, 7), H_empty, 0.0);
 }
 
+// Tests for the QP interior point solver.
 class QPSolverTest : public ::testing::Test {
  public:
   // Specify the root of a polynominal: (a * x - b)^2
@@ -158,13 +161,13 @@ class QPSolverTest : public ::testing::Test {
     Root(double a, double b) : a(a), b(b) {}
   };
 
+  // Create a quadratic (with diagonal G matrix) for the polynomial with the given roots.
   double BuildQuadratic(const std::vector<Root>& roots, QP* const output) {
     const std::size_t N = roots.size();
     output->G.resize(N, N);
     output->G.setZero();
     output->c.resize(N);
     output->c.setZero();
-
     std::size_t i = 0;
     double constant = 0;
     for (const Root& root : roots) {
@@ -331,9 +334,15 @@ class QPSolverTest : public ::testing::Test {
     std::cout << solver.StateToString() << std::endl;
 
     // start with sigma=1
-    solver.Iterate();
+    solver.Iterate(0.1);
     std::cout << solver.StateToString() << std::endl;
-    solver.Iterate();
+    solver.Iterate(0.0000001);
+    std::cout << solver.StateToString() << std::endl;
+    solver.Iterate(0.0000001);
+    std::cout << solver.StateToString() << std::endl;
+    solver.Iterate(0.0000001);
+    std::cout << solver.StateToString() << std::endl;
+    solver.Iterate(0.0000001);
     std::cout << solver.StateToString() << std::endl;
   }
 

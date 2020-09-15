@@ -114,7 +114,7 @@ struct QPInteriorPointSolver {
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
   QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess);
 
-  void Iterate();
+  void Iterate(const double sigma);
 
   // Print state to a string, for unit tests.
   std::string StateToString() const;
@@ -128,6 +128,7 @@ struct QPInteriorPointSolver {
   // Re-usable storage for the linear system and residuals
   Eigen::MatrixXd H_;
   Eigen::VectorXd r_;
+  Eigen::VectorXd r_dual_aug_;
   Eigen::MatrixXd H_inv_;
 
   // Solution vector at each iteration
@@ -137,6 +138,7 @@ struct QPInteriorPointSolver {
   // solving for p_x and p_y.
   void SolveForUpdate(const double mu);
 
+  // Compute the largest step size we can execute that satisfies constraints.
   double ComputeAlpha() const;
 
   // Compute the `alpha` step size.
