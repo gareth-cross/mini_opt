@@ -2,9 +2,9 @@
 #pragma once
 #include <Eigen/Core>
 #include <Eigen/Dense>
-#include <vector>
 #include <array>
 #include <memory>
+#include <vector>
 
 #include "assertions.hpp"
 
@@ -88,12 +88,35 @@ struct LinearInequalityConstraint {
 };
 
 /*
+ * Helper for specifying constraints in a more legible way.
+ *
+ * Allows you to write Var(index) >= alpha to specify the appropriate LinearInequalityConstraint.
+ */
+struct Var {
+  explicit Var(int variable) : variable_(variable) {}
+
+  // Specify constraint as <=
+  LinearInequalityConstraint operator<=(double value) const {
+    return LinearInequalityConstraint(variable_, -1.0, value);
+  }
+
+  // Specify constraint as >=
+  LinearInequalityConstraint operator>=(double value) const {
+    return LinearInequalityConstraint(variable_, 1.0, -value);
+  }
+
+  const int variable_;
+};
+
+/*
  * Problem specification for a QP:
  *
  *  minimize x^T * G * x + c^T * c
  *
  *  st. A_e * x + b_e == 0
  *  st. a_i * x + b_i >= 0  (A_i is diagonal)
+ *
+ * Note that the solver assumes G is positive definite.
  */
 struct QP {
   // Default initialize empty.
@@ -120,11 +143,36 @@ struct QP {
 struct QPInteriorPointSolver {
   using ConstVectorBlock = Eigen::VectorBlock<const Eigen::VectorXd>;
 
+  // Parameters of the solver.
+  struct Params {
+    // Sigma is multiplied by `mu` at each iteration, to scale down the amount of 'perturbation'
+    // we are applying to the KKT conditions. This is the initial value for sigma.
+    double initial_sigma{0.1};
+
+    // If ||kkt||^2 < termination_kkt2_tol, we terminate optimization.
+    double termination_kkt2_tol{1.0e-4};
+
+    // Max # of iterations.
+    int max_iterations{10};
+  };
+
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
   QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess = {});
 
   // Take a single step.
   void Iterate(const double sigma);
+
+  /*
+   * Iterate until one of the following conditions is met:
+   *
+   *   - The norm of the first order KKT conditions is less than the tolerance.
+   *   - Newton step does not reduce the error.
+   *   - We get `alpha ~= 0` (ie. cannot apply an update).
+   *   - The fixed max number if iterations is hit.
+   *
+   * We don't implement any smart recovery
+   */
+  void Solve(const Params& params);
 
   // Set the logger callback to a function pointer, lambda, etc.
   template <typename T>

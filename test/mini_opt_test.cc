@@ -333,9 +333,7 @@ class QPSolverTest : public ::testing::Test {
     // Set up problem
     QP qp{1};
     res.UpdateSystem(initial_values, &qp.G, &qp.c);
-
-    // inequality constraint: x <= 4 --> -x >= -4 --> -x + 4 >= 0
-    qp.constraints.emplace_back(/* variable index = */ 0, -1.0, 4.0);
+    qp.constraints.emplace_back(Var(0) <= 4);
 
     QPInteriorPointSolver solver(qp, VectorXd::Zero(1));
     solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
@@ -373,15 +371,15 @@ class QPSolverTest : public ::testing::Test {
     // Set up problem
     QP qp{2};
     res.UpdateSystem(initial_values, &qp.G, &qp.c);
-    qp.constraints.emplace_back(0, -1.0, 1.0);  // x0 <= 1.0
-    qp.constraints.emplace_back(1, 1.0, 3.0);   // x1 >= -3.0
+    qp.constraints.emplace_back(Var(0) <= 1.0);
+    qp.constraints.emplace_back(Var(1) >= -3.0);
 
     QPInteriorPointSolver solver(qp);
     solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
                                        std::placeholders::_1, std::placeholders::_2,
                                        std::placeholders::_3));
     // start with sigma=1
-    double sigma_initial = 0.1;
+    double sigma_initial = 1.0;
     for (int i = 0; i < 10; ++i) {
       solver.Iterate(sigma_initial);
       sigma_initial *= 0.1;
