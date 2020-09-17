@@ -139,6 +139,14 @@ struct QP {
   std::vector<LinearInequalityConstraint> constraints;
 };
 
+// Possible methods of picking the barrier parameter, `mu`.
+enum class BarrierStrategy {
+  // Set mu = sigma * (s^T * z) / M, where sigma is a scalar decreased at each iteration.
+  SCALED_COMPLEMENTARITY = 0,
+  // Use Predictor corrector algorithm to select `mu`.
+  PREDICTOR_CORRECTOR,
+};
+
 /*
  * Minimize quadratic cost function with inequality constraints using interior point method.
  */
@@ -150,19 +158,21 @@ struct QPInteriorPointSolver {
     double initial_sigma{0.1};
 
     // Amount to reduce sigma on each iteration.
-    double sigma_reduction{0.1};
+    double sigma_reduction{0.5};
 
     // If ||kkt||^2 < termination_kkt2_tol, we terminate optimization.
     double termination_kkt2_tol{1.0e-8};
 
     // Max # of iterations.
     int max_iterations{10};
+
+    // Strategy to apply to barrier parameter `mu`.
+    BarrierStrategy barrier_strategy{BarrierStrategy::SCALED_COMPLEMENTARITY};
   };
 
   // List of possible termination criteria.
   enum class TerminationState {
     SATISFIED_KKT_TOL = 0,
-    BAD_STEP,
     MAX_ITERATIONS,
   };
 
@@ -173,11 +183,7 @@ struct QPInteriorPointSolver {
    * Iterate until one of the following conditions is met:
    *
    *   - The norm of the first order KKT conditions is less than the tolerance.
-   *   - Newton step does not get us closer to satisfying the first order KKT conditions.
    *   - The fixed max number if iterations is hit.
-   *
-   * I don't implement any smart recovery in the second case. There's likely a better option
-   * here than just bailing.
    */
   TerminationState Solve(const Params& params);
 
@@ -192,6 +198,29 @@ struct QPInteriorPointSolver {
   ConstVectorBlock s_block() const;
   ConstVectorBlock y_block() const;
   ConstVectorBlock z_block() const;
+
+  struct AlphaValues {
+    // Alpha in the primal variables (x an s), set to 1 if we have no s
+    double primal{1.};
+    // Alpha in the dual variables (y and z), set to 1 if we have no z
+    double dual{1.};
+  };
+
+  // Some derivative values we compute during Iterate.
+  struct IterationOutputs {
+    // Mu, the complementarity condition: s^T * z / M (Equation 16.56).
+    double mu{0.};
+    // The value of sigma used during the iteration.
+    double sigma{1.};
+    // Alpha as defined by equation (19.9).
+    AlphaValues alpha{};
+    // Optional alpha values computing during the MPC probing step.
+    AlphaValues alpha_probe{std::numeric_limits<double>::quiet_NaN(),
+                            std::numeric_limits<double>::quiet_NaN()};
+    // Mu as determined by taking a step with mu=0, then evaluating equation (19.21).
+    // Only relevant in predictor-corrector mode.
+    double mu_affine{std::numeric_limits<double>::quiet_NaN()};
+  };
 
  private:
   const QP& p_;
@@ -217,27 +246,25 @@ struct QPInteriorPointSolver {
 
   // Solution vector at each iteration
   Eigen::VectorXd delta_;
+  Eigen::VectorXd delta_affine_;
 
   // Optional iteration logger.
-  std::function<void(double kkt_2, double mu, double alpha)> logger_callback_;
+  std::function<void(double kkt_2_prev, double kkt_2_after, const IterationOutputs& iter_outputs)>
+      logger_callback_;
 
-  // Some derivative values we compute during Iterate.
-  struct IterationOutputs {
-    // mu, the complementarity condition: s^T * z / M (Equation 16.56)
-    double mu{0};
-    // alpha in the primal variables (x an s), set to 1 if we have no s
-    double alpha_primal{1};
-    // alpha in the dual variables (y and z), set to 1 if we have no z
-    double alpha_dual{1};
-  };
+  bool HasInequalityConstraints() const { return dims_.M > 0; }
 
   // Take a single step.
   // Computes mu, solves for the update, and takes the longest step we can while satisfying
   // constraints.
-  IterationOutputs Iterate(const double sigma);
+  IterationOutputs Iterate(const double sigma, const BarrierStrategy& strategy);
 
-  // Solve the augmented linear system, which is done by eliminating p_s, and p_z and then
+  // Invert the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
+  void ComputeLDLT();
+
+  // Apply the result of ComputeLDLT (the inverse H_inv) to compute the update vector
+  // [dx, ds, dy, dz] for a given value of mu.
   void SolveForUpdate(const double mu);
 
   // Fill out the matrix `r_` with the KKT conditions (equations 19.2a-d).
@@ -245,12 +272,15 @@ struct QPInteriorPointSolver {
   void EvaluateKKTConditions();
 
   // Compute the largest step size we can execute that satisfies constraints.
-  void ComputeAlpha(IterationOutputs* const output) const;
+  void ComputeAlpha(AlphaValues* const output, const double tau) const;
 
   // Compute the `alpha` step size.
   // Returns alpha such that (val[i] + d_val[i]) >= val[i] * (1 - tau)
-  double ComputeAlpha(const Eigen::VectorBlock<const Eigen::VectorXd>& val,
-                      const Eigen::VectorBlock<const Eigen::VectorXd>& d_val) const;
+  double ComputeAlpha(const ConstVectorBlock& val, const ConstVectorBlock& d_val,
+                      const double tau) const;
+
+  // Compute the predictor/corrector `mu_affine`, equation (19.22)
+  double ComputePredictorCorrectorMuAffine(const double mu, const AlphaValues& alpha_probe) const;
 
   // Helpers for accessing segments of vectors.
   static ConstVectorBlock ConstXBlock(const ProblemDims& dims, const Eigen::VectorXd& vec);

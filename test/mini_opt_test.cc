@@ -239,6 +239,7 @@ class QPSolverTest : public ::testing::Test {
 
     // now solve w/ cholesky
     solver.EvaluateKKTConditions();
+    solver.ComputeLDLT();
     solver.SolveForUpdate(0.0 /* mu = 0 */);
 
     // must match the full system
@@ -314,17 +315,20 @@ class QPSolverTest : public ::testing::Test {
   }
 
   // TODO(gareth): Would really like to use libfmt for this instead...
-  static void ProgressPrinter(const QPInteriorPointSolver* const solver, const double kkt_2,
-                              const double mu, const double alpha) {
+  static void ProgressPrinter(const QPInteriorPointSolver* const solver, const double kkt2_prev,
+                              const double kkt2_after,
+                              const QPInteriorPointSolver::IterationOutputs& outputs) {
     std::cout << "Iteration summary: ";
-    std::cout << "||kkt||^2 = " << kkt_2 << ", mu = " << mu << ",  alpha = " << alpha << "\n";
+    std::cout << "||kkt||^2: " << kkt2_prev << " --> " << kkt2_after << ", mu = " << outputs.mu
+              << ", sigma = " << outputs.sigma << ", a_p = " << outputs.alpha.primal
+              << ", a_d = " << outputs.alpha.dual << "\n";
+
     // dump the state with labels
-    /*   std::cout << "After update:\n";
-       std::cout << "  x = " << solver->x_block().transpose().format(kMatrixFmt) << "\n";
-       std::cout << "  s = " << solver->s_block().transpose().format(kMatrixFmt) << "\n";
-       std::cout << "  y = " << solver->y_block().transpose().format(kMatrixFmt) << "\n";
-       std::cout << "  z = " << solver->z_block().transpose().format(kMatrixFmt) << "\n";*/
-    (void)solver;
+    std::cout << "After update:\n";
+    std::cout << "  x = " << solver->x_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  s = " << solver->s_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  y = " << solver->y_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  z = " << solver->z_block().transpose().format(kMatrixFmt) << "\n";
   }
 
   // Scalar quadratic equation with a single inequality constraint.
@@ -363,8 +367,8 @@ class QPSolverTest : public ::testing::Test {
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
     ASSERT_NEAR(0.0, solver.r_.squaredNorm(), tol::kPico);
     ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro);
-    ASSERT_NEAR(0.0, solver.s_block()[0], 1.0e-8);
-    ASSERT_LT(1.0, solver.z_block()[0]);
+    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro);
+    ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]);
   }
 
   // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
@@ -441,8 +445,8 @@ class QPSolverTest : public ::testing::Test {
     // check the solution
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
     ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro);
-    ASSERT_NEAR(0.0, solver.s_block()[0], 1.0e-8);  // first constraint is active
-    ASSERT_NEAR(0.0, solver.z_block()[1], 1.0e-8);  // second constraint is inactive
+    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro);  // first constraint is active
+    ASSERT_NEAR(0.0, solver.z_block()[1], tol::kMicro);  // second constraint is inactive
   }
 
   // Test simple problem with equality constraints.
@@ -492,9 +496,6 @@ class QPSolverTest : public ::testing::Test {
                                        std::placeholders::_1, std::placeholders::_2,
                                        std::placeholders::_3));
 
-    solver.EvaluateKKTConditions();
-    PRINT_MATRIX(solver.r_.transpose());
-
     // solve it in a single step
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
@@ -522,22 +523,37 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.push_back(Var(1) >= -1.0);
 
     QPInteriorPointSolver solver(qp);
+    PRINT_MATRIX(solver.variables_.transpose());
+
     solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
                                        std::placeholders::_1, std::placeholders::_2,
                                        std::placeholders::_3));
 
+    solver.EvaluateKKTConditions();
+    PRINT_MATRIX(solver.r_.transpose());
+
     // solve it in a single step
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
+    params.initial_sigma = 1;
+    params.sigma_reduction = 0.5;
+
     const auto term_state = solver.Solve(params);
     PRINT(term_state);
 
     // both inequalities should be active
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
     ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro);
-    ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), 1.0e-8);
+    ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), tol::kMicro);
   }
 
+  /*
+   * This is some nonsense I made up. We generate a bunch of roots of a quadratic with diagonal G,
+   * and then scale it by a random positive definite matrix to jumble things up a bit. It's not
+   * that principled.
+   *
+   * This is mostly just to 'poke' the implementation and find issues.
+   */
   QP GenerateRandomQP(const int seed, const int dimension, const double p_inequality,
                       Eigen::VectorXd* const solution,
                       std::vector<uint8_t>* const constraint_mask) {
@@ -583,28 +599,42 @@ class QPSolverTest : public ::testing::Test {
 
   // Test a bunch of randomly generated problems.
   void TestGeneratedProblems() {
-    const int kNumProblems = 1;
+    const int kNumProblems = 1000;
     const int kProblemDim = 8;  //  size of `x`, for me 8-12 is a typical problem size
     for (int p = 0; p < kNumProblems; ++p) {
       VectorXd x_solution;
       std::vector<uint8_t> constraint_mask;
       const QP qp = GenerateRandomQP(p, kProblemDim, 0.5, &x_solution, &constraint_mask);
 
-      // solve it
+      // solve it, use the MPC strategy for these ones
       QPInteriorPointSolver solver(qp);
       QPInteriorPointSolver::Params params{};
       params.termination_kkt2_tol = tol::kPico;
-      params.initial_sigma = 1.0;
-      params.sigma_reduction = 0.5;
-      params.max_iterations = 20;  //  seems high?
-#if 1
-      solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
-                                         std::placeholders::_1, std::placeholders::_2,
-                                         std::placeholders::_3));
-#endif
+      params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
+
+      // Some of the randomly generated problems start close to the barrier, which causes
+      // them to bounce around a bunch before getting close to the solution. Should implement
+      // a strategy for this, but for now I'm gonna crank this up.
+      params.max_iterations = 30;
+
+      if (p == -1) {
+        // can turn on for debugging...
+        PRINT_MATRIX(x_solution);
+        for (const LinearInequalityConstraint& c : qp.constraints) {
+          std::cout << "x[" << c.variable << "] * " << c.a << " + " << c.b << " >= 0\n";
+        }
+        solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
+                                           std::placeholders::_1, std::placeholders::_2,
+                                           std::placeholders::_3));
+      }
+
       const auto term_state = solver.Solve(params);
-      PRINT(term_state);
-      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), tol::kMicro);
+      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 1.0e-5) << "Term: " << term_state << "\n"
+                                                              << "Problem p = " << p;
+      // check the variables that are constrained
+      ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 1.0e-5)
+          << "Term: " << term_state << "\n"
+          << "Problem p = " << p;
     }
   }
 };

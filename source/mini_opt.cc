@@ -1,6 +1,7 @@
 #include "mini_opt.hpp"
 
 #include <Eigen/Dense>
+#include <iostream>
 
 using namespace Eigen;
 namespace mini_opt {
@@ -49,7 +50,7 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
   // Could assume constraints are active, in which case we compute lambda from the KKT conditions.
   SBlock(dims_, variables_).setConstant(1);
   ZBlock(dims_, variables_).setConstant(1);
-  YBlock(dims_, variables_).setConstant(1);
+  YBlock(dims_, variables_).setConstant(0);
 
   // Allocate space for solving
   const std::size_t reduced_system_size = dims_.N + dims_.K;
@@ -63,6 +64,8 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
 
   // Space for the output of all variables
   delta_.resizeLike(variables_);
+  delta_affine_.resizeLike(variables_);
+  delta_affine_.setZero();
 }
 
 // Assert params are in valid range.
@@ -78,6 +81,12 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
 QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(const Params& params) {
   CheckParams(params);
 
+  if (false) {
+    EvaluateKKTConditions();
+    ComputeLDLT();
+    SolveForUpdate(0.0);
+  }
+
   // on the first iteration, the residual needs to be filled first
   EvaluateKKTConditions();
 
@@ -90,62 +99,79 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(const Param
     const double kkt2 = r_.squaredNorm();
 
     // solve for the update
-    const IterationOutputs iteration_outputs = Iterate(sigma);
+    const IterationOutputs iteration_outputs = Iterate(sigma, params.barrier_strategy);
 
     // evaluate the residual again, which fills `r_` for the next iteration
     EvaluateKKTConditions();
-    const double kkt2_after = r_.squaredNorm();
 
+    const double kkt2_after = r_.squaredNorm();
     if (logger_callback_) {
       // pass progress to the logger callback for printing in the test
-      logger_callback_(
-          kkt2_after,
-          std::min(iteration_outputs.alpha_primal, iteration_outputs.alpha_primal) * sigma,
-          iteration_outputs.mu);
+      logger_callback_(kkt2, kkt2_after, iteration_outputs);
     }
 
-    // check for termination
-    if (kkt2_after > kkt2) {
-      // newton step took us in a bad direction, roll back the update
-      // if we want to try to recover, we need to reset `r_` here as well
-      variables_ = prev_variables_;
-      return TerminationState::BAD_STEP;
-    }
     if (kkt2_after < params.termination_kkt2_tol) {
       // error is low enough, stop
       return TerminationState::SATISFIED_KKT_TOL;
     }
 
-    // TODO(gareth): Implement one of the smarter strategies here.
+    // TODO(gareth): Try the strategy described by equation (19.20) here?
+    // This probably decreases too quickly in some cases, and too slowly in others.
     sigma *= params.sigma_reduction;
   }
 
   return TerminationState::MAX_ITERATIONS;
 }
 
-QPInteriorPointSolver::IterationOutputs QPInteriorPointSolver::Iterate(const double sigma) {
+QPInteriorPointSolver::IterationOutputs QPInteriorPointSolver::Iterate(
+    const double sigma, const BarrierStrategy& strategy) {
   // fill out `r_`
   EvaluateKKTConditions();
 
   // evaluate the complementarity condition
   IterationOutputs outputs{};
-  if (dims_.M > 0) {
+  if (HasInequalityConstraints()) {
     outputs.mu = ConstSBlock(dims_, r_).sum() / static_cast<double>(dims_.M);
   }
 
-  // solve the system, multiply by sigma to get equation 19.19
-  SolveForUpdate(sigma * outputs.mu);
+  // solve the system w/ the LDLT factorization
+  ComputeLDLT();
 
-  // compute step size
-  if (dims_.M > 0) {
-    ComputeAlpha(&outputs);
+  if (!HasInequalityConstraints()) {
+    // No inequality constraints, ignore mu & sigma.
+    SolveForUpdate(0.0);
+  } else if (strategy == BarrierStrategy::SCALED_COMPLEMENTARITY) {
+    // Use the complementarity condition, and scale by sigma.
+    SolveForUpdate(sigma * outputs.mu);
+    outputs.sigma = sigma;
+  } else if (strategy == BarrierStrategy::PREDICTOR_CORRECTOR) {
+    // Use the MPC/predictor-corrector (algorithm 16.4).
+    // Solve with mu=0 and compute the largest step size.
+    SolveForUpdate(0.0);
+    ComputeAlpha(&outputs.alpha_probe, /* tau = */ 1.0);
+
+    // save the value of the affine step
+    delta_affine_ = delta_;
+
+    // Compute complementarity had we applied this update we just solved.
+    outputs.mu_affine = ComputePredictorCorrectorMuAffine(outputs.mu, outputs.alpha_probe);
+    outputs.sigma = std::pow(outputs.mu_affine / outputs.mu, 3);  // equation (19.22)
+
+    // Solve again (alpha will be computed again below), input sigma is ignored.
+    // This time, delta_affine_ will be incorporated to add the diag(dz)*ds term.
+    SolveForUpdate(outputs.mu * outputs.sigma);
+  }
+
+  // compute alpha values
+  if (HasInequalityConstraints()) {
+    ComputeAlpha(&outputs.alpha, /* tau = */ 0.995);
   }
 
   // update
-  const double alpha = std::min(outputs.alpha_dual, outputs.alpha_primal);
-  variables_.noalias() += delta_ * alpha;
-
-  // return mu and alpha
+  XBlock(dims_, variables_).noalias() += ConstXBlock(dims_, delta_) * outputs.alpha.primal;
+  SBlock(dims_, variables_).noalias() += ConstSBlock(dims_, delta_) * outputs.alpha.primal;
+  YBlock(dims_, variables_).noalias() += ConstYBlock(dims_, delta_) * outputs.alpha.dual;
+  ZBlock(dims_, variables_).noalias() += ConstZBlock(dims_, delta_) * outputs.alpha.dual;
   return outputs;
 }
 
@@ -206,7 +232,7 @@ ConstVectorBlock QPInteriorPointSolver::z_block() const { return ConstZBlock(dim
  *
  * It is assumed that `EvaluateKKTConditions` was called first.
  */
-void QPInteriorPointSolver::SolveForUpdate(const double mu) {
+void QPInteriorPointSolver::ComputeLDLT() {
   const std::size_t N = dims_.N;
   const std::size_t M = dims_.M;
   const std::size_t K = dims_.K;
@@ -235,20 +261,6 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
     H_(c.variable, c.variable) += c.a * (z[i] / s[i]) * c.a;
   }
 
-  // create the right-hand side (const because these were filled out already)
-  const auto r_d = ConstXBlock(dims_, r_);
-  const auto r_comp = ConstSBlock(dims_, r_);
-  const auto r_pe = ConstYBlock(dims_, r_);
-  const auto r_pi = ConstZBlock(dims_, r_);
-
-  // apply the variable elimination, which updates r_d (make a copy to save the original)
-  r_dual_aug_.noalias() = r_d;
-  for (std::size_t i = 0; i < M; ++i) {
-    const LinearInequalityConstraint& c = p_.constraints[i];
-    r_dual_aug_[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
-    r_dual_aug_[c.variable] += c.a * (r_comp[i] - mu) / s[i];
-  }
-
   // factorize, TODO(gareth): preallocate ldlt.
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
@@ -260,6 +272,39 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   // compute H^-1
   H_inv_.setIdentity();
   ldlt.solveInPlace(H_inv_);
+
+  // clear update steps
+  delta_.setZero();
+  delta_affine_.setZero();
+}
+
+void QPInteriorPointSolver::SolveForUpdate(const double mu) {
+  const std::size_t N = dims_.N;
+  const std::size_t M = dims_.M;
+  const std::size_t K = dims_.K;
+
+  const auto x = ConstXBlock(dims_, variables_);
+  const auto s = ConstSBlock(dims_, variables_);
+  const auto y = ConstYBlock(dims_, variables_);
+  const auto z = ConstZBlock(dims_, variables_);
+
+  // create the right-hand side of the 'augmented system'
+  const auto r_d = ConstXBlock(dims_, r_);
+  const auto r_comp = ConstSBlock(dims_, r_);
+  const auto r_pe = ConstYBlock(dims_, r_);
+  const auto r_pi = ConstZBlock(dims_, r_);
+
+  // relevant for MPC (zero if not doing the corrector step)
+  const auto s_aff = ConstSBlock(dims_, delta_affine_);
+  const auto z_aff = ConstZBlock(dims_, delta_affine_);
+
+  // apply the variable elimination, which updates r_d (make a copy to save the original)
+  r_dual_aug_.noalias() = r_d;
+  for (std::size_t i = 0; i < M; ++i) {
+    const LinearInequalityConstraint& c = p_.constraints[i];
+    r_dual_aug_[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
+    r_dual_aug_[c.variable] += c.a * (r_comp[i] + (s_aff[i] * z_aff[i]) - mu) / s[i];
+  }
 
   // compute [px, -py]
   auto dx = XBlock(dims_, delta_);
@@ -279,7 +324,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   for (std::size_t i = 0; i < M; ++i) {
     const LinearInequalityConstraint& c = p_.constraints[i];
     ds[i] = c.a * dx[c.variable] + r_pi[i];
-    dz[i] = -(z[i] / s[i]) * ds[i] - (1 / s[i]) * (r_comp[i] - mu);
+    dz[i] = -(z[i] / s[i]) * ds[i] - (1 / s[i]) * (r_comp[i] + (s_aff[i] * z_aff[i]) - mu);
   }
 }
 
@@ -316,18 +361,18 @@ void QPInteriorPointSolver::EvaluateKKTConditions() {
 }
 
 // Formula 19.9
-void QPInteriorPointSolver::ComputeAlpha(IterationOutputs* const output) const {
-  output->alpha_primal = ComputeAlpha(ConstSBlock(dims_, variables_), ConstSBlock(dims_, delta_));
-  output->alpha_dual = ComputeAlpha(ConstZBlock(dims_, variables_), ConstZBlock(dims_, delta_));
+void QPInteriorPointSolver::ComputeAlpha(AlphaValues* const output, const double tau) const {
+  ASSERT(output != nullptr);
+  output->primal = ComputeAlpha(ConstSBlock(dims_, variables_), ConstSBlock(dims_, delta_), tau);
+  output->dual = ComputeAlpha(ConstZBlock(dims_, variables_), ConstZBlock(dims_, delta_), tau);
 }
 
-double QPInteriorPointSolver::ComputeAlpha(
-    const Eigen::VectorBlock<const Eigen::VectorXd>& val,
-    const Eigen::VectorBlock<const Eigen::VectorXd>& d_val) const {
+double QPInteriorPointSolver::ComputeAlpha(const ConstVectorBlock& val,
+                                           const ConstVectorBlock& d_val, const double tau) const {
   ASSERT(val.rows() == d_val.rows());
+  ASSERT(tau > 0 && tau <= 1);
   double alpha = 1.0;
   // TODO(gareth): Make this value adjustable for possibly faster convergence?
-  constexpr double tau = .995;
   for (int i = 0; i < val.rows(); ++i) {
     const double updated_val = val[i] + d_val[i];
     if (updated_val <= 0.0 && std::abs(d_val[i]) > 0) {
@@ -338,6 +383,21 @@ double QPInteriorPointSolver::ComputeAlpha(
     }
   }
   return alpha;
+}
+
+// We don't re-evaluate the s^T * z / M term, because it is already stored in mu.
+double QPInteriorPointSolver::ComputePredictorCorrectorMuAffine(
+    const double mu, const AlphaValues& alpha_probe) const {
+  const auto s = ConstSBlock(dims_, variables_);
+  const auto z = ConstZBlock(dims_, variables_);
+  const auto ds = ConstSBlock(dims_, delta_);
+  const auto dz = ConstZBlock(dims_, delta_);
+  // here we just compute the missing terms from (s + ds * a_p)^T * (z + dz * a_d)
+  double mu_affine = mu;
+  mu_affine += alpha_probe.dual * s.dot(dz) / static_cast<double>(dims_.M);
+  mu_affine += alpha_probe.primal * z.dot(ds) / static_cast<double>(dims_.N);
+  mu_affine += (alpha_probe.dual * alpha_probe.primal) * ds.dot(dz) / static_cast<double>(dims_.M);
+  return mu_affine;
 }
 
 ConstVectorBlock QPInteriorPointSolver::ConstXBlock(const ProblemDims& dims,
@@ -455,9 +515,6 @@ std::ostream& operator<<(std::ostream& stream,
   switch (state) {
     case TerminationState::SATISFIED_KKT_TOL:
       stream << "SATISFIED_KKT_TOL";
-      break;
-    case TerminationState::BAD_STEP:
-      stream << "BAD_STEP";
       break;
     case TerminationState::MAX_ITERATIONS:
       stream << "MAX_ITERATIONS";
