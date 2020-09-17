@@ -39,11 +39,10 @@ static Eigen::Vector2d DummyFunction(const Matrix<double, 3, 1>& p, Matrix<doubl
 // This is the matrix `M` such that (M * H * M.T) will extract the relevant values
 // from the hessian.
 template <std::size_t N>
-static Eigen::MatrixXd CreateRemapMatrix(const std::array<int, N>& index,
-                                         const std::size_t full_size) {
+static Eigen::MatrixXd CreateRemapMatrix(const std::array<int, N>& index, const int full_size) {
   Eigen::MatrixXd small_D_large(N, full_size);
   small_D_large.setZero();
-  for (int row = 0; row < N; ++row) {
+  for (int row = 0; row < static_cast<int>(N); ++row) {
     ASSERT(index[row] < full_size);
     small_D_large(row, index[row]) = 1;
   }
@@ -68,7 +67,7 @@ TEST(MiniOptTest, TestStaticResidualSimple) {
 
   // check error
   const VectorXd global_params = params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), res.Error(global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.Error(global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -97,7 +96,7 @@ TEST(MiniOptTest, TestStaticResidualOutOfOrder) {
 
   // check error
   const VectorXd global_params = local_D_global.transpose() * params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), res.Error(global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.Error(global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -128,7 +127,7 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
 
   // check error
   const VectorXd global_params = local_D_global.transpose() * params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), res.Error(global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.Error(global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -194,10 +193,6 @@ class QPSolverTest : public ::testing::Test {
   // Check that the solution of the 'augmented system' (which leverages sparsity)
   // matches the full 'brute force' solve that uses LU decomposition.
   void CheckAugmentedSolveAgainstPartialPivot(const QP& qp, const VectorXd& x_guess) {
-    const Index N = qp.G.rows();
-    const Index K = qp.A_eq.rows();
-    const Index M = static_cast<Index>(qp.constraints.size());
-
     // construct the solver
     QPInteriorPointSolver solver(qp);
     QPInteriorPointSolver::XBlock(solver.dims_, solver.variables_) = x_guess;
@@ -555,6 +550,9 @@ class QPSolverTest : public ::testing::Test {
    * that principled.
    *
    * This is mostly just to 'poke' the implementation and find issues.
+   *
+   * Should generate these offline and save them so the random generator
+   * can't muck with the results.
    */
   QP GenerateRandomQP(const int seed, const int dimension, const double p_inequality,
                       Eigen::VectorXd* const solution,
@@ -631,10 +629,10 @@ class QPSolverTest : public ::testing::Test {
       }
 
       const auto term_state = solver.Solve(params);
-      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 1.0e-5) << "Term: " << term_state << "\n"
+      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 1.0e-4) << "Term: " << term_state << "\n"
                                                               << "Problem p = " << p;
       // check the variables that are constrained
-      ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 1.0e-5)
+      ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 1.0e-4)
           << "Term: " << term_state << "\n"
           << "Problem p = " << p;
     }
@@ -659,11 +657,12 @@ class ConstrainedNLSTest : public ::testing::Test {
   // Test a simple non-linear least squares problem.
   void TestActuatorChain() {
     // We have a chain of three rotational actuators, at the end of which we have an effector.
-    Residual<2, 3> target_pos;
-    target_pos.index = {{0, 1, 2}};
-    target_pos.function = [](const Vector3d& theta, Matrix<double, 2, 3>* const J) -> Vector2d {
+    //    Residual<2, 3> target_pos;
+    //    target_pos.index = {{0, 1, 2}};
+    //    target_pos.function = [](const Vector3d& theta, Matrix<double, 2, 3>* const J) -> Vector2d
+    //    {
 
-    };
+    //    };
   }
 };
 

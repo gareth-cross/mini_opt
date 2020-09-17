@@ -63,7 +63,7 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem) : p_(problem) {
 
   const bool check_feasible = false;  // TODO(gareth): Param?
   for (const LinearInequalityConstraint& c : p_.constraints) {
-    ASSERT(c.variable < dims_.N, "Constraint index is out of bounds");
+    ASSERT(c.variable < static_cast<int>(dims_.N), "Constraint index is out of bounds");
     const bool is_feasible = c.IsFeasible(variables_[c.variable]);
     if (!is_feasible && check_feasible) {
       std::stringstream ss;
@@ -239,9 +239,7 @@ void QPInteriorPointSolver::ComputeLDLT() {
   const std::size_t K = dims_.K;
 
   // const-block expressions for these, for convenience
-  const auto x = ConstXBlock(dims_, variables_);
   const auto s = ConstSBlock(dims_, variables_);
-  const auto y = ConstYBlock(dims_, variables_);
   const auto z = ConstZBlock(dims_, variables_);
 
   // shouldn't happen due to selection of alpha, but double check
@@ -284,9 +282,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   const std::size_t M = dims_.M;
   const std::size_t K = dims_.K;
 
-  const auto x = ConstXBlock(dims_, variables_);
   const auto s = ConstSBlock(dims_, variables_);
-  const auto y = ConstYBlock(dims_, variables_);
   const auto z = ConstZBlock(dims_, variables_);
 
   // create the right-hand side of the 'augmented system'

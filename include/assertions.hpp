@@ -2,6 +2,12 @@
 #pragma once
 #define ASSERTS_ENABLED
 
+// Disable warning about no variadic arguments.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+#endif
+
 // Geneates an exception w/ a formatted string.
 void RaiseAssert(const char* const condition, const char* const file, const int line,
                  const char* const fmt = 0, ...);
@@ -24,3 +30,7 @@ void RaiseAssert(const char* const condition, const char* const file, const int 
 
 // Macro to use when defining an assertion.
 #define ASSERT(cond, ...) ASSERT_IMPL(cond, __FILE__, __LINE__, ##__VA_ARGS__)
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif

@@ -505,7 +505,7 @@ void Residual<ResidualDim, NumParams>::UpdateJacobian(
   JacobianType J;
   b_out.noalias() = function(relevant_params, &J);
 
-  for (int col_local = 0; col_local < NumParams; ++col_local) {
+  for (int col_local = 0; col_local < static_cast<int>(NumParams); ++col_local) {
     const int col_global = index[col_local];
     ASSERT(col_global < J_out.cols(), "Index %i exceeds the size of the Jacobian (cols = %i)",
            col_global);
