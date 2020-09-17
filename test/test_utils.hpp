@@ -27,8 +27,10 @@ void printImpl(const std::string& name, Xpr xpr) {
   TEST_F(object, function) { function(); }
 
 // Macro to compare eigen matrices and print a nice error.
-#define EXPECT_EIGEN_NEAR(a, b, tol) EXPECT_PRED_FORMAT3(test_utils::ExpectEigenNear, (a).eval(), (b).eval(), tol)
-#define ASSERT_EIGEN_NEAR(a, b, tol) ASSERT_PRED_FORMAT3(test_utils::ExpectEigenNear, (a).eval(), (b).eval(), tol)
+#define EXPECT_EIGEN_NEAR(a, b, tol) \
+  EXPECT_PRED_FORMAT3(test_utils::ExpectEigenNear, (a).eval(), (b).eval(), tol)
+#define ASSERT_EIGEN_NEAR(a, b, tol) \
+  ASSERT_PRED_FORMAT3(test_utils::ExpectEigenNear, (a).eval(), (b).eval(), tol)
 
 // TODO(gareth): This is all copy-pasta from other repos I have. Should put it in a
 // common place.
@@ -64,5 +66,8 @@ testing::AssertionResult ExpectEigenNear(const std::string& name_a, const std::s
 /// Create a vector in the specified range.
 /// Begins at `start` and increments by `step` until >= `end`.
 std::vector<double> Range(double start, double end, double step);
+
+/// Generate a random positive definite matrix.
+Eigen::MatrixXd GenerateRandomPDMatrix(int size, int seed);
 
 }  // namespace test_utils

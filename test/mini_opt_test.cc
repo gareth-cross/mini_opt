@@ -1,7 +1,9 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt.hpp"
 
+#include <Eigen/Jacobi>
 #include <chrono>
+#include <random>
 
 #include "test_utils.hpp"
 
@@ -181,6 +183,14 @@ class QPSolverTest : public ::testing::Test {
     return constant;
   }
 
+  double BuildQuadraticVector(const Eigen::VectorXd& roots, QP* const output) {
+    std::vector<Root> roots_structs;
+    for (int i = 0; i < roots.rows(); ++i) {
+      roots_structs.emplace_back(1.0, roots[i]);
+    }
+    return BuildQuadratic(roots_structs, output);
+  }
+
   // Check that the solution of the 'augmented system' (which leverages sparsity)
   // matches the full 'brute force' solve that uses LU decomposition.
   void CheckAugmentedSolveAgainstPartialPivot(const QP& qp, const VectorXd& x_guess) {
@@ -309,14 +319,16 @@ class QPSolverTest : public ::testing::Test {
     std::cout << "Iteration summary: ";
     std::cout << "||kkt||^2 = " << kkt_2 << ", mu = " << mu << ",  alpha = " << alpha << "\n";
     // dump the state with labels
-    std::cout << "  x = " << solver->x_block().transpose().format(kMatrixFmt) << "\n";
-    std::cout << "  s = " << solver->s_block().transpose().format(kMatrixFmt) << "\n";
-    std::cout << "  y = " << solver->y_block().transpose().format(kMatrixFmt) << "\n";
-    std::cout << "  z = " << solver->z_block().transpose().format(kMatrixFmt) << "\n";
+    /*   std::cout << "After update:\n";
+       std::cout << "  x = " << solver->x_block().transpose().format(kMatrixFmt) << "\n";
+       std::cout << "  s = " << solver->s_block().transpose().format(kMatrixFmt) << "\n";
+       std::cout << "  y = " << solver->y_block().transpose().format(kMatrixFmt) << "\n";
+       std::cout << "  z = " << solver->z_block().transpose().format(kMatrixFmt) << "\n";*/
+    (void)solver;
   }
 
   // Scalar quadratic equation with a single inequality constraint.
-  void TestScalarQuadraticWithInequality() {
+  void TestWithSingleInequality() {
     using ScalarMatrix = Matrix<double, 1, 1>;
 
     // simple quadratic residual: f_0(x) = ||x - 5||^2, h(x) = x - 5
@@ -343,14 +355,20 @@ class QPSolverTest : public ::testing::Test {
                                        std::placeholders::_3));
 
     QPInteriorPointSolver::Params params{};
+    params.termination_kkt2_tol = tol::kPico;
     const auto term_state = solver.Solve(params);
     PRINT(term_state);
+
+    // check the solution
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_NEAR(0.0, solver.r_.squaredNorm(), tol::kPico);
+    ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro);
+    ASSERT_NEAR(0.0, solver.s_block()[0], 1.0e-8);
+    ASSERT_LT(1.0, solver.z_block()[0]);
   }
 
   // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
-  void TestQuadraticWithInequalities() {
-    using ScalarMatrix = Matrix<double, 1, 1>;
-
+  void TestWithInequalitiesActive() {
     // Quadratic in two variables. Has a PD diagonal hessian.
     Residual<2, 2> res;
     res.index = {{0, 1}};
@@ -379,18 +397,228 @@ class QPSolverTest : public ::testing::Test {
                                        std::placeholders::_3));
     // solve it
     QPInteriorPointSolver::Params params{};
+    params.termination_kkt2_tol = tol::kPico;
     const auto term_state = solver.Solve(params);
     PRINT(term_state);
+
+    // check the solution
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro);
+    ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), 1.0e-8);
+    ASSERT_TRUE((solver.z_block().array() > 1).all());
   }
 
- private:
+  // Quadratic in three variables, with one active and one inactive inequality.
+  void TestWithInequalitiesPartiallyActive() {
+    Residual<3, 3> res;
+    res.index = {{0, 1, 2}};
+    res.function = [](const Matrix<double, 3, 1>& x,
+                      Matrix<double, 3, 3>* const J) -> Matrix<double, 3, 1> {
+      if (J) {
+        J->setZero();
+        J->diagonal() = Matrix<double, 3, 1>(1.0, -1.0, 0.5);
+      }
+      // solution at [1, -3, -10]
+      return Matrix<double, 3, 1>{x[0] - 1.0, -x[1] - 3.0, 0.5 * x[2] + -5.0};
+    };
+
+    // Set up problem w/ only one relevant constraint
+    QP qp{3};
+    res.UpdateSystem(Vector3d::Zero(), &qp.G, &qp.c);
+    qp.constraints.emplace_back(Var(1) >= -2.0);
+    qp.constraints.emplace_back(Var(0) >= -3.5);  //  irrelevant
+
+    QPInteriorPointSolver solver(qp);
+    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
+                                       std::placeholders::_1, std::placeholders::_2,
+                                       std::placeholders::_3));
+    // solve it
+    QPInteriorPointSolver::Params params{};
+    params.termination_kkt2_tol = tol::kPico;
+    const auto term_state = solver.Solve(params);
+    PRINT(term_state);
+
+    // check the solution
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro);
+    ASSERT_NEAR(0.0, solver.s_block()[0], 1.0e-8);  // first constraint is active
+    ASSERT_NEAR(0.0, solver.z_block()[1], 1.0e-8);  // second constraint is inactive
+  }
+
+  // Test simple problem with equality constraints.
+  // Should converge in a single step.
+  void TestWithEqualitiesOnly() {
+    QP qp{};
+    BuildQuadratic({Root(1.0, 0.5), Root(3.0, 2.0), Root(-4.0, 5.0), Root(0.25, 4)}, &qp);
+
+    // specify x[0] - x[2]/2 == 3.0
+    // specify x[1]/4 + x[3] == -2.0
+    qp.A_eq.resize(2, 4);
+    qp.b_eq.resize(2);
+    qp.A_eq(0, 0) = 1;
+    qp.A_eq(0, 2) = -0.5;
+    qp.A_eq(1, 1) = 0.25;
+    qp.A_eq(1, 3) = 1.0;
+    qp.b_eq[0] = 3.0;
+    qp.b_eq[1] = -2.0;
+
+    QPInteriorPointSolver solver(qp);
+    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
+                                       std::placeholders::_1, std::placeholders::_2,
+                                       std::placeholders::_3));
+    // solve it
+    QPInteriorPointSolver::Params params{};
+    params.termination_kkt2_tol = tol::kPico;
+    params.max_iterations = 1;  //  should only need one
+    const auto term_state = solver.Solve(params);
+    PRINT(term_state);
+
+    // shoudl be able to satisfy immediately
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_EIGEN_NEAR(Vector2d::Zero(), qp.A_eq * solver.x_block() + qp.b_eq, tol::kNano);
+  }
+
+  // Test a problem where all the variables are locked with equality constraints.
+  void TestWithFullyConstrainedEqualities() {
+    QP qp{};
+    BuildQuadratic({Root(1.0, -0.5), Root(1.0, -0.25), Root(1.0, 1.0)}, &qp);
+
+    // lock all the variables to a specific value (nothing to optimized)
+    qp.A_eq = Matrix3d::Identity();
+    qp.b_eq = -Vector3d{1., 2., 3.};
+
+    QPInteriorPointSolver solver(qp);
+    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
+                                       std::placeholders::_1, std::placeholders::_2,
+                                       std::placeholders::_3));
+
+    solver.EvaluateKKTConditions();
+    PRINT_MATRIX(solver.r_.transpose());
+
+    // solve it in a single step
+    QPInteriorPointSolver::Params params{};
+    params.termination_kkt2_tol = tol::kPico;
+    params.max_iterations = 1;
+    const auto term_state = solver.Solve(params);
+    PRINT(term_state);
+
+    // should be able to satisfy immediately
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_EIGEN_NEAR(-qp.b_eq, solver.x_block(), tol::kNano);
+    ASSERT_TRUE((solver.y_block().array() > tol::kCenti).all());
+  }
+
+  // Test with both types of constraint.
+  void TestWithInequalitiesAndEqualities() {
+    QP qp{};
+    BuildQuadratic({Root(1.0, 1.0), Root(5.0, -10.0), Root(10.0, 2.0)}, &qp);
+
+    // lock one of the variables with an equality, x[2] == -2
+    qp.A_eq = RowVector3d(0.0, 0.0, 1.0);
+    qp.b_eq = Matrix<double, 1, 1>(-2.0);
+
+    // keep both variables from their roots
+    qp.constraints.push_back(Var(0) <= 0.5);
+    qp.constraints.push_back(Var(1) >= -1.0);
+
+    QPInteriorPointSolver solver(qp);
+    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
+                                       std::placeholders::_1, std::placeholders::_2,
+                                       std::placeholders::_3));
+
+    // solve it in a single step
+    QPInteriorPointSolver::Params params{};
+    params.termination_kkt2_tol = tol::kPico;
+    const auto term_state = solver.Solve(params);
+    PRINT(term_state);
+
+    // both inequalities should be active
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro);
+    ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), 1.0e-8);
+  }
+
+  QP GenerateRandomQP(const int seed, const int dimension, const double p_inequality,
+                      Eigen::VectorXd* const solution,
+                      std::vector<uint8_t>* const constraint_mask) {
+    std::default_random_engine engine{static_cast<unsigned int>(seed)};
+    std::uniform_real_distribution<double> root_dist{-20.0, 20.0};
+    std::uniform_real_distribution<double> ineq_dist{0.1, 0.9};
+    std::bernoulli_distribution binomial{p_inequality};
+
+    // generate a bunch of random roots
+    VectorXd roots_original(dimension);
+    for (int r = 0; r < dimension; ++r) {
+      roots_original[r] = root_dist(engine);
+    }
+
+    QP qp{};
+    BuildQuadraticVector(roots_original, &qp);
+
+    // Generate a random PD matrix and scale the system by it.
+    const MatrixXd PD = test_utils::GenerateRandomPDMatrix(dimension, /* seed = */ seed);
+    const VectorXd roots_shifted = PD.inverse() * roots_original * 2;
+    qp.G = (PD.transpose() * qp.G * PD).eval();
+    qp.c = (PD * qp.c).eval();
+
+    solution->noalias() = roots_shifted;
+    constraint_mask->resize(dimension, false);
+
+    // put random active inequality constraints
+    for (int r = 0; r < roots_shifted.rows(); ++r) {
+      if (binomial(engine)) {
+        constraint_mask->at(r) = true;
+        // this is pretty arbitrary:
+        const double scale = ineq_dist(engine);
+        if (roots_shifted[r] < 0) {
+          qp.constraints.push_back(Var(r) >= roots_shifted[r] * scale);
+        } else {
+          qp.constraints.push_back(Var(r) <= roots_shifted[r] * scale);
+        }
+        solution->operator[](r) *= scale;
+      }
+    }
+    return qp;
+  }
+
+  // Test a bunch of randomly generated problems.
+  void TestGeneratedProblems() {
+    const int kNumProblems = 1;
+    const int kProblemDim = 8;  //  size of `x`, for me 8-12 is a typical problem size
+    for (int p = 0; p < kNumProblems; ++p) {
+      VectorXd x_solution;
+      std::vector<uint8_t> constraint_mask;
+      const QP qp = GenerateRandomQP(p, kProblemDim, 0.5, &x_solution, &constraint_mask);
+
+      // solve it
+      QPInteriorPointSolver solver(qp);
+      QPInteriorPointSolver::Params params{};
+      params.termination_kkt2_tol = tol::kPico;
+      params.initial_sigma = 1.0;
+      params.sigma_reduction = 0.5;
+      params.max_iterations = 20;  //  seems high?
+#if 1
+      solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
+                                         std::placeholders::_1, std::placeholders::_2,
+                                         std::placeholders::_3));
+#endif
+      const auto term_state = solver.Solve(params);
+      PRINT(term_state);
+      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), tol::kMicro);
+    }
+  }
 };
 
 TEST_FIXTURE(QPSolverTest, TestSolveNoConstraints)
 TEST_FIXTURE(QPSolverTest, TestSolveEqualityConstraints)
 TEST_FIXTURE(QPSolverTest, TestSolveInequalityConstraints)
 TEST_FIXTURE(QPSolverTest, TestSolveAllConstraints)
-TEST_FIXTURE(QPSolverTest, TestScalarQuadraticWithInequality)
-TEST_FIXTURE(QPSolverTest, TestQuadraticWithInequalities)
+TEST_FIXTURE(QPSolverTest, TestWithSingleInequality)
+TEST_FIXTURE(QPSolverTest, TestWithInequalitiesActive)
+TEST_FIXTURE(QPSolverTest, TestWithInequalitiesPartiallyActive)
+TEST_FIXTURE(QPSolverTest, TestWithEqualitiesOnly)
+TEST_FIXTURE(QPSolverTest, TestWithFullyConstrainedEqualities)
+TEST_FIXTURE(QPSolverTest, TestWithInequalitiesAndEqualities)
+TEST_FIXTURE(QPSolverTest, TestGeneratedProblems)
 
 }  // namespace mini_opt

@@ -29,34 +29,37 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
   }
 
   // Order is [slacks (s), equality multipliers(y), inequality multiplers (lambda)]
-  const std::size_t x_size = p_.G.rows();
-  const std::size_t num_slacks = p_.constraints.size();
-  const std::size_t num_multipliers = p_.constraints.size() + p_.A_eq.rows();
-  variables_.resize(x_size + num_slacks + num_multipliers);
+  dims_.N = p_.G.rows();
+  dims_.M = p_.constraints.size();
+  dims_.K = p_.A_eq.rows();
+
+  variables_.resize(dims_.N + dims_.M * 2 + dims_.K);
   prev_variables_.resizeLike(variables_);
 
   // if a guess was provided, copy it in
   if (x_guess.size() > 0) {
-    ASSERT(x_guess.rows() == p_.G.rows());
-    variables_.head(x_size) = x_guess;
+    ASSERT(x_guess.rows() == static_cast<Eigen::Index>(dims_.N));
+    XBlock(dims_, variables_) = x_guess;
   } else {
     // otherwise guess zero
-    variables_.head(x_size).setZero();
+    XBlock(dims_, variables_).setZero();
   }
 
   // TODO(gareth): A better initialization strategy for these?
   // Could assume constraints are active, in which case we compute lambda from the KKT conditions.
-  variables_.tail(num_slacks + num_multipliers).setConstant(1);
+  SBlock(dims_, variables_).setConstant(1);
+  ZBlock(dims_, variables_).setConstant(1);
+  YBlock(dims_, variables_).setConstant(1);
 
   // Allocate space for solving
-  const std::size_t reduced_system_size = x_size + p_.A_eq.rows();
+  const std::size_t reduced_system_size = dims_.N + dims_.K;
   H_.resize(reduced_system_size, reduced_system_size);
   H_.setZero();
   H_inv_.resizeLike(H_);
 
   // Use the total size here
   r_.resizeLike(variables_);
-  r_dual_aug_.resize(x_size);
+  r_dual_aug_.resize(dims_.N);
 
   // Space for the output of all variables
   delta_.resizeLike(variables_);
@@ -87,7 +90,7 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(const Param
     const double kkt2 = r_.squaredNorm();
 
     // solve for the update
-    const auto mu_and_alpha = Iterate(sigma);
+    const IterationOutputs iteration_outputs = Iterate(sigma);
 
     // evaluate the residual again, which fills `r_` for the next iteration
     EvaluateKKTConditions();
@@ -95,7 +98,10 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(const Param
 
     if (logger_callback_) {
       // pass progress to the logger callback for printing in the test
-      logger_callback_(kkt2_after, mu_and_alpha.first, mu_and_alpha.second);
+      logger_callback_(
+          kkt2_after,
+          std::min(iteration_outputs.alpha_primal, iteration_outputs.alpha_primal) * sigma,
+          iteration_outputs.mu);
     }
 
     // check for termination
@@ -110,64 +116,48 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(const Param
       return TerminationState::SATISFIED_KKT_TOL;
     }
 
-    // TODO(gareth): Impleent one of the smarter strategies here.
+    // TODO(gareth): Implement one of the smarter strategies here.
     sigma *= params.sigma_reduction;
   }
 
   return TerminationState::MAX_ITERATIONS;
 }
 
-std::pair<double, double> QPInteriorPointSolver::Iterate(const double sigma) {
-  const std::size_t N = p_.G.rows();
-  const std::size_t M = p_.constraints.size();
-
+QPInteriorPointSolver::IterationOutputs QPInteriorPointSolver::Iterate(const double sigma) {
   // fill out `r_`
   EvaluateKKTConditions();
 
   // evaluate the complementarity condition
-  double mu = 0;
-  if (M > 0) {
-    const auto r_comp = r_.segment(N, M);
-    mu = r_comp.sum() / static_cast<double>(M);
+  IterationOutputs outputs{};
+  if (dims_.M > 0) {
+    outputs.mu = ConstSBlock(dims_, r_).sum() / static_cast<double>(dims_.M);
   }
 
   // solve the system, multiply by sigma to get equation 19.19
-  SolveForUpdate(sigma * mu);
+  SolveForUpdate(sigma * outputs.mu);
 
   // compute step size
-  const double alpha = ComputeAlpha();
+  if (dims_.M > 0) {
+    ComputeAlpha(&outputs);
+  }
 
   // update
+  const double alpha = std::min(outputs.alpha_dual, outputs.alpha_primal);
   variables_.noalias() += delta_ * alpha;
 
   // return mu and alpha
-  return std::make_pair(mu, alpha);
+  return outputs;
 }
 
 // TODO(gareth): All the accessing by index is a little gross, could maybe split
 // up the variables into separate vectors? I do like having the full state as one object.
-QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::x_block() const {
-  const std::size_t N = p_.G.rows();
-  return variables_.head(N);
-}
+ConstVectorBlock QPInteriorPointSolver::x_block() const { return ConstXBlock(dims_, variables_); }
 
-QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::s_block() const {
-  const std::size_t N = p_.G.rows();
-  const std::size_t M = p_.constraints.size();
-  return variables_.segment(N, M);
-}
+ConstVectorBlock QPInteriorPointSolver::s_block() const { return ConstSBlock(dims_, variables_); }
 
-QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::y_block() const {
-  const std::size_t N = p_.G.rows();
-  const std::size_t M = p_.constraints.size();
-  const std::size_t K = p_.A_eq.rows();
-  return variables_.segment(N + M, K);
-}
+ConstVectorBlock QPInteriorPointSolver::y_block() const { return ConstYBlock(dims_, variables_); }
 
-QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::z_block() const {
-  const std::size_t M = p_.constraints.size();
-  return variables_.tail(M);
-}
+ConstVectorBlock QPInteriorPointSolver::z_block() const { return ConstZBlock(dims_, variables_); }
 
 /*
  * We start with the full symmetric system (Equation 19.12):
@@ -217,15 +207,15 @@ QPInteriorPointSolver::ConstVectorBlock QPInteriorPointSolver::z_block() const {
  * It is assumed that `EvaluateKKTConditions` was called first.
  */
 void QPInteriorPointSolver::SolveForUpdate(const double mu) {
-  const std::size_t N = p_.G.rows();
-  const std::size_t M = p_.constraints.size();
-  const std::size_t K = p_.A_eq.rows();
+  const std::size_t N = dims_.N;
+  const std::size_t M = dims_.M;
+  const std::size_t K = dims_.K;
 
   // const-block expressions for these, for convenience
-  const auto x = variables_.head(N);
-  const auto s = variables_.segment(N, M);
-  const auto y = variables_.segment(N + M, K);
-  const auto z = variables_.tail(M);
+  const auto x = ConstXBlock(dims_, variables_);
+  const auto s = ConstSBlock(dims_, variables_);
+  const auto y = ConstYBlock(dims_, variables_);
+  const auto z = ConstZBlock(dims_, variables_);
 
   // shouldn't happen due to selection of alpha, but double check
   const bool any_non_positive_s = (s.array() <= 0.0).any();
@@ -246,10 +236,10 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   }
 
   // create the right-hand side (const because these were filled out already)
-  const auto r_d = r_.head(N);
-  const auto r_comp = r_.segment(N, M);
-  const auto r_pe = r_.segment(N + M, K);
-  const auto r_pi = r_.tail(M);
+  const auto r_d = ConstXBlock(dims_, r_);
+  const auto r_comp = ConstSBlock(dims_, r_);
+  const auto r_pe = ConstYBlock(dims_, r_);
+  const auto r_pi = ConstZBlock(dims_, r_);
 
   // apply the variable elimination, which updates r_d (make a copy to save the original)
   r_dual_aug_.noalias() = r_d;
@@ -272,10 +262,10 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   ldlt.solveInPlace(H_inv_);
 
   // compute [px, -py]
-  auto dx = delta_.head(N);
-  auto ds = delta_.segment(N, M);
-  auto dy = delta_.segment(N + M, K);
-  auto dz = delta_.tail(M);
+  auto dx = XBlock(dims_, delta_);
+  auto ds = SBlock(dims_, delta_);
+  auto dy = YBlock(dims_, delta_);
+  auto dz = ZBlock(dims_, delta_);
 
   dx.noalias() = H_inv_.block(0, 0, N, N) * -r_dual_aug_;
   if (K > 0) {
@@ -297,32 +287,27 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
  * Build the right hand side of the system illustrated in the comment on SolveForUpdate.
  */
 void QPInteriorPointSolver::EvaluateKKTConditions() {
-  const std::size_t N = p_.G.rows();
-  const std::size_t M = p_.constraints.size();
-  const std::size_t K = p_.A_eq.rows();
-
-  // TODO(gareth): Some shorthand for getting these blocks?
-  const auto x = variables_.head(N);
-  const auto s = variables_.segment(N, M);
-  const auto y = variables_.segment(N + M, K);
-  const auto z = variables_.tail(M);
+  const auto x = ConstXBlock(dims_, variables_);
+  const auto s = ConstSBlock(dims_, variables_);
+  const auto y = ConstYBlock(dims_, variables_);
+  const auto z = ConstZBlock(dims_, variables_);
 
   // create the right-hand side
-  auto r_d = r_.head(N);
-  auto r_comp = r_.segment(N, M);
-  auto r_pe = r_.segment(N + M, K);
-  auto r_pi = r_.tail(M);
+  auto r_d = XBlock(dims_, r_);
+  auto r_comp = SBlock(dims_, r_);
+  auto r_pe = YBlock(dims_, r_);
+  auto r_pi = ZBlock(dims_, r_);
 
   // build the dual objective first
   r_d.noalias() = p_.G.selfadjointView<Eigen::Lower>() * x + p_.c;
-  if (K > 0) {
+  if (dims_.K > 0) {
     r_d.noalias() -= p_.A_eq.transpose() * y;
     // equality constraints
     r_pe.noalias() = p_.A_eq * x + p_.b_eq;
   }
 
   // contributions from inequality constraints, there is some redundant work here
-  for (std::size_t i = 0; i < M; ++i) {
+  for (std::size_t i = 0; i < dims_.M; ++i) {
     const LinearInequalityConstraint& c = p_.constraints[i];
     r_d[c.variable] -= c.a * z[i];
     r_pi[i] = c.a * x[c.variable] + c.b - s[i];
@@ -330,18 +315,10 @@ void QPInteriorPointSolver::EvaluateKKTConditions() {
   }
 }
 
-// TODO(gareth): Should implement selection of alphas to minimize objective.
-// See formula 16.66 in Nocedal and Wright
-double QPInteriorPointSolver::ComputeAlpha() const {
-  const std::size_t N = p_.G.rows();
-  const std::size_t M = p_.constraints.size();
-  if (M > 0) {
-    const double alpha_s = ComputeAlpha(variables_.segment(N, M), delta_.segment(N, M));
-    const double alpha_z = ComputeAlpha(variables_.tail(M), delta_.tail(M));
-    // We just take the min, although having separate alphas can supposedly improve convergence.
-    return std::min(alpha_s, alpha_z);
-  }
-  return 1.0;
+// Formula 19.9
+void QPInteriorPointSolver::ComputeAlpha(IterationOutputs* const output) const {
+  output->alpha_primal = ComputeAlpha(ConstSBlock(dims_, variables_), ConstSBlock(dims_, delta_));
+  output->alpha_dual = ComputeAlpha(ConstZBlock(dims_, variables_), ConstZBlock(dims_, delta_));
 }
 
 double QPInteriorPointSolver::ComputeAlpha(
@@ -363,6 +340,42 @@ double QPInteriorPointSolver::ComputeAlpha(
   return alpha;
 }
 
+ConstVectorBlock QPInteriorPointSolver::ConstXBlock(const ProblemDims& dims,
+                                                    const Eigen::VectorXd& vec) {
+  return vec.head(dims.N);
+}
+
+ConstVectorBlock QPInteriorPointSolver::ConstSBlock(const ProblemDims& dims,
+                                                    const Eigen::VectorXd& vec) {
+  return vec.segment(dims.N, dims.M);
+}
+
+ConstVectorBlock QPInteriorPointSolver::ConstYBlock(const ProblemDims& dims,
+                                                    const Eigen::VectorXd& vec) {
+  return vec.segment(dims.N + dims.M, dims.K);
+}
+
+ConstVectorBlock QPInteriorPointSolver::ConstZBlock(const ProblemDims& dims,
+                                                    const Eigen::VectorXd& vec) {
+  return vec.tail(dims.M);
+}
+
+VectorBlock QPInteriorPointSolver::XBlock(const ProblemDims& dims, Eigen::VectorXd& vec) {
+  return vec.head(dims.N);
+}
+
+VectorBlock QPInteriorPointSolver::SBlock(const ProblemDims& dims, Eigen::VectorXd& vec) {
+  return vec.segment(dims.N, dims.M);
+}
+
+VectorBlock QPInteriorPointSolver::YBlock(const ProblemDims& dims, Eigen::VectorXd& vec) {
+  return vec.segment(dims.N + dims.M, dims.K);
+}
+
+VectorBlock QPInteriorPointSolver::ZBlock(const ProblemDims& dims, Eigen::VectorXd& vec) {
+  return vec.tail(dims.M);
+}
+
 /*
  * Just build this matrix directly:
  *
@@ -378,15 +391,14 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
                                             Eigen::VectorXd* const r) const {
   ASSERT(H != nullptr);
   ASSERT(r != nullptr);
+  const std::size_t N = dims_.N;
+  const std::size_t M = dims_.M;
+  const std::size_t K = dims_.K;
 
-  const std::size_t N = p_.G.rows();
-  const std::size_t M = p_.constraints.size();
-  const std::size_t K = p_.A_eq.rows();
-
-  const auto x = variables_.head(N);
-  const auto s = variables_.segment(N, M);
-  const auto y = variables_.segment(N + M, K);
-  const auto z = variables_.tail(M);
+  const auto x = ConstXBlock(dims_, variables_);
+  const auto s = ConstSBlock(dims_, variables_);
+  const auto y = ConstYBlock(dims_, variables_);
+  const auto z = ConstZBlock(dims_, variables_);
 
   H->resize(N + K + M * 2, N + K + M * 2);
   H->setZero();
@@ -419,10 +431,10 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
     H->topRows(N + M).bottomRightCorner(M, M).diagonal().setConstant(-1);
   }
 
-  auto r_d = r->head(N);
-  auto s_inv_r_comp = r->segment(N, M);
-  auto r_pe = r->segment(N + M, K);
-  auto r_pi = r->tail(M);
+  auto r_d = XBlock(dims_, *r);
+  auto s_inv_r_comp = SBlock(dims_, *r);
+  auto r_pe = YBlock(dims_, *r);
+  auto r_pi = ZBlock(dims_, *r);
 
   r_d.noalias() = p_.G.selfadjointView<Eigen::Lower>() * x + p_.c;
   if (K > 0) {

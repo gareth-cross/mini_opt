@@ -18,6 +18,9 @@
  */
 namespace mini_opt {
 
+using ConstVectorBlock = Eigen::VectorBlock<const Eigen::VectorXd>;
+using VectorBlock = Eigen::VectorBlock<Eigen::VectorXd>;
+
 // Base type for residuals in case we want more than one.
 struct ResidualBase {
   using unique_ptr = std::unique_ptr<ResidualBase>;
@@ -140,8 +143,6 @@ struct QP {
  * Minimize quadratic cost function with inequality constraints using interior point method.
  */
 struct QPInteriorPointSolver {
-  using ConstVectorBlock = Eigen::VectorBlock<const Eigen::VectorXd>;
-
   // Parameters of the solver.
   struct Params {
     // Sigma is multiplied by `mu` at each iteration, to scale down the amount of 'perturbation'
@@ -195,6 +196,15 @@ struct QPInteriorPointSolver {
  private:
   const QP& p_;
 
+  struct ProblemDims {
+    std::size_t N;  //  number of variables `x`
+    std::size_t M;  //  number of inequality constraints, `s` and `z`
+    std::size_t K;  //  number of equality constraints, `y`
+  };
+
+  // For convenience we save these here
+  ProblemDims dims_;
+
   // Storage for the variables: (x, s, y, z)
   Eigen::VectorXd variables_;
   Eigen::VectorXd prev_variables_;
@@ -211,10 +221,20 @@ struct QPInteriorPointSolver {
   // Optional iteration logger.
   std::function<void(double kkt_2, double mu, double alpha)> logger_callback_;
 
+  // Some derivative values we compute during Iterate.
+  struct IterationOutputs {
+    // mu, the complementarity condition: s^T * z / M (Equation 16.56)
+    double mu{0};
+    // alpha in the primal variables (x an s), set to 1 if we have no s
+    double alpha_primal{1};
+    // alpha in the dual variables (y and z), set to 1 if we have no z
+    double alpha_dual{1};
+  };
+
   // Take a single step.
   // Computes mu, solves for the update, and takes the longest step we can while satisfying
-  // constraints. Returns {mu = s^T * z, alpha}, where alpha is min(alpha_z, alpha_s).
-  std::pair<double, double> Iterate(const double sigma);
+  // constraints.
+  IterationOutputs Iterate(const double sigma);
 
   // Solve the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
@@ -225,12 +245,22 @@ struct QPInteriorPointSolver {
   void EvaluateKKTConditions();
 
   // Compute the largest step size we can execute that satisfies constraints.
-  double ComputeAlpha() const;
+  void ComputeAlpha(IterationOutputs* const output) const;
 
   // Compute the `alpha` step size.
   // Returns alpha such that (val[i] + d_val[i]) >= val[i] * (1 - tau)
   double ComputeAlpha(const Eigen::VectorBlock<const Eigen::VectorXd>& val,
                       const Eigen::VectorBlock<const Eigen::VectorXd>& d_val) const;
+
+  // Helpers for accessing segments of vectors.
+  static ConstVectorBlock ConstXBlock(const ProblemDims& dims, const Eigen::VectorXd& vec);
+  static ConstVectorBlock ConstSBlock(const ProblemDims& dims, const Eigen::VectorXd& vec);
+  static ConstVectorBlock ConstYBlock(const ProblemDims& dims, const Eigen::VectorXd& vec);
+  static ConstVectorBlock ConstZBlock(const ProblemDims& dims, const Eigen::VectorXd& vec);
+  static VectorBlock XBlock(const ProblemDims& dims, Eigen::VectorXd& vec);
+  static VectorBlock SBlock(const ProblemDims& dims, Eigen::VectorXd& vec);
+  static VectorBlock YBlock(const ProblemDims& dims, Eigen::VectorXd& vec);
+  static VectorBlock ZBlock(const ProblemDims& dims, Eigen::VectorXd& vec);
 
   // For unit test, allow construction of the full linear system required for Newton step.
   void BuildFullSystem(Eigen::MatrixXd* const H, Eigen::VectorXd* const r) const;
