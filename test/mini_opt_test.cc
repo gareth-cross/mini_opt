@@ -199,27 +199,28 @@ class QPSolverTest : public ::testing::Test {
     const Index M = static_cast<Index>(qp.constraints.size());
 
     // construct the solver
-    QPInteriorPointSolver solver(qp, x_guess);
+    QPInteriorPointSolver solver(qp);
+    QPInteriorPointSolver::XBlock(solver.dims_, solver.variables_) = x_guess;
 
     // Give all the multipliers different positive non-zero values.
     // The exact values aren't actually important, we just want to validate indexing.
-    auto s = solver.variables_.segment(N, M);
-    auto y = solver.variables_.segment(N + M, K);
-    auto z = solver.variables_.tail(M);
-    for (Index i = 0; i < M; ++i) {
+    auto s = QPInteriorPointSolver::SBlock(solver.dims_, solver.variables_);
+    auto y = QPInteriorPointSolver::YBlock(solver.dims_, solver.variables_);
+    auto z = QPInteriorPointSolver::ZBlock(solver.dims_, solver.variables_);
+    for (Index i = 0; i < s.rows(); ++i) {
       s[i] = 2.0 / (i + 1);
       z[i] = 0.5 * (i + 1);
     }
-    for (Index k = 0; k < K; ++k) {
+    for (Index k = 0; k < y.rows(); ++k) {
       y[k] = static_cast<double>((k + 1) * (k + 1));
     }
 
     // check the dimensions
-    const Index total_dims = N + M * 2 + K;
+    const Index total_dims = solver.dims_.N + solver.dims_.M * 2 + solver.dims_.K;
     ASSERT_EQ(total_dims, solver.variables_.rows());
     ASSERT_EQ(total_dims, solver.delta_.rows());
     ASSERT_EQ(total_dims, solver.r_.rows());
-    ASSERT_EQ(N + K, solver.H_.rows());  //  only x and y
+    ASSERT_EQ(static_cast<Index>(solver.dims_.N + solver.dims_.K), solver.H_.rows());  //  only x and y
 
     // build the full system
     MatrixXd H_full;
@@ -234,8 +235,8 @@ class QPSolverTest : public ::testing::Test {
 
     // flip the signs
     VectorXd update = signed_update;
-    update.segment(N + M, K).array() *= -1.0;  // flip dy
-    update.tail(M).array() *= -1.0;            // flip dz
+    QPInteriorPointSolver::YBlock(solver.dims_, update) *= -1.0;  // flip dy
+    QPInteriorPointSolver::ZBlock(solver.dims_, update) *= -1.0;  // flip dz
 
     // now solve w/ cholesky
     solver.EvaluateKKTConditions();
@@ -353,7 +354,7 @@ class QPSolverTest : public ::testing::Test {
     res.UpdateSystem(initial_values, &qp.G, &qp.c);
     qp.constraints.emplace_back(Var(0) <= 4);
 
-    QPInteriorPointSolver solver(qp, VectorXd::Zero(1));
+    QPInteriorPointSolver solver(qp);
     solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
                                        std::placeholders::_1, std::placeholders::_2,
                                        std::placeholders::_3));

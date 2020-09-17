@@ -15,11 +15,10 @@ bool LinearInequalityConstraint::IsFeasible(double x) const {
   return a * x - b >= 0.0;
 }
 
-QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess)
-    : p_(problem) {
-  ASSERT(p_.G.rows() == p_.G.cols());
-  ASSERT(p_.G.rows() == p_.c.rows());
-  ASSERT(p_.A_eq.rows() == p_.b_eq.rows());
+QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem) : p_(problem) {
+  ASSERT(p_.G.rows() == p_.G.cols(), "G must be square");
+  ASSERT(p_.G.rows() == p_.c.rows(), "Dims of G and c must match");
+  ASSERT(p_.A_eq.rows() == p_.b_eq.rows(), "Rows of A_e and b_e must match");
 
   // If equality constraints were specified, we must be able to multiply A*x
   if (p_.A_eq.size() > 0) {
@@ -37,14 +36,9 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const Eigen::Vec
   variables_.resize(dims_.N + dims_.M * 2 + dims_.K);
   prev_variables_.resizeLike(variables_);
 
-  // if a guess was provided, copy it in
-  if (x_guess.size() > 0) {
-    ASSERT(x_guess.rows() == static_cast<Eigen::Index>(dims_.N));
-    XBlock(dims_, variables_) = x_guess;
-  } else {
-    // otherwise guess zero
-    XBlock(dims_, variables_).setZero();
-  }
+  // Since this is solving a problem in the tangent space of a larger nonlinear problem,
+  // we can guess zero for `x`.
+  XBlock(dims_, variables_).setZero();
 
   // TODO(gareth): A better initialization strategy for these?
   // Could assume constraints are active, in which case we compute lambda from the KKT conditions.

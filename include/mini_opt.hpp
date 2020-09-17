@@ -177,7 +177,7 @@ struct QPInteriorPointSolver {
   };
 
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
-  QPInteriorPointSolver(const QP& problem, const Eigen::VectorXd& x_guess = {});
+  explicit QPInteriorPointSolver(const QP& problem);
 
   /*
    * Iterate until one of the following conditions is met:
