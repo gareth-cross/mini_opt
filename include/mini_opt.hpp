@@ -28,12 +28,20 @@ struct ResidualBase {
   // We will be storing these through pointer to the base class.
   virtual ~ResidualBase();
 
-  // Get the error.
+  // Dimension of the residual vector.
+  virtual std::size_t Dimension() const = 0;
+
+  // Get the error: (1/2) * h(x)^T * h(x)
   virtual double Error(const Eigen::VectorXd& params) const = 0;
 
   // Update a system of equations Hx=b by writing to `H` and `b`.
-  virtual void UpdateSystem(const Eigen::VectorXd& params, Eigen::MatrixXd* const H,
-                            Eigen::VectorXd* const b) const = 0;
+  // Returns the value of `Error` as well.
+  virtual double UpdateHessian(const Eigen::VectorXd& params, Eigen::MatrixXd* const H,
+                               Eigen::VectorXd* const b) const = 0;
+
+  // Output the jacobian for the linear system: J * dx + b
+  virtual void UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
+                              Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
 };
 
 // Simple statically sized residual.
@@ -50,6 +58,9 @@ struct Residual : public ResidualBase {
   // optionally the jacobian via the output argument.
   std::function<ResidualType(const ParamType& params, JacobianType* const J_out)> function;
 
+  // Return constant dimension.
+  std::size_t Dimension() const override { return ResidualDim; }
+
   // Map params from the global state vector to those required for this function, and
   // then evaluate the function.
   double Error(const Eigen::VectorXd& params) const override;
@@ -57,8 +68,12 @@ struct Residual : public ResidualBase {
   // Map params from the global state vector to those required for this function, and
   // then evaluate the function and its derivative. Update the linear system [H|b] w/
   // the result.
-  void UpdateSystem(const Eigen::VectorXd& params, Eigen::MatrixXd* const H,
-                    Eigen::VectorXd* const b) const override;
+  double UpdateHessian(const Eigen::VectorXd& params, Eigen::MatrixXd* const H,
+                       Eigen::VectorXd* const b) const override;
+
+  // Implementation of abstract method UpdateJacobian.
+  void UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
+                      Eigen::VectorBlock<Eigen::VectorXd> b_out) const override;
 
  private:
   // Copy out the params that matter for this function.
@@ -82,6 +97,18 @@ struct LinearInequalityConstraint {
 
   // True if x is feasible.
   bool IsFeasible(double x) const;
+
+  // Shift to a new linearization point.
+  // a*(x + dx) + b >= 0  -->  a*dx + (ax + b) >= 0
+  LinearInequalityConstraint ShiftTo(double x) const {
+    return LinearInequalityConstraint(variable, a, a * x + b);
+  }
+
+  // Version of shift that takes vector.
+  LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
+    ASSERT(variable < x.rows());
+    return ShiftTo(x[variable]);
+  }
 
   // Ctor
   LinearInequalityConstraint(int variable, double a, double b) : variable(variable), a(a), b(b) {}
@@ -149,6 +176,9 @@ enum class BarrierStrategy {
 
 /*
  * Minimize quadratic cost function with inequality constraints using interior point method.
+ *
+ * Not doing any smart initial guess selection at the moment. We assume x_guess=0, which must
+ * be feasible (which works for my application).
  */
 struct QPInteriorPointSolver {
   // Parameters of the solver.
@@ -222,6 +252,9 @@ struct QPInteriorPointSolver {
     double mu_affine{std::numeric_limits<double>::quiet_NaN()};
   };
 
+  using LoggingCallback = std::function<void(double kkt_2_prev, double kkt_2_after,
+                                             const IterationOutputs& iter_outputs)>;
+
  private:
   const QP& p_;
 
@@ -232,7 +265,7 @@ struct QPInteriorPointSolver {
   };
 
   // For convenience we save these here
-  ProblemDims dims_;
+  ProblemDims dims_{0, 0, 0};
 
   // Storage for the variables: (x, s, y, z)
   Eigen::VectorXd variables_;
@@ -249,8 +282,7 @@ struct QPInteriorPointSolver {
   Eigen::VectorXd delta_affine_;
 
   // Optional iteration logger.
-  std::function<void(double kkt_2_prev, double kkt_2_after, const IterationOutputs& iter_outputs)>
-      logger_callback_;
+  LoggingCallback logger_callback_;
 
   bool HasInequalityConstraints() const { return dims_.M > 0; }
 
@@ -312,7 +344,8 @@ std::ostream& operator<<(std::ostream& stream,
  *
  *  min: f_0(x)  [where f_0(x) = (1/2) * h(x)^T * h(x)]
  *
- *  Subject to: diag(a) * x >= b
+ *  Subject to: diag(a) * x + b >= 0, and
+ *  Subject to: g(x) == 0
  *
  * Note that we actually iteratively minimize the first order approximation of f(x):
  *
@@ -326,11 +359,64 @@ std::ostream& operator<<(std::ostream& stream,
 struct Problem {
   using unique_ptr = std::unique_ptr<Problem>;
 
+  // Problem dimension. (ie. max variable index + 1)
+  std::size_t dimension;
+
   // The errors that form the sum of squares part of the cost function.
   std::vector<ResidualBase::unique_ptr> costs;
 
   // Linear inequality constraints.
   std::vector<LinearInequalityConstraint> inequality_constraints;
+
+  // Nonlinear inequality constraints.
+  std::vector<ResidualBase::unique_ptr> equality_constraints;
+};
+
+/*
+ * Solve constrained non-linear least squares problems using SQP.
+ *
+ * At each step we approximate the problem as a quadratic with linear equality constraints
+ * and inequality constraints about the current lineariation point. We do this iteratively
+ * until satisfied with the result on the original nonlinear cost.
+ */
+struct ConstrainedNonlinearLeastSquares {
+ public:
+  // Construct w/ const pointer to a problem definition.
+  explicit ConstrainedNonlinearLeastSquares(const Problem* const problem);
+
+  // Linearize and take a step.
+  void LinearizeAndSolve();
+
+  template <typename T>
+  void SetQPLoggingCallback(T cb) {
+    qp_logger_callback_ = cb;
+  }
+
+ private:
+  const Problem* const p_;
+
+  // Storage for the QP representation of the problem.
+  QP qp_{};
+
+  // Parameters (the current linearization point)
+  Eigen::VectorXd variables_;
+
+  // Callback we pass to the QP solver
+  QPInteriorPointSolver::LoggingCallback qp_logger_callback_;
+};
+
+/*
+ * Some exceptions we can throw.
+ */
+
+// Initial guess is not feasible according to constraints.
+struct InfeasibleGuess : public std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
+// Failed to factorize system.
+struct FailedFactorization : public std::runtime_error {
+  using std::runtime_error::runtime_error;
 };
 
 //
@@ -357,16 +443,16 @@ template <size_t ResidualDim, size_t NumParams>
 double Residual<ResidualDim, NumParams>::Error(const Eigen::VectorXd& params) const {
   const ParamType relevant_params = GetParamSlice(params);
   const ResidualType err = function(relevant_params, nullptr);
-  return err.squaredNorm();
+  return 0.5 * err.squaredNorm();
 }
 
 // TODO(gareth): Probably faster to associate a dimension to each variable,
 // in the style of GTSAM, so that we can do block-wise updates. For now this
 // suits the small problem size I am doing.
 template <size_t ResidualDim, size_t NumParams>
-void Residual<ResidualDim, NumParams>::UpdateSystem(const Eigen::VectorXd& params,
-                                                    Eigen::MatrixXd* const H,
-                                                    Eigen::VectorXd* const b) const {
+double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& params,
+                                                       Eigen::MatrixXd* const H,
+                                                       Eigen::VectorXd* const b) const {
   ASSERT(H != nullptr);
   ASSERT(b != nullptr);
   ASSERT(H->rows() == H->cols());
@@ -387,10 +473,9 @@ void Residual<ResidualDim, NumParams>::UpdateSystem(const Eigen::VectorXd& param
     ASSERT(row_global < H->rows(), "Index %i exceeds the bounds of the hessian (rows = %i)",
            row_global, H->rows());
     for (int col_local = 0; col_local <= row_local; ++col_local) {
-      // pull and check the column index as well
+      // pull column index
+      // because col_local <= row_local, we already checked this global index
       const int col_global = index[col_local];
-      ASSERT(col_global < H->rows(), "Index %i exceeds the bounds of the hessian (rows = %i)",
-             col_global, H->rows());
 
       // each param is a single column, so we can just do dot product
       const double JtT = J.col(row_local).dot(J.col(col_local));
@@ -403,6 +488,28 @@ void Residual<ResidualDim, NumParams>::UpdateSystem(const Eigen::VectorXd& param
     }
     // Also update the right hand side vector `b`.
     b->operator()(row_global) += J.col(row_local).dot(r);
+  }
+  return 0.5 * r.squaredNorm();
+}
+
+template <size_t ResidualDim, size_t NumParams>
+void Residual<ResidualDim, NumParams>::UpdateJacobian(
+    const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
+    Eigen::VectorBlock<Eigen::VectorXd> b_out) const {
+  ASSERT(ResidualDim == b_out.rows());
+  ASSERT(ResidualDim == J_out.rows());
+  // Collect params.
+  const ParamType relevant_params = GetParamSlice(params);
+
+  // Evaluate, and copy jacobian back using indices.
+  JacobianType J;
+  b_out.noalias() = function(relevant_params, &J);
+
+  for (int col_local = 0; col_local < NumParams; ++col_local) {
+    const int col_global = index[col_local];
+    ASSERT(col_global < J_out.cols(), "Index %i exceeds the size of the Jacobian (cols = %i)",
+           col_global);
+    J_out.col(col_global).noalias() = J.col(col_local);
   }
 }
 

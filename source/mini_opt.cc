@@ -12,7 +12,7 @@ ResidualBase::~ResidualBase() {}
 
 bool LinearInequalityConstraint::IsFeasible(double x) const {
   // There might be an argument to be made we should tolerate some epsilon > 0 here?
-  return a * x - b >= 0.0;
+  return a * x - b < 0.0;
 }
 
 QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem) : p_(problem) {
@@ -60,6 +60,18 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem) : p_(problem) {
   delta_.resizeLike(variables_);
   delta_affine_.resizeLike(variables_);
   delta_affine_.setZero();
+
+  const bool check_feasible = false;  // TODO(gareth): Param?
+  for (const LinearInequalityConstraint& c : p_.constraints) {
+    ASSERT(c.variable < dims_.N, "Constraint index is out of bounds");
+    const bool is_feasible = c.IsFeasible(variables_[c.variable]);
+    if (!is_feasible && check_feasible) {
+      std::stringstream ss;
+      ss << "Constraint is not feasible: " << c.a << " * x[" << c.variable << "] + " << c.b
+         << " >= 0, x = " << variables_[c.variable];
+      throw InfeasibleGuess(ss.str());
+    }
+  }
 }
 
 // Assert params are in valid range.
@@ -72,7 +84,8 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
   ASSERT(params.max_iterations > 0);
 }
 
-QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(const Params& params) {
+QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
+    const QPInteriorPointSolver::Params& params) {
   CheckParams(params);
 
   // on the first iteration, the residual needs to be filled first
@@ -249,12 +262,12 @@ void QPInteriorPointSolver::ComputeLDLT() {
     H_(c.variable, c.variable) += c.a * (z[i] / s[i]) * c.a;
   }
 
-  // factorize, TODO(gareth): preallocate ldlt.
+  // factorize, TODO(gareth): preallocate ldlt...
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
     std::stringstream ss;
-    ss << "Failed to solve:\n" << H_.format(kMatrixFmt) << "\n";
-    throw std::runtime_error(ss.str());
+    ss << "Failed to solve system:\n" << H_.format(kMatrixFmt) << "\n";
+    throw FailedFactorization(ss.str());
   }
 
   // compute H^-1
@@ -509,6 +522,82 @@ std::ostream& operator<<(std::ostream& stream,
       break;
   }
   return stream;
+}
+
+ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem* const problem)
+    : p_(problem) {
+  ASSERT(p_ != nullptr);
+  ASSERT(p_->dimension > 0, "Need at least one variable");
+
+  // allocate space
+  qp_.G.resize(p_->dimension, p_->dimension);
+  qp_.c.resize(p_->dimension);
+
+  // determine the size of the equality constraint matrix
+  std::size_t total_eq_size = 0;
+  for (const ResidualBase::unique_ptr& residual : p_->equality_constraints) {
+    total_eq_size += residual->Dimension();
+  }
+  qp_.A_eq.resize(total_eq_size, p_->dimension);
+  qp_.b_eq.resize(total_eq_size);
+
+  // we'll fill these out later
+  qp_.constraints.reserve(p_->inequality_constraints.size());
+
+  // leave uninitialized, we'll fill this in later
+  variables_.resize(p_->dimension);
+}
+
+void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
+  // zero out the linear system before adding all the costs to it
+  qp_.G.setZero();
+  qp_.c.setZero();
+  double total_l2 = 0;
+  for (const ResidualBase::unique_ptr& cost : p_->costs) {
+    total_l2 += cost->UpdateHessian(variables_, &qp_.G, &qp_.c);
+  }
+
+  // linearize equality constraints
+  qp_.A_eq.setZero();
+  qp_.b_eq.setZero();
+  int row = 0;
+  for (const ResidualBase::unique_ptr& eq : p_->equality_constraints) {
+    const int dim = static_cast<int>(eq->Dimension());
+    eq->UpdateJacobian(variables_, qp_.A_eq.middleRows(row, dim), qp_.b_eq.segment(row, dim));
+    row += dim;
+  }
+
+  // shift constraints to the new linearization point:
+  qp_.constraints.clear();
+  for (const LinearInequalityConstraint& c : p_->inequality_constraints) {
+    qp_.constraints.push_back(c.ShiftTo(variables_));
+  }
+
+  // TODO(gareth): Cache this object!
+  // tune all these params.
+  QPInteriorPointSolver solver(qp_);
+  solver.SetLoggerCallback(qp_logger_callback_);
+
+  QPInteriorPointSolver::Params params{};
+  params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
+  params.max_iterations = 10;
+  params.termination_kkt2_tol = 1.0e-5;
+
+  // solve it
+  const QPInteriorPointSolver::TerminationState term_state = solver.Solve(params);
+
+  std::cout << "error before = " << total_l2 << std::endl;
+  std::cout << "termination state = " << term_state << std::endl;
+
+  // get the update and retract it onto the state
+  variables_ += solver.x_block();
+
+  // compute the error after
+  double total_l2_after = 0;
+  for (const ResidualBase::unique_ptr& cost : p_->costs) {
+    total_l2_after += cost->Error(variables_);
+  }
+  std::cout << "error after = " << total_l2_after << std::endl;
 }
 
 }  // namespace mini_opt

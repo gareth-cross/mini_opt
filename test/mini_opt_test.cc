@@ -71,7 +71,7 @@ TEST(MiniOptTest, TestStaticResidualSimple) {
   ASSERT_EQ(expected_error.squaredNorm(), res.Error(global_params));
 
   // update
-  res.UpdateSystem(global_params, &H, &b);
+  res.UpdateHessian(global_params, &H, &b);
 
   const auto H_full = H.selfadjointView<Eigen::Lower>().toDenseMatrix();
   ASSERT_EIGEN_NEAR(J.transpose() * J, H_full, tol::kPico);
@@ -100,7 +100,7 @@ TEST(MiniOptTest, TestStaticResidualOutOfOrder) {
   ASSERT_EQ(expected_error.squaredNorm(), res.Error(global_params));
 
   // update
-  res.UpdateSystem(global_params, &H, &b);
+  res.UpdateHessian(global_params, &H, &b);
 
   // check that it agrees after remapping
   const auto H_full = H.selfadjointView<Eigen::Lower>().toDenseMatrix();
@@ -131,7 +131,7 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
   ASSERT_EQ(expected_error.squaredNorm(), res.Error(global_params));
 
   // update
-  res.UpdateSystem(global_params, &H, &b);
+  res.UpdateHessian(global_params, &H, &b);
 
   // check that top half is zero
   for (int col = 0; col < H.cols(); ++col) {
@@ -146,7 +146,7 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
                     tol::kPico);
   ASSERT_EIGEN_NEAR(J.transpose() * expected_error, local_D_global * b, tol::kPico);
 
-  // check that other cells were left at zero by UpdateSystem
+  // check that other cells were left at zero by UpdateHessian
   const auto H_empty = (H.selfadjointView<Eigen::Lower>().toDenseMatrix() -
                         (J * local_D_global).transpose() * (J * local_D_global))
                            .eval();
@@ -220,7 +220,8 @@ class QPSolverTest : public ::testing::Test {
     ASSERT_EQ(total_dims, solver.variables_.rows());
     ASSERT_EQ(total_dims, solver.delta_.rows());
     ASSERT_EQ(total_dims, solver.r_.rows());
-    ASSERT_EQ(static_cast<Index>(solver.dims_.N + solver.dims_.K), solver.H_.rows());  //  only x and y
+    ASSERT_EQ(static_cast<Index>(solver.dims_.N + solver.dims_.K),
+              solver.H_.rows());  //  only x and y
 
     // build the full system
     MatrixXd H_full;
@@ -351,7 +352,7 @@ class QPSolverTest : public ::testing::Test {
 
     // Set up problem
     QP qp{1};
-    res.UpdateSystem(initial_values, &qp.G, &qp.c);
+    res.UpdateHessian(initial_values, &qp.G, &qp.c);
     qp.constraints.emplace_back(Var(0) <= 4);
 
     QPInteriorPointSolver solver(qp);
@@ -392,7 +393,7 @@ class QPSolverTest : public ::testing::Test {
 
     // Set up problem
     QP qp{2};
-    res.UpdateSystem(initial_values, &qp.G, &qp.c);
+    res.UpdateHessian(initial_values, &qp.G, &qp.c);
     qp.constraints.emplace_back(Var(0) <= 1.0);
     qp.constraints.emplace_back(Var(1) >= -3.0);
 
@@ -429,7 +430,7 @@ class QPSolverTest : public ::testing::Test {
 
     // Set up problem w/ only one relevant constraint
     QP qp{3};
-    res.UpdateSystem(Vector3d::Zero(), &qp.G, &qp.c);
+    res.UpdateHessian(Vector3d::Zero(), &qp.G, &qp.c);
     qp.constraints.emplace_back(Var(1) >= -2.0);
     qp.constraints.emplace_back(Var(0) >= -3.5);  //  irrelevant
 
@@ -651,5 +652,21 @@ TEST_FIXTURE(QPSolverTest, TestWithEqualitiesOnly)
 TEST_FIXTURE(QPSolverTest, TestWithFullyConstrainedEqualities)
 TEST_FIXTURE(QPSolverTest, TestWithInequalitiesAndEqualities)
 TEST_FIXTURE(QPSolverTest, TestGeneratedProblems)
+
+// Test constrained non-linear least squares.
+class ConstrainedNLSTest : public ::testing::Test {
+ public:
+  // Test a simple non-linear least squares problem.
+  void TestActuatorChain() {
+    // We have a chain of three rotational actuators, at the end of which we have an effector.
+    Residual<2, 3> target_pos;
+    target_pos.index = {{0, 1, 2}};
+    target_pos.function = [](const Vector3d& theta, Matrix<double, 2, 3>* const J) -> Vector2d {
+
+    };
+  }
+};
+
+TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
 }  // namespace mini_opt
