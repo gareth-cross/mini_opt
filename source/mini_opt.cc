@@ -81,12 +81,6 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
 QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(const Params& params) {
   CheckParams(params);
 
-  if (false) {
-    EvaluateKKTConditions();
-    ComputeLDLT();
-    SolveForUpdate(0.0);
-  }
-
   // on the first iteration, the residual needs to be filled first
   EvaluateKKTConditions();
 
