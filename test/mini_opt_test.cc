@@ -5,6 +5,7 @@
 #include <chrono>
 #include <random>
 
+#include "so3.hpp"  //  from geometry_utils
 #include "test_utils.hpp"
 
 namespace mini_opt {
@@ -358,10 +359,9 @@ class QPSolverTest : public ::testing::Test {
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     const auto term_state = solver.Solve(params);
-    PRINT(term_state);
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
     ASSERT_NEAR(0.0, solver.r_.squaredNorm(), tol::kPico);
     ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro);
     ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro);
@@ -400,10 +400,9 @@ class QPSolverTest : public ::testing::Test {
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     const auto term_state = solver.Solve(params);
-    PRINT(term_state);
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
     ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro);
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), 1.0e-8);
     ASSERT_TRUE((solver.z_block().array() > 1).all());
@@ -437,10 +436,9 @@ class QPSolverTest : public ::testing::Test {
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     const auto term_state = solver.Solve(params);
-    PRINT(term_state);
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
     ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro);
     ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro);  // first constraint is active
     ASSERT_NEAR(0.0, solver.z_block()[1], tol::kMicro);  // second constraint is inactive
@@ -498,10 +496,9 @@ class QPSolverTest : public ::testing::Test {
     params.termination_kkt2_tol = tol::kPico;
     params.max_iterations = 1;
     const auto term_state = solver.Solve(params);
-    PRINT(term_state);
 
     // should be able to satisfy immediately
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
     ASSERT_EIGEN_NEAR(-qp.b_eq, solver.x_block(), tol::kNano);
     ASSERT_TRUE((solver.y_block().array() > tol::kCenti).all());
   }
@@ -536,10 +533,9 @@ class QPSolverTest : public ::testing::Test {
     params.sigma_reduction = 0.5;
 
     const auto term_state = solver.Solve(params);
-    PRINT(term_state);
 
     // both inequalities should be active
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
     ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro);
     ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), tol::kMicro);
   }
@@ -617,8 +613,8 @@ class QPSolverTest : public ::testing::Test {
       // a strategy for this, but for now I'm gonna crank this up.
       params.max_iterations = 30;
 
+      // can turn on for debugging...
       if (p == -1) {
-        // can turn on for debugging...
         PRINT_MATRIX(x_solution);
         for (const LinearInequalityConstraint& c : qp.constraints) {
           std::cout << "x[" << c.variable << "] * " << c.a << " + " << c.b << " >= 0\n";
@@ -657,12 +653,34 @@ class ConstrainedNLSTest : public ::testing::Test {
   // Test a simple non-linear least squares problem.
   void TestActuatorChain() {
     // We have a chain of three rotational actuators, at the end of which we have an effector.
-    //    Residual<2, 3> target_pos;
-    //    target_pos.index = {{0, 1, 2}};
-    //    target_pos.function = [](const Vector3d& theta, Matrix<double, 2, 3>* const J) -> Vector2d
-    //    {
+    const double length_0 = 0.4;
+    const double length_1 = 0.5;
+    const double length_2 = 0.25;
 
-    //    };
+    Residual<2, 3> target_pos;
+    target_pos.index = {{0, 1, 2}};
+    target_pos.function = [&](const Vector3d& theta, Matrix<double, 2, 3>* const J) -> Vector2d {
+      // convert to rotation elements
+      const math::SO3FromEulerAngles_<double> rot0 =
+          math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[0]);
+      const math::SO3FromEulerAngles_<double> rot1 =
+          math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[1]);
+      const math::SO3FromEulerAngles_<double> rot2 =
+          math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[2]);
+
+      // rotate arm lengths
+      const Vector3d base_t_joint1 = Vector3d::UnitX() * length_0;
+      const Vector3d joint1_t_joint2 = Vector3d::UnitX() * length_1;
+      const Vector3d joint2_t_effector = Vector3d::UnitX() * length_2;
+
+      // compute the chained derivative
+      if (J) {
+      }
+      // chain them together
+      return (rot0.q * base_t_joint1 + (rot0.q * rot1.q) * joint1_t_joint2 +
+              (rot0.q * rot1.q * rot2.q) * joint2_t_effector)
+          .head<2>();
+    };
   }
 };
 
