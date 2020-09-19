@@ -154,6 +154,43 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
   ASSERT_EIGEN_NEAR(MatrixXd::Zero(7, 7), H_empty, 0.0);
 }
 
+// Test with dynamic # of params.
+TEST(MiniOptTest, TestDynamicParameterVector) {
+  Residual<2, Dynamic> res;
+  res.index = {0, 1, 2};
+  res.function = [&](const VectorXd& p, Matrix<double, 2, Dynamic>* const J) -> Vector2d {
+    Matrix<double, 2, 3> J_static;
+    const auto r = DummyFunction(p, J ? &J_static : nullptr);
+    if (J) {
+      ASSERT(2 == J->rows());
+      ASSERT(3 == J->cols());
+      J->noalias() = J_static;
+    }
+    return r;
+  };
+
+  // pick some params for xyz
+  const Vector3d params_xyz = {.099, -0.5, 0.76};
+
+  Matrix<double, 2, 3> J;
+  const Vector2d expected_error = DummyFunction(params_xyz, &J);
+
+  // allocate H and b
+  MatrixXd H = Matrix3d::Zero();
+  VectorXd b = Vector3d::Zero();
+
+  // check error
+  const VectorXd global_params = params_xyz;
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.Error(global_params));
+
+  // update
+  res.UpdateHessian(global_params, &H, &b);
+
+  const auto H_full = H.selfadjointView<Eigen::Lower>().toDenseMatrix();
+  ASSERT_EIGEN_NEAR(J.transpose() * J, H_full, tol::kPico);
+  ASSERT_EIGEN_NEAR(J.transpose() * expected_error, b, tol::kPico);
+}
+
 // Tests for the QP interior point solver.
 class QPSolverTest : public ::testing::Test {
  public:
@@ -648,21 +685,21 @@ TEST_FIXTURE(QPSolverTest, TestWithFullyConstrainedEqualities)
 TEST_FIXTURE(QPSolverTest, TestWithInequalitiesAndEqualities)
 TEST_FIXTURE(QPSolverTest, TestGeneratedProblems)
 
-struct Link {
+// TODO(gareth): Template?
+struct Pose {
   // Construct w/ rotation and translation.
-  Link(const math::Quaternion<double>& q, const math::Vector<double, 3>& t)
-      : previous_R_current(q), previous_t_current(t) {}
+  Pose(const math::Quaternion<double>& q, const math::Vector<double, 3>& t)
+      : rotation(q), translation(t) {}
 
-  // Joint angles in quaternion form.
-  math::Quaternion<double> previous_R_current;
+  // Rotation.
+  math::Quaternion<double> rotation;
 
-  // Position of this joint in the parent frame.
-  math::Vector<double, 3> previous_t_current;
+  // Translation.
+  math::Vector<double, 3> translation;
 
   // Multiply together.
-  Link operator*(const Link& other) const {
-    return Link(previous_R_current * other.previous_R_current,
-                previous_t_current + previous_R_current * other.previous_t_current);
+  Pose operator*(const Pose& other) const {
+    return Pose(rotation * other.rotation, translation + rotation * other.translation);
   }
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
@@ -671,7 +708,7 @@ struct Link {
 template <typename T>
 using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
-struct EffectorComputation {
+struct ChainComputationBuffer {
   // Derivatives of `root_R_effector` wrt joint angles.
   math::Matrix<double, 3, Eigen::Dynamic> orientation_D_angles;
 
@@ -686,11 +723,9 @@ struct EffectorComputation {
 
   // Buffer for translations.
   math::Matrix<double, 3, Eigen::Dynamic> i_t_end;
-
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 };
 
-void ComputeEffector(const std::vector<Link>& links, EffectorComputation* const c) {
+void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const c) {
   if (links.empty()) {
     // no iteration to do
     c->orientation_D_angles.resize(3, 0);
@@ -705,55 +740,56 @@ void ComputeEffector(const std::vector<Link>& links, EffectorComputation* const 
   const auto k_hat = math::Vector<double, 3>::UnitZ();
   const int N = static_cast<int>(links.size());
 
-  // Compute forward rotations.
-  // Bucket `i` stores start_R_[i+1] (we don't store the first one, since it would be identity)
-  c->start_R_i_plus_1.resize(N);
-  c->start_R_i_plus_1[0] = links[0].previous_R_current;
-  for (int i = 1; i < N; ++i) {
-    c->start_R_i_plus_1[i] = c->start_R_i_plus_1[i - 1] * links[i].previous_R_current;
-  }
-
   // Compute backwards rotations (right to left)
   // Bucket `i` stores [i]_R_end. We don't store N_R_end since this is identity.
   c->i_R_end.resize(N);
-  c->i_R_end[N - 1] = links[N - 1].previous_R_current;
+  c->i_R_end[N - 1] = links[N - 1].rotation;  // previous_R_current
   for (int i = N - 2; i >= 0; --i) {
-    c->i_R_end[i] = links[i].previous_R_current * c->i_R_end[i + 1];
+    // rotation = previous_R_current
+    c->i_R_end[i] = links[i].rotation * c->i_R_end[i + 1];
   }
 
   // Now compute translations.
   // We are multiplying the transforms, going right to left. The last element (i==0) is
   // root_t_effector.
   c->i_t_end.resize(3, N);
-  c->i_t_end.col(N - 1) = links[N - 1].previous_t_current;
+  c->i_t_end.col(N - 1) = links[N - 1].translation;  //  previous_t_current
   for (int i = N - 2; i >= 0; --i) {
-    c->i_t_end.col(i).noalias() =
-        links[i].previous_R_current * c->i_t_end.col(i + 1) + links[i].previous_t_current;
+    // rotation = previous_R_current
+    c->i_t_end.col(i).noalias() = links[i].rotation * c->i_t_end.col(i + 1) + links[i].translation;
+  }
+
+  // Compute forward rotations.
+  // Bucket `i` stores start_R_[i+1] (we don't store the first one, since it would be identity)
+  c->start_R_i_plus_1.resize(N);
+  c->start_R_i_plus_1[0] = links[0].rotation;  //  previous_R_current
+  for (int i = 1; i < N; ++i) {
+    c->start_R_i_plus_1[i] = c->start_R_i_plus_1[i - 1] * links[i].rotation;  // previous_R_current
   }
 
   // Compute derivative of translation at the end wrt angle i.
   // d(0_t_N) / d(theta_[i]) = start_R_i * d(i_R_[i+1] * [i+1]_t_N) / d(theta_[i])
-  //  = start_D_[i+1] * [-[i+1]_t_N]_x * k_hat
-  c->translation_D_angles.resize(3, N);
+  //  = start_D_[i+1] * [-[i+1]_t_N]_x
+  c->translation_D_angles.resize(3, N * 3);
   for (int i = 0; i < N - 1; ++i) {
-    c->translation_D_angles.col(i).noalias() =
-        c->start_R_i_plus_1[i] * c->i_t_end.col(i + 1).cross(-k_hat);
+    c->translation_D_angles.middleCols(i * 3, 3).noalias() =
+        c->start_R_i_plus_1[i].matrix() * math::Skew3(-c->i_t_end.col(i + 1));
   }
-  c->translation_D_angles.col(N - 1).setZero();  //  last angle does not affect translation
+  c->translation_D_angles.rightCols<3>().setZero();  //  last angle does not affect translation
 
-  // Compute derivative of rotation at the end wrt angle i.
-  c->orientation_D_angles.resize(3, N);
+  //// Compute derivative of rotation at the end wrt angle i.
+  c->orientation_D_angles.resize(3, N * 3);
   for (int i = 0; i < N - 1; ++i) {
-    //  d(root_R_eff)/d(theta_i) = n_R_[i+1]
-    c->orientation_D_angles.col(i).noalias() = c->i_R_end[i + 1].conjugate() * k_hat;
+    // d(root_R_eff)/d(theta_i) = n_R_[i+1]
+    c->orientation_D_angles.middleCols(i * 3, 3).noalias() = c->i_R_end[i + 1].conjugate().matrix();
   }
-  c->orientation_D_angles.col(N - 1) = k_hat;
+  c->orientation_D_angles.rightCols<3>().setIdentity();
 }
 
 TEST(LinkTest, TestRotation) {
   // create some links
   // clang-format off
-  const std::vector<Link> links = {
+  const std::vector<Pose> links = {
     {math::QuaternionExp(Vector3d{-0.5, 0.5, 0.3}), {1.0, 0.5, 2.0}}, 
     {math::QuaternionExp(Vector3d{0.8, 0.5, 1.2}), {0.5, 0.75, -0.5}},
     {math::QuaternionExp(Vector3d{1.5, -0.2, 0.0}), {1.2, -0.5, 0.1}},
@@ -762,34 +798,36 @@ TEST(LinkTest, TestRotation) {
   // clang-format on
 
   const auto translation_lambda = [&](const VectorXd& angles) -> Vector3d {
-    std::vector<Link> links_copied = links;
-    for (int i = 0; i < angles.rows(); ++i) {
-      links_copied[i].previous_R_current *= math::QuaternionExp(Vector3d::UnitZ() * angles[i]);
+    ASSERT(angles.rows() == 12);
+    std::vector<Pose> links_copied = links;
+    for (int i = 0; i < angles.rows() / 3; ++i) {
+      links_copied[i].rotation *= math::QuaternionExp(angles.segment(i * 3, 3));
     }
-    EffectorComputation c{};
-    ComputeEffector(links_copied, &c);
+    ChainComputationBuffer c{};
+    ComputeChain(links_copied, &c);
     return c.i_t_end.leftCols<1>();
   };
 
   const auto rotation_lambda = [&](const VectorXd& angles) -> Quaterniond {
-    std::vector<Link> links_copied = links;
-    for (int i = 0; i < angles.rows(); ++i) {
-      links_copied[i].previous_R_current *= math::QuaternionExp(Vector3d::UnitZ() * angles[i]);
+    ASSERT(angles.rows() == 12);
+    std::vector<Pose> links_copied = links;
+    for (int i = 0; i < angles.rows() / 3; ++i) {
+      links_copied[i].rotation *= math::QuaternionExp(angles.segment(i * 3, 3));
     }
-    EffectorComputation c{};
-    ComputeEffector(links_copied, &c);
+    ChainComputationBuffer c{};
+    ComputeChain(links_copied, &c);
     return c.i_R_end.front();
   };
 
   // compute numerically
-  const Matrix<double, 3, 4> J_trans_numerical =
-      math::NumericalJacobian(Vector4d::Zero(), translation_lambda);
-  const Matrix<double, 3, 4> J_trans_rotational =
-      math::NumericalJacobian(Vector4d::Zero(), rotation_lambda);
+  const Matrix<double, 3, 12> J_trans_numerical =
+      math::NumericalJacobian(Matrix<double, 12, 1>::Zero(), translation_lambda);
+  const Matrix<double, 3, 12> J_trans_rotational =
+      math::NumericalJacobian(Matrix<double, 12, 1>::Zero(), rotation_lambda);
 
   // check against anlytical
-  EffectorComputation c{};
-  ComputeEffector(links, &c);
+  ChainComputationBuffer c{};
+  ComputeChain(links, &c);
 
   ASSERT_EIGEN_NEAR(J_trans_numerical, c.translation_D_angles, tol::kNano);
   PRINT_MATRIX(J_trans_numerical);
@@ -800,45 +838,61 @@ TEST(LinkTest, TestRotation) {
   PRINT_MATRIX(c.orientation_D_angles);
 }
 
+struct ActuatorChain {
+  // Current poses in the chain.
+  std::vector<Pose> links;
+
+  std::vector<Pose> links_updated_;
+
+  // Storage for operations.
+  ChainComputationBuffer buffer_{};
+
+  // Compute rotation and translation of the effector.
+  Pose ComputeEffector(const math::Vector<double>& angles,
+                       math::Matrix<double, 6, Eigen::Dynamic>* const J) {
+    ASSERT(static_cast<Eigen::Index>(links.size()) == angles.rows());
+
+    // Compute the effector pose - update the transforms.
+    links_updated_.clear();
+    links_updated_.reserve(links.size());
+    for (std::size_t i = 0; i < links.size(); ++i) {
+      // Split up rotation and translation so we aren't always copying them together?
+      links_updated_[i].rotation =
+          links[i].rotation * math::QuaternionExp(Vector3d::UnitZ() * angles[i]);
+      links_updated_[i].translation = links[i].translation;
+    }
+
+    // linearize
+    ComputeChain(links_updated_, &buffer_);
+    if (J) {
+      // todo - this should be pre-allocated
+      J->resize(6, angles.rows());
+      J->topRows<3>() = buffer_.orientation_D_angles;
+      J->bottomRows<3>() = buffer_.translation_D_angles;
+    }
+    return Pose{buffer_.i_R_end.front(), buffer_.i_t_end.leftCols<1>()};
+  }
+};
+
 // Test constrained non-linear least squares.
 class ConstrainedNLSTest : public ::testing::Test {
  public:
   // Test a simple non-linear least squares problem.
-  // void TestActuatorChain() {
-  //  // We have a chain of three rotational actuators, at the end of which we have an effector.
-  //  const double length_0 = 0.4;
-  //  const double length_1 = 0.5;
-  //  const double length_2 = 0.25;
+  void TestActuatorChain() {
+    // We have a chain of three rotational actuators, at the end of which we have an effector.
+    // Two actuators can effectuate translation, whereas the last one can only rotate the effector.
+    ActuatorChain chain{};
+    chain.links.emplace_back(math::QuaternionExp(Vector3d::UnitZ() * M_PI / 4),
+                             Vector3d{0.25, 0.1, 0.0});
+    chain.links.emplace_back(math::QuaternionExp(Vector3d::UnitZ() * 0.0),
+                             Vector3d{0.5, 0.05, 0.0});
+    chain.links.emplace_back(math::QuaternionExp(Vector3d::UnitZ() * -M_PI / 6),
+                             Vector3d{0.4, 0.0, 0.0});
 
-  //  // std::vector<>
-
-  //  Residual<2, 3> target_pos;
-  //  target_pos.index = {{0, 1, 2}};
-  //  target_pos.function = [&](const Vector3d& theta, Matrix<double, 2, 3>* const J) -> Vector2d {
-  //    // convert to rotation elements
-  //    const math::SO3FromEulerAngles_<double> rot0 =
-  //        math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[0]);
-  //    const math::SO3FromEulerAngles_<double> rot1 =
-  //        math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[1]);
-  //    const math::SO3FromEulerAngles_<double> rot2 =
-  //        math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[2]);
-
-  //    // rotate arm lengths
-  //    const Vector3d base_t_joint1 = Vector3d::UnitX() * length_0;
-  //    const Vector3d joint1_t_joint2 = Vector3d::UnitX() * length_1;
-  //    const Vector3d joint2_t_effector = Vector3d::UnitX() * length_2;
-
-  //    // compute the chained derivative
-  //    if (J) {
-  //    }
-  //    // chain them together
-  //    return (rot0.q * base_t_joint1 + (rot0.q * rot1.q) * joint1_t_joint2 +
-  //            (rot0.q * rot1.q * rot2.q) * joint2_t_effector)
-  //        .head<2>();
-  //  };
-  //}
+    // make a cost that we want to achieve a specific point
+  }
 };
 
-// TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
+TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
 }  // namespace mini_opt
