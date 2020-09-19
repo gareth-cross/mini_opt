@@ -29,7 +29,7 @@ struct ResidualBase {
   virtual ~ResidualBase();
 
   // Dimension of the residual vector.
-  virtual std::size_t Dimension() const = 0;
+  virtual int Dimension() const = 0;
 
   // Get the error: (1/2) * h(x)^T * h(x)
   virtual double Error(const Eigen::VectorXd& params) const = 0;
@@ -44,22 +44,33 @@ struct ResidualBase {
                               Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
 };
 
+template <int N>
+struct IndexType {
+  using type = std::array<int, static_cast<std::size_t>(N)>;
+};
+
+template <>
+struct IndexType<Eigen::Dynamic> {
+  using type = std::vector<int>;
+};
+
+
 // Simple statically sized residual.
-template <size_t ResidualDim, size_t NumParams>
+template <int ResidualDim, int NumParams>
 struct Residual : public ResidualBase {
   using ParamType = Eigen::Matrix<double, NumParams, 1>;
   using ResidualType = Eigen::Matrix<double, ResidualDim, 1>;
   using JacobianType = Eigen::Matrix<double, ResidualDim, NumParams>;
 
   // Variables we are touching, one per column in the jacobian.
-  std::array<int, NumParams> index;
+  typename IndexType<NumParams>::type index;
 
   // Function that evaluates the residual given the params, and returns an error vector and
   // optionally the jacobian via the output argument.
   std::function<ResidualType(const ParamType& params, JacobianType* const J_out)> function;
 
   // Return constant dimension.
-  std::size_t Dimension() const override { return ResidualDim; }
+  int Dimension() const override { return ResidualDim; }
 
   // Map params from the global state vector to those required for this function, and
   // then evaluate the function.
@@ -424,12 +435,20 @@ struct FailedFactorization : public std::runtime_error {
 // TODO(gareth): Could put these in a separate header.
 //
 
-template <size_t ResidualDim, size_t NumParams>
+// Turn off warnings about constant if statements.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4127)
+#endif  // _MSC_VER
+
+template <int ResidualDim, int NumParams>
 typename Residual<ResidualDim, NumParams>::ParamType
 Residual<ResidualDim, NumParams>::GetParamSlice(const Eigen::VectorXd& params) const {
   ParamType sliced;
-  static_assert(ParamType::RowsAtCompileTime == NumParams, "");
-  for (std::size_t local = 0; local < NumParams; ++local) {
+  if (NumParams == Eigen::Dynamic) {
+    sliced.resize(index.size());
+  }
+  for (std::size_t local = 0; local < index.size(); ++local) {
     const int i = index[local];
     ASSERT(i >= 0);
     ASSERT(i < params.rows(), "Index %i exceeds the # of provided params, which is %i", i,
@@ -439,7 +458,7 @@ Residual<ResidualDim, NumParams>::GetParamSlice(const Eigen::VectorXd& params) c
   return sliced;
 }
 
-template <size_t ResidualDim, size_t NumParams>
+template <int ResidualDim, int NumParams>
 double Residual<ResidualDim, NumParams>::Error(const Eigen::VectorXd& params) const {
   const ParamType relevant_params = GetParamSlice(params);
   const ResidualType err = function(relevant_params, nullptr);
@@ -449,7 +468,7 @@ double Residual<ResidualDim, NumParams>::Error(const Eigen::VectorXd& params) co
 // TODO(gareth): Probably faster to associate a dimension to each variable,
 // in the style of GTSAM, so that we can do block-wise updates. For now this
 // suits the small problem size I am doing.
-template <size_t ResidualDim, size_t NumParams>
+template <int ResidualDim, int NumParams>
 double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& params,
                                                        Eigen::MatrixXd* const H,
                                                        Eigen::VectorXd* const b) const {
@@ -463,10 +482,14 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
 
   // Evaluate the function and its derivative.
   JacobianType J;
+  // Microsoft doesn't like that this if statement is constexpr.
+  if (NumParams == Eigen::Dynamic) {
+    J.resize(ResidualDim, index.size());
+  }
   const ResidualType r = function(relevant_params, &J);
 
   // Add contributions to the hessian, only lower part.
-  constexpr int N = static_cast<int>(NumParams);
+  const int N = static_cast<int>(index.size());
   for (int row_local = 0; row_local < N; ++row_local) {
     // get index mapping into the full system
     const int row_global = index[row_local];
@@ -492,7 +515,7 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
   return 0.5 * r.squaredNorm();
 }
 
-template <size_t ResidualDim, size_t NumParams>
+template <int ResidualDim, int NumParams>
 void Residual<ResidualDim, NumParams>::UpdateJacobian(
     const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
     Eigen::VectorBlock<Eigen::VectorXd> b_out) const {
@@ -503,14 +526,21 @@ void Residual<ResidualDim, NumParams>::UpdateJacobian(
 
   // Evaluate, and copy jacobian back using indices.
   JacobianType J;
+  if (NumParams == Eigen::Dynamic) {
+    J.resize(ResidualDim, index.size());
+  }
   b_out.noalias() = function(relevant_params, &J);
 
-  for (int col_local = 0; col_local < static_cast<int>(NumParams); ++col_local) {
+  for (int col_local = 0; col_local < static_cast<int>(index.size()); ++col_local) {
     const int col_global = index[col_local];
     ASSERT(col_global < J_out.cols(), "Index %i exceeds the size of the Jacobian (cols = %i)",
            col_global);
     J_out.col(col_global).noalias() = J.col(col_local);
   }
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif  // _MSC_VER
 
 }  // namespace mini_opt
