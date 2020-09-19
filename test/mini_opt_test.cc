@@ -5,6 +5,7 @@
 #include <chrono>
 #include <random>
 
+#include "numerical_derivative.hpp"
 #include "so3.hpp"  //  from geometry_utils
 #include "test_utils.hpp"
 
@@ -647,43 +648,197 @@ TEST_FIXTURE(QPSolverTest, TestWithFullyConstrainedEqualities)
 TEST_FIXTURE(QPSolverTest, TestWithInequalitiesAndEqualities)
 TEST_FIXTURE(QPSolverTest, TestGeneratedProblems)
 
+struct Link {
+  // Construct w/ rotation and translation.
+  Link(const math::Quaternion<double>& q, const math::Vector<double, 3>& t)
+      : previous_R_current(q), previous_t_current(t) {}
+
+  // Joint angles in quaternion form.
+  math::Quaternion<double> previous_R_current;
+
+  // Position of this joint in the parent frame.
+  math::Vector<double, 3> previous_t_current;
+
+  // Multiply together.
+  Link operator*(const Link& other) const {
+    return Link(previous_R_current * other.previous_R_current,
+                previous_t_current + previous_R_current * other.previous_t_current);
+  }
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+};
+
+template <typename T>
+using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
+
+struct EffectorComputation {
+  // Derivatives of `root_R_effector` wrt joint angles.
+  math::Matrix<double, 3, Eigen::Dynamic> orientation_D_angles;
+
+  // Derivatives of `root_t_effector` wrt joint angles.
+  math::Matrix<double, 3, Eigen::Dynamic> translation_D_angles;
+
+  // Buffer for rotations of the joints, forward direction.
+  AlignedVector<math::Quaternion<double>> start_R_i_plus_1;
+
+  // Buffer for rotations of the joints, backwards direction.
+  AlignedVector<math::Quaternion<double>> i_R_end;
+
+  // Buffer for translations.
+  math::Matrix<double, 3, Eigen::Dynamic> i_t_end;
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+};
+
+void ComputeEffector(const std::vector<Link>& links, EffectorComputation* const c) {
+  if (links.empty()) {
+    // no iteration to do
+    c->orientation_D_angles.resize(3, 0);
+    c->translation_D_angles.resize(3, 0);
+    c->start_R_i_plus_1.clear();
+    c->i_R_end.clear();
+    c->i_t_end.resize(3, 0);
+    return;
+  }
+
+  // [0, 0, 1]
+  const auto k_hat = math::Vector<double, 3>::UnitZ();
+  const int N = static_cast<int>(links.size());
+
+  // Compute forward rotations.
+  // Bucket `i` stores start_R_[i+1] (we don't store the first one, since it would be identity)
+  c->start_R_i_plus_1.resize(N);
+  c->start_R_i_plus_1[0] = links[0].previous_R_current;
+  for (int i = 1; i < N; ++i) {
+    c->start_R_i_plus_1[i] = c->start_R_i_plus_1[i - 1] * links[i].previous_R_current;
+  }
+
+  // Compute backwards rotations (right to left)
+  // Bucket `i` stores [i]_R_end. We don't store N_R_end since this is identity.
+  c->i_R_end.resize(N);
+  c->i_R_end[N - 1] = links[N - 1].previous_R_current;
+  for (int i = N - 2; i >= 0; --i) {
+    c->i_R_end[i] = links[i].previous_R_current * c->i_R_end[i + 1];
+  }
+
+  // Now compute translations.
+  // We are multiplying the transforms, going right to left. The last element (i==0) is
+  // root_t_effector.
+  c->i_t_end.resize(3, N);
+  c->i_t_end.col(N - 1) = links[N - 1].previous_t_current;
+  for (int i = N - 2; i >= 0; --i) {
+    c->i_t_end.col(i).noalias() =
+        links[i].previous_R_current * c->i_t_end.col(i + 1) + links[i].previous_t_current;
+  }
+
+  // Compute derivative of translation at the end wrt angle i.
+  // d(0_t_N) / d(theta_[i]) = start_R_i * d(i_R_[i+1] * [i+1]_t_N) / d(theta_[i])
+  //  = start_D_[i+1] * [-[i+1]_t_N]_x * k_hat
+  c->translation_D_angles.resize(3, N);
+  for (int i = 0; i < N - 1; ++i) {
+    c->translation_D_angles.col(i).noalias() =
+        c->start_R_i_plus_1[i] * c->i_t_end.col(i + 1).cross(-k_hat);
+  }
+  c->translation_D_angles.col(N - 1).setZero();  //  last angle does not affect translation
+
+  // Compute derivative of rotation at the end wrt angle i.
+  c->orientation_D_angles.resize(3, N);
+  for (int i = 0; i < N - 1; ++i) {
+    //  d(root_R_eff)/d(theta_i) = n_R_[i+1]
+    c->orientation_D_angles.col(i).noalias() = c->i_R_end[i + 1].conjugate() * k_hat;
+  }
+  c->orientation_D_angles.col(N - 1) = k_hat;
+}
+
+TEST(LinkTest, TestRotation) {
+  // create some links
+  // clang-format off
+  const std::vector<Link> links = {
+    {math::QuaternionExp(Vector3d{-0.5, 0.5, 0.3}), {1.0, 0.5, 2.0}}, 
+    {math::QuaternionExp(Vector3d{0.8, 0.5, 1.2}), {0.5, 0.75, -0.5}},
+    {math::QuaternionExp(Vector3d{1.5, -0.2, 0.0}), {1.2, -0.5, 0.1}},
+    {math::QuaternionExp(Vector3d{0.2, -0.1, 0.3}), {0.1, -0.1, 0.2}}
+  };
+  // clang-format on
+
+  const auto translation_lambda = [&](const VectorXd& angles) -> Vector3d {
+    std::vector<Link> links_copied = links;
+    for (int i = 0; i < angles.rows(); ++i) {
+      links_copied[i].previous_R_current *= math::QuaternionExp(Vector3d::UnitZ() * angles[i]);
+    }
+    EffectorComputation c{};
+    ComputeEffector(links_copied, &c);
+    return c.i_t_end.leftCols<1>();
+  };
+
+  const auto rotation_lambda = [&](const VectorXd& angles) -> Quaterniond {
+    std::vector<Link> links_copied = links;
+    for (int i = 0; i < angles.rows(); ++i) {
+      links_copied[i].previous_R_current *= math::QuaternionExp(Vector3d::UnitZ() * angles[i]);
+    }
+    EffectorComputation c{};
+    ComputeEffector(links_copied, &c);
+    return c.i_R_end.front();
+  };
+
+  // compute numerically
+  const Matrix<double, 3, 4> J_trans_numerical =
+      math::NumericalJacobian(Vector4d::Zero(), translation_lambda);
+  const Matrix<double, 3, 4> J_trans_rotational =
+      math::NumericalJacobian(Vector4d::Zero(), rotation_lambda);
+
+  // check against anlytical
+  EffectorComputation c{};
+  ComputeEffector(links, &c);
+
+  ASSERT_EIGEN_NEAR(J_trans_numerical, c.translation_D_angles, tol::kNano);
+  PRINT_MATRIX(J_trans_numerical);
+  PRINT_MATRIX(c.translation_D_angles);
+
+  ASSERT_EIGEN_NEAR(J_trans_rotational, c.orientation_D_angles, tol::kNano);
+  PRINT_MATRIX(J_trans_rotational);
+  PRINT_MATRIX(c.orientation_D_angles);
+}
+
 // Test constrained non-linear least squares.
 class ConstrainedNLSTest : public ::testing::Test {
  public:
   // Test a simple non-linear least squares problem.
-  void TestActuatorChain() {
-    // We have a chain of three rotational actuators, at the end of which we have an effector.
-    const double length_0 = 0.4;
-    const double length_1 = 0.5;
-    const double length_2 = 0.25;
+  // void TestActuatorChain() {
+  //  // We have a chain of three rotational actuators, at the end of which we have an effector.
+  //  const double length_0 = 0.4;
+  //  const double length_1 = 0.5;
+  //  const double length_2 = 0.25;
 
-    Residual<2, 3> target_pos;
-    target_pos.index = {{0, 1, 2}};
-    target_pos.function = [&](const Vector3d& theta, Matrix<double, 2, 3>* const J) -> Vector2d {
-      // convert to rotation elements
-      const math::SO3FromEulerAngles_<double> rot0 =
-          math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[0]);
-      const math::SO3FromEulerAngles_<double> rot1 =
-          math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[1]);
-      const math::SO3FromEulerAngles_<double> rot2 =
-          math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[2]);
+  //  // std::vector<>
 
-      // rotate arm lengths
-      const Vector3d base_t_joint1 = Vector3d::UnitX() * length_0;
-      const Vector3d joint1_t_joint2 = Vector3d::UnitX() * length_1;
-      const Vector3d joint2_t_effector = Vector3d::UnitX() * length_2;
+  //  Residual<2, 3> target_pos;
+  //  target_pos.index = {{0, 1, 2}};
+  //  target_pos.function = [&](const Vector3d& theta, Matrix<double, 2, 3>* const J) -> Vector2d {
+  //    // convert to rotation elements
+  //    const math::SO3FromEulerAngles_<double> rot0 =
+  //        math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[0]);
+  //    const math::SO3FromEulerAngles_<double> rot1 =
+  //        math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[1]);
+  //    const math::SO3FromEulerAngles_<double> rot2 =
+  //        math::SO3FromEulerAngles(Vector3d::UnitZ() * theta[2]);
 
-      // compute the chained derivative
-      if (J) {
-      }
-      // chain them together
-      return (rot0.q * base_t_joint1 + (rot0.q * rot1.q) * joint1_t_joint2 +
-              (rot0.q * rot1.q * rot2.q) * joint2_t_effector)
-          .head<2>();
-    };
-  }
+  //    // rotate arm lengths
+  //    const Vector3d base_t_joint1 = Vector3d::UnitX() * length_0;
+  //    const Vector3d joint1_t_joint2 = Vector3d::UnitX() * length_1;
+  //    const Vector3d joint2_t_effector = Vector3d::UnitX() * length_2;
+
+  //    // compute the chained derivative
+  //    if (J) {
+  //    }
+  //    // chain them together
+  //    return (rot0.q * base_t_joint1 + (rot0.q * rot1.q) * joint1_t_joint2 +
+  //            (rot0.q * rot1.q * rot2.q) * joint2_t_effector)
+  //        .head<2>();
+  //  };
+  //}
 };
 
-TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
+// TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
 }  // namespace mini_opt
