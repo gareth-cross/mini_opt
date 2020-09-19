@@ -12,19 +12,6 @@ if(NOT googletest_POPULATED)
   add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
 endif()
 
-# Download geometry utils.
-if (NOT DEFINED GEOMETRY_UTILS_DIRECTORY)
-  FetchContent_Declare(
-    geometry_utils
-    GIT_REPOSITORY https://github.com/gareth-cross/geometry_utils
-  )
-  FetchContent_GetProperties(geometry_utils)
-  if(NOT geometry_utils_POPULATED)
-    FetchContent_Populate(geometry_utils)
-    add_subdirectory(${geometry_utils_SOURCE_DIR} ${geometry_utils_BINARY_DIR})
-  endif()
-endif()
-
 # Build testing helper library.
 add_library(${PROJECT_NAME}_test_utils test_utils.cc)
 
@@ -45,9 +32,7 @@ foreach(test_file ${${PROJECT_NAME}_TEST_SOURCES})
 
   # make sure it depends on the test utils
   add_dependencies(${test_name} ${PROJECT_NAME} ${PROJECT_NAME}_test_utils)
-  add_dependencies(${test_name} geometry_utils)
   target_link_libraries(${test_name} ${PROJECT_NAME}_test_utils gtest_main)
-  target_link_libraries(${test_name} geometry_utils)
 
   # turn on maximum warnings
   if(MSVC)

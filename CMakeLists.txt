@@ -3,6 +3,7 @@ project(mini_opt VERSION 0.1
                  DESCRIPTION "Optimization"
                  LANGUAGES CXX)
 enable_testing()
+include(FetchContent)
 
 # TODO(gareth): All this cmake is shameless copy-pasta from geometry_utils.
 # Should probably just make a math_utils or something and put it all together.
@@ -19,11 +20,26 @@ if (${Eigen_FOUND})
   MESSAGE("Eigen Includes: ${EIGEN_INCLUDE_DIRS}")
 endif()
 
+# Download geometry utils.
+FetchContent_Declare(
+  geometry_utils
+  GIT_REPOSITORY https://github.com/gareth-cross/geometry_utils
+)
+FetchContent_GetProperties(geometry_utils)
+if(NOT geometry_utils_POPULATED)
+  FetchContent_Populate(geometry_utils)
+  add_subdirectory(${geometry_utils_SOURCE_DIR} ${geometry_utils_BINARY_DIR})
+endif()
+
 # Find all the source files.
 FILE(GLOB ${PROJECT_NAME}_SOURCES "source/*.cc")
 
 # Main project library
 add_library(${PROJECT_NAME} STATIC ${${PROJECT_NAME}_SOURCES})
+
+# Link to geometry utils
+add_dependencies(${PROJECT_NAME} geometry_utils)
+target_link_libraries(${PROJECT_NAME} geometry_utils)
 
 # Turn on C++14
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_14)
