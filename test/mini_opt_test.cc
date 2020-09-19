@@ -3,6 +3,7 @@
 
 #include <Eigen/Jacobi>
 #include <chrono>
+#include <numeric>
 #include <random>
 
 #include "numerical_derivative.hpp"
@@ -723,6 +724,11 @@ struct ChainComputationBuffer {
 
   // Buffer for translations.
   math::Matrix<double, 3, Eigen::Dynamic> i_t_end;
+
+  Pose start_T_end() const {
+    ASSERT(!i_R_end.empty() && i_t_end.cols() > 0);
+    return Pose{i_R_end.front(), i_t_end.leftCols<1>()};
+  }
 };
 
 void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const c) {
@@ -735,9 +741,6 @@ void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const 
     c->i_t_end.resize(3, 0);
     return;
   }
-
-  // [0, 0, 1]
-  const auto k_hat = math::Vector<double, 3>::UnitZ();
   const int N = static_cast<int>(links.size());
 
   // Compute backwards rotations (right to left)
@@ -838,39 +841,103 @@ TEST(LinkTest, TestRotation) {
   PRINT_MATRIX(c.orientation_D_angles);
 }
 
+struct ActuatorLink {
+  // Euler angles from the decomposed rotation.
+  // Factorized w/ order XYZ.
+  math::Vector<double, 3> rotation_xyz;
+
+  // Translational part.
+  math::Vector<double, 3> translation;
+
+  // Mask of angles that are active in the optimization.
+  std::array<uint8_t, 3> active;
+
+  // Number of active angles.
+  int ActiveCount() const {
+    return std::count_if(active.begin(), active.end(), [](auto b) { return b > 0; });
+  }
+
+  // Construct from Pose and mask.
+  ActuatorLink(const Pose& pose, const std::array<uint8_t, 3>& mask)
+      : rotation_xyz(math::EulerAnglesFromSO3(pose.rotation.conjugate())),
+        translation(pose.translation),
+        active(mask) {}
+
+  // Return pose representing this transform, given the euler angles.
+  Pose Compute(const math::Vector<double>& angles, const int position,
+               math::Matrix<double, 3, Dynamic>* const J_out) const {
+    // Pull out just the angles we care about.
+    math::Vector<double, 3> xyz_copy = rotation_xyz;
+    for (int i = 0, angle_pos = position; i < 3; ++i) {
+      if (active[i]) {
+        xyz_copy[i] = angles[angle_pos++];
+      }
+    }
+    // compute rotation and derivatives
+    const math::SO3FromEulerAngles_<double> rot =
+        math::SO3FromEulerAngles(xyz_copy, math::CompositionOrder::XYZ);
+    if (J_out) {
+      // copy out derivative blocks we'll need later
+      for (int i = 0, angle_pos = position; i < 3; ++i) {
+        if (active[i]) {
+          J_out->col(angle_pos++) = rot.rotation_D_angles.col(i);
+        }
+      }
+    }
+    // Return a pose w/ our fixed translation.
+    // TODO(gareth): Dumb that we have to copy the fixed translation always...
+    return Pose{rot.q, translation};
+  }
+};
+
 struct ActuatorChain {
   // Current poses in the chain.
-  std::vector<Pose> links;
+  std::vector<ActuatorLink> links;
 
-  std::vector<Pose> links_updated_;
+  // Poses.
+  std::vector<Pose> pose_buffer_;
 
-  // Storage for operations.
-  ChainComputationBuffer buffer_{};
+  // Buffer of rotations derivatives.
+  math::Matrix<double, 3, Dynamic> rotation_D_angles_;
+
+  // Cached products while doing computations.
+  ChainComputationBuffer chain_buffer_;
 
   // Compute rotation and translation of the effector.
   Pose ComputeEffector(const math::Vector<double>& angles,
                        math::Matrix<double, 6, Eigen::Dynamic>* const J) {
-    ASSERT(static_cast<Eigen::Index>(links.size()) == angles.rows());
+    if (rotation_D_angles_.size() == 0) {
+      // compute total active
+      const int total_active = TotalActive();
+      ASSERT(total_active == angles.rows());
+      // allocate space
+      rotation_D_angles_.resize(3, total_active);
+    }
 
-    // Compute the effector pose - update the transforms.
-    links_updated_.clear();
-    links_updated_.reserve(links.size());
-    for (std::size_t i = 0; i < links.size(); ++i) {
-      // Split up rotation and translation so we aren't always copying them together?
-      links_updated_[i].rotation =
-          links[i].rotation * math::QuaternionExp(Vector3d::UnitZ() * angles[i]);
-      links_updated_[i].translation = links[i].translation;
+    // compute poses and rotational derivatives
+    pose_buffer_.resize(links.size());
+    for (int i = 0, position = 0; i < links.size(); ++i) {
+      const ActuatorLink& link = links[i];
+      const int num_active = link.ActiveCount();
+      pose_buffer_[i] = link.Compute(angles, position, &rotation_D_angles_);
+      position += num_active;
     }
 
     // linearize
-    ComputeChain(links_updated_, &buffer_);
+    ComputeChain(pose_buffer_, &chain_buffer_);
+
+    // chain rule
     if (J) {
-      // todo - this should be pre-allocated
-      J->resize(6, angles.rows());
-      J->topRows<3>() = buffer_.orientation_D_angles;
-      J->bottomRows<3>() = buffer_.translation_D_angles;
+      for (int i = 0, position = 0; i < links.size(); ++i) {
+        const ActuatorLink& link = links[i];
+      }
     }
-    return Pose{buffer_.i_R_end.front(), buffer_.i_t_end.leftCols<1>()};
+    return chain_buffer_.start_T_end();
+  }
+
+  int TotalActive() const {
+    return std::accumulate(links.begin(), links.end(), 0,
+                           [](const int t, const ActuatorLink& l) { return t + l.ActiveCount(); });
   }
 };
 
