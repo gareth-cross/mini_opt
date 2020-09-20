@@ -54,7 +54,6 @@ struct IndexType<Eigen::Dynamic> {
   using type = std::vector<int>;
 };
 
-
 // Simple statically sized residual.
 template <int ResidualDim, int NumParams>
 struct Residual : public ResidualBase {
@@ -240,6 +239,12 @@ struct QPInteriorPointSolver {
   ConstVectorBlock y_block() const;
   ConstVectorBlock z_block() const;
 
+  // Mutable block accessors.
+  VectorBlock x_block();
+  VectorBlock s_block();
+  VectorBlock y_block();
+  VectorBlock z_block();
+
   struct AlphaValues {
     // Alpha in the primal variables (x an s), set to 1 if we have no s
     double primal{1.};
@@ -295,6 +300,7 @@ struct QPInteriorPointSolver {
   // Optional iteration logger.
   LoggingCallback logger_callback_;
 
+  // Return true if there are any inequality constraints.
   bool HasInequalityConstraints() const { return dims_.M > 0; }
 
   // Take a single step.
@@ -398,10 +404,16 @@ struct ConstrainedNonlinearLeastSquares {
   // Linearize and take a step.
   void LinearizeAndSolve();
 
+  // Set the variables.
+  void SetVariables(const Eigen::VectorXd& variables) { variables_ = variables; }
+
   template <typename T>
   void SetQPLoggingCallback(T cb) {
     qp_logger_callback_ = cb;
   }
+
+  // Get the variables.
+  const Eigen::VectorXd& variables() const { return variables_; }
 
  private:
   const Problem* const p_;

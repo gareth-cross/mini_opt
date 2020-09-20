@@ -10,6 +10,11 @@
 #include "so3.hpp"  //  from geometry_utils
 #include "test_utils.hpp"
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4127)
+#endif  // _MSC_VER
+
 namespace mini_opt {
 
 using namespace Eigen;
@@ -692,6 +697,10 @@ struct Pose {
   Pose(const math::Quaternion<double>& q, const math::Vector<double, 3>& t)
       : rotation(q), translation(t) {}
 
+  Pose()
+      : rotation(math::Quaternion<double>::Identity()),
+        translation(math::Vector<double, 3>::Zero()) {}
+
   // Rotation.
   math::Quaternion<double> rotation;
 
@@ -711,10 +720,10 @@ using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
 struct ChainComputationBuffer {
   // Derivatives of `root_R_effector` wrt joint angles.
-  math::Matrix<double, 3, Eigen::Dynamic> orientation_D_angles;
+  math::Matrix<double, 3, Eigen::Dynamic> orientation_D_tangent;
 
   // Derivatives of `root_t_effector` wrt joint angles.
-  math::Matrix<double, 3, Eigen::Dynamic> translation_D_angles;
+  math::Matrix<double, 3, Eigen::Dynamic> translation_D_tangent;
 
   // Buffer for rotations of the joints, forward direction.
   AlignedVector<math::Quaternion<double>> start_R_i_plus_1;
@@ -734,8 +743,8 @@ struct ChainComputationBuffer {
 void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const c) {
   if (links.empty()) {
     // no iteration to do
-    c->orientation_D_angles.resize(3, 0);
-    c->translation_D_angles.resize(3, 0);
+    c->orientation_D_tangent.resize(3, 0);
+    c->translation_D_tangent.resize(3, 0);
     c->start_R_i_plus_1.clear();
     c->i_R_end.clear();
     c->i_t_end.resize(3, 0);
@@ -773,20 +782,21 @@ void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const 
   // Compute derivative of translation at the end wrt angle i.
   // d(0_t_N) / d(theta_[i]) = start_R_i * d(i_R_[i+1] * [i+1]_t_N) / d(theta_[i])
   //  = start_D_[i+1] * [-[i+1]_t_N]_x
-  c->translation_D_angles.resize(3, N * 3);
+  c->translation_D_tangent.resize(3, N * 3);
   for (int i = 0; i < N - 1; ++i) {
-    c->translation_D_angles.middleCols(i * 3, 3).noalias() =
+    c->translation_D_tangent.middleCols(i * 3, 3).noalias() =
         c->start_R_i_plus_1[i].matrix() * math::Skew3(-c->i_t_end.col(i + 1));
   }
-  c->translation_D_angles.rightCols<3>().setZero();  //  last angle does not affect translation
+  c->translation_D_tangent.rightCols<3>().setZero();  //  last angle does not affect translation
 
   //// Compute derivative of rotation at the end wrt angle i.
-  c->orientation_D_angles.resize(3, N * 3);
+  c->orientation_D_tangent.resize(3, N * 3);
   for (int i = 0; i < N - 1; ++i) {
     // d(root_R_eff)/d(theta_i) = n_R_[i+1]
-    c->orientation_D_angles.middleCols(i * 3, 3).noalias() = c->i_R_end[i + 1].conjugate().matrix();
+    c->orientation_D_tangent.middleCols(i * 3, 3).noalias() =
+        c->i_R_end[i + 1].conjugate().matrix();
   }
-  c->orientation_D_angles.rightCols<3>().setIdentity();
+  c->orientation_D_tangent.rightCols<3>().setIdentity();
 }
 
 TEST(LinkTest, TestRotation) {
@@ -832,13 +842,13 @@ TEST(LinkTest, TestRotation) {
   ChainComputationBuffer c{};
   ComputeChain(links, &c);
 
-  ASSERT_EIGEN_NEAR(J_trans_numerical, c.translation_D_angles, tol::kNano);
+  ASSERT_EIGEN_NEAR(J_trans_numerical, c.translation_D_tangent, tol::kNano);
   PRINT_MATRIX(J_trans_numerical);
-  PRINT_MATRIX(c.translation_D_angles);
+  PRINT_MATRIX(c.translation_D_tangent);
 
-  ASSERT_EIGEN_NEAR(J_trans_rotational, c.orientation_D_angles, tol::kNano);
+  ASSERT_EIGEN_NEAR(J_trans_rotational, c.orientation_D_tangent, tol::kNano);
   PRINT_MATRIX(J_trans_rotational);
-  PRINT_MATRIX(c.orientation_D_angles);
+  PRINT_MATRIX(c.orientation_D_tangent);
 }
 
 struct ActuatorLink {
@@ -854,7 +864,8 @@ struct ActuatorLink {
 
   // Number of active angles.
   int ActiveCount() const {
-    return std::count_if(active.begin(), active.end(), [](auto b) { return b > 0; });
+    return static_cast<int>(
+        std::count_if(active.begin(), active.end(), [](auto b) { return b > 0; }));
   }
 
   // Construct from Pose and mask.
@@ -888,12 +899,27 @@ struct ActuatorLink {
     // TODO(gareth): Dumb that we have to copy the fixed translation always...
     return Pose{rot.q, translation};
   }
+
+  void FillJacobian(
+      const Block<const Matrix<double, 3, Dynamic>, 3, 3, true>& output_D_tangent,
+      const Block<const Matrix<double, 3, Dynamic>, 3, Dynamic, true>& tangent_D_angles,
+      Block<Eigen::Matrix<double, 3, Dynamic>, 3, Dynamic, true> J_out) const {
+    // Output buffer should be correct size already.
+    ASSERT(J_out.cols() == ActiveCount());
+    if (!active[0] && !active[1] && active[2]) {
+      // Fast path for common case, we know dz = [0, 0, 1]
+      J_out = output_D_tangent.rightCols<1>();
+    } else {
+      J_out.noalias() = output_D_tangent * tangent_D_angles;
+    }
+  }
 };
 
 struct ActuatorChain {
   // Current poses in the chain.
   std::vector<ActuatorLink> links;
 
+ private:
   // Poses.
   std::vector<Pose> pose_buffer_;
 
@@ -903,13 +929,22 @@ struct ActuatorChain {
   // Cached products while doing computations.
   ChainComputationBuffer chain_buffer_;
 
-  // Compute rotation and translation of the effector.
-  Pose ComputeEffector(const math::Vector<double>& angles,
-                       math::Matrix<double, 6, Eigen::Dynamic>* const J) {
+  // Cached angles
+  math::Vector<double> angles_cached_;
+
+  // Iterate over the chain and compute the effector pose.
+  // Derivatives wrt all the input angles are computed and cached locally.
+  void Update(const math::Vector<double>& angles) {
+    if (!ShouldUpdate(angles)) {
+      return;
+    }
+    angles_cached_ = angles;
+
+    // Recompute.
     if (rotation_D_angles_.size() == 0) {
       // compute total active
       const int total_active = TotalActive();
-      ASSERT(total_active == angles.rows());
+      ASSERT(angles.rows() == total_active);
       // allocate space
       rotation_D_angles_.resize(3, total_active);
     }
@@ -925,14 +960,52 @@ struct ActuatorChain {
 
     // linearize
     ComputeChain(pose_buffer_, &chain_buffer_);
+  }
+
+  // Return true if the angles have changed since the last time this was called.
+  // Allows us to re-use intermediate values.
+  bool ShouldUpdate(const math::Vector<double>& angles) const {
+    if (angles_cached_.rows() != angles.rows()) {
+      return true;
+    }
+    for (int i = 0; i < angles.rows(); ++i) {
+      if (std::abs(angles_cached_[i] - angles[i]) > 1.0e-6) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+ public:
+  // Compute rotation and translation of the effector.
+  math::Vector<double, 3> ComputeEffectorPosition(
+      const math::Vector<double>& angles,
+      math::Matrix<double, 3, Eigen::Dynamic>* const J = nullptr) {
+    Update(angles);
 
     // chain rule
     if (J) {
+      ASSERT(J->cols() == TotalActive());
       for (int i = 0, position = 0; i < links.size(); ++i) {
         const ActuatorLink& link = links[i];
+        const int active_count = link.ActiveCount();
+        if (active_count == 0) {
+          continue;
+        }
+
+        // Need const-references so we can get const-blocks.
+        const ChainComputationBuffer& const_buffer = chain_buffer_;
+        const math::Matrix<double, 3, Dynamic>& const_rotation_D_angles = rotation_D_angles_;
+
+        // Chain rule w/ the angle representation.
+        link.FillJacobian(const_buffer.translation_D_tangent.middleCols<3>(i * 3),
+                          const_rotation_D_angles.middleCols(position, active_count),
+                          J->middleCols(position, active_count));
+
+        position += link.ActiveCount();
       }
     }
-    return chain_buffer_.start_T_end();
+    return chain_buffer_.start_T_end().translation;
   }
 
   int TotalActive() const {
@@ -941,6 +1014,28 @@ struct ActuatorChain {
   }
 };
 
+template <int ResidualDim, int NumParams>
+void TestResidualFunctionDerivative(
+    const std::function<Eigen::Matrix<double, ResidualDim, 1>(
+        const Eigen::Matrix<double, NumParams, 1>&,
+        Eigen::Matrix<double, ResidualDim, NumParams, 1>* const)>& function,
+    const Eigen::Matrix<double, NumParams, 1>& params, const double tol = tol::kNano) {
+  static_assert(ResidualDim != Eigen::Dynamic, "ResidualDim cannot be dynamic");
+
+  // Compute analytically.
+  Eigen::Matrix<double, ResidualDim, NumParams> J;
+  if (NumParams == Eigen::Dynamic) {
+    J.resize(ResidualDim, params.rows());
+  }
+  function(params, &J);
+
+  // evaluate numerically
+  const Eigen::Matrix<double, ResidualDim, NumParams> J_numerical = math::NumericalJacobian(
+      params, [&](const Eigen::Matrix<double, NumParams, 1>& x) { return function(x, nullptr); });
+
+  ASSERT_EIGEN_NEAR(J_numerical, J, tol);
+}
+
 // Test constrained non-linear least squares.
 class ConstrainedNLSTest : public ::testing::Test {
  public:
@@ -948,18 +1043,92 @@ class ConstrainedNLSTest : public ::testing::Test {
   void TestActuatorChain() {
     // We have a chain of three rotational actuators, at the end of which we have an effector.
     // Two actuators can effectuate translation, whereas the last one can only rotate the effector.
-    ActuatorChain chain{};
-    chain.links.emplace_back(math::QuaternionExp(Vector3d::UnitZ() * M_PI / 4),
-                             Vector3d{0.25, 0.1, 0.0});
-    chain.links.emplace_back(math::QuaternionExp(Vector3d::UnitZ() * 0.0),
-                             Vector3d{0.5, 0.05, 0.0});
-    chain.links.emplace_back(math::QuaternionExp(Vector3d::UnitZ() * -M_PI / 6),
-                             Vector3d{0.4, 0.0, 0.0});
+    std::unique_ptr<ActuatorChain> chain = std::make_unique<ActuatorChain>();
+    const std::array<uint8_t, 3> mask = {{0, 0, 1}};
+    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.25, 0.1, 0.0}), mask);
+    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.6, 0.05, 0.0}), mask);
+    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}),
+                              std::array<uint8_t, 3>{{0, 0, 0}} /* turn off for now */);
 
-    // make a cost that we want to achieve a specific point
+    // make a cost that we want to achieve a specific point vertically
+    Residual<1, Dynamic> y_residual;
+    y_residual.index = {0, 1};
+    y_residual.function = [&](const VectorXd& params,
+                              Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
+      // todo: don't evaluate full xyz jacobian here
+      Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
+      const Vector3d effector_xyz =
+          chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
+      if (J_out) {
+        ASSERT(J_out->cols() == 2);
+        *J_out = J_full.middleRows<1>(1);
+      }
+      return Matrix<double, 1, 1>{effector_xyz.y() - 0.1};
+    };
+
+    // make an equality constraint on x
+    Residual<1, Dynamic> x_eq_constraint;
+    x_eq_constraint.index = {0, 1};
+    x_eq_constraint.function =
+        [&](const VectorXd& params,
+            Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
+      Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
+      const Vector3d effector_xyz =
+          chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
+      if (J_out) {
+        ASSERT(J_out->cols() == 2);
+        *J_out = J_full.topRows<1>();
+      }
+      return Matrix<double, 1, 1>{effector_xyz.x() - 0.3};
+    };
+
+    TestResidualFunctionDerivative<1, Dynamic>(y_residual.function, VectorXd{Vector2d(-0.5, 0.4)});
+    TestResidualFunctionDerivative<1, Dynamic>(x_eq_constraint.function,
+                                               VectorXd{Vector2d(0.3, -0.6)});
+
+    Problem problem{};
+    problem.costs.emplace_back(new Residual<1, Dynamic>(y_residual));
+    problem.equality_constraints.emplace_back(new Residual<1, Dynamic>(x_eq_constraint));
+    // problem.inequality_constraints.push_back(Var(0) <= 3 * M_PI / 4);
+    // problem.inequality_constraints.push_back(Var(0) >= 0);
+    // problem.inequality_constraints.push_back(Var(1) <= 3 * M_PI / 4);
+    // problem.inequality_constraints.push_back(Var(1) >= -3 * M_PI / 4);
+    problem.dimension = 2;
+
+    ConstrainedNonlinearLeastSquares nls(&problem);
+    nls.SetQPLoggingCallback([](const double kkt2_prev, const double kkt2_after,
+                                const QPInteriorPointSolver::IterationOutputs& outputs) {
+      std::cout << "Iteration summary: ";
+      std::cout << "||kkt||^2: " << kkt2_prev << " --> " << kkt2_after << ", mu = " << outputs.mu
+                << ", sigma = " << outputs.sigma << ", a_p = " << outputs.alpha.primal
+                << ", a_d = " << outputs.alpha.dual << "\n";
+    });
+
+    const Vector2d initial_values{M_PI / 4, -M_PI / 6};
+    nls.SetVariables(initial_values);
+    nls.LinearizeAndSolve();
+    nls.LinearizeAndSolve();
+    nls.LinearizeAndSolve();
+    nls.LinearizeAndSolve();
+
+    const VectorXd angles_out = nls.variables();
+    PRINT_MATRIX(chain->ComputeEffectorPosition(angles_out).transpose());
+
+    PRINT(y_residual.Error(angles_out));
+    PRINT(x_eq_constraint.Error(angles_out));
+
+    MatrixXd J(1, 2);
+    VectorXd b(1);
+    y_residual.UpdateJacobian(angles_out, J.block(0, 0, 1, 2), b.segment(0, 1));
+    PRINT_MATRIX(J);
+    PRINT_MATRIX(b);
   }
 };
 
 TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
 }  // namespace mini_opt
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif  // _MSC_VER

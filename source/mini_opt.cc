@@ -149,7 +149,7 @@ QPInteriorPointSolver::IterationOutputs QPInteriorPointSolver::Iterate(
     // Use the MPC/predictor-corrector (algorithm 16.4).
     // Solve with mu=0 and compute the largest step size.
     SolveForUpdate(0.0);
-    ComputeAlpha(&outputs.alpha_probe, /* tau = */ 1.0);
+    ComputeAlpha(&outputs.alpha_probe, /* tau = */ 1.);
 
     // save the value of the affine step
     delta_affine_ = delta_;
@@ -185,6 +185,14 @@ ConstVectorBlock QPInteriorPointSolver::s_block() const { return ConstSBlock(dim
 ConstVectorBlock QPInteriorPointSolver::y_block() const { return ConstYBlock(dims_, variables_); }
 
 ConstVectorBlock QPInteriorPointSolver::z_block() const { return ConstZBlock(dims_, variables_); }
+
+VectorBlock QPInteriorPointSolver::x_block() { return XBlock(dims_, variables_); }
+
+VectorBlock QPInteriorPointSolver::s_block() { return SBlock(dims_, variables_); }
+
+VectorBlock QPInteriorPointSolver::y_block() { return YBlock(dims_, variables_); }
+
+VectorBlock QPInteriorPointSolver::z_block() { return ZBlock(dims_, variables_); }
 
 /*
  * We start with the full symmetric system (Equation 19.12):
@@ -389,12 +397,18 @@ double QPInteriorPointSolver::ComputePredictorCorrectorMuAffine(
   const auto z = ConstZBlock(dims_, variables_);
   const auto ds = ConstSBlock(dims_, delta_);
   const auto dz = ConstZBlock(dims_, delta_);
+
   // here we just compute the missing terms from (s + ds * a_p)^T * (z + dz * a_d)
   double mu_affine = mu;
   mu_affine += alpha_probe.dual * s.dot(dz) / static_cast<double>(dims_.M);
-  mu_affine += alpha_probe.primal * z.dot(ds) / static_cast<double>(dims_.N);
+  mu_affine += alpha_probe.primal * z.dot(ds) / static_cast<double>(dims_.M);
   mu_affine += (alpha_probe.dual * alpha_probe.primal) * ds.dot(dz) / static_cast<double>(dims_.M);
-  return mu_affine;
+
+  // This value shouldn't be < 0, because we already found a_p and a_d such that:
+  //  s + ds * ap >= 0
+  //  z + dz * ad >= 0
+  // Catch small numerical errors anyways.
+  return std::max(mu_affine, 0.0);
 }
 
 ConstVectorBlock QPInteriorPointSolver::ConstXBlock(const ProblemDims& dims,
@@ -545,6 +559,9 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
 }
 
 void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
+  ASSERT(p_ != nullptr);
+  ASSERT(static_cast<Eigen::Index>(p_->dimension) == variables_.rows());
+
   // zero out the linear system before adding all the costs to it
   qp_.G.setZero();
   qp_.c.setZero();
@@ -574,6 +591,9 @@ void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
   QPInteriorPointSolver solver(qp_);
   solver.SetLoggerCallback(qp_logger_callback_);
 
+  // Initialize z near zero, so inequalities are initially inactive
+  solver.z_block().setConstant(1.0e-3);
+
   QPInteriorPointSolver::Params params{};
   params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
   params.max_iterations = 10;
@@ -594,6 +614,14 @@ void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
     total_l2_after += cost->Error(variables_);
   }
   std::cout << "error after = " << total_l2_after << std::endl;
+
+  std::cout << "A_eq = \n" << qp_.A_eq.format(kMatrixFmt) << std::endl;
+  std::cout << "b_eq = " << qp_.b_eq.transpose().format(kMatrixFmt) << std::endl;
+
+  std::cout << "x = " << solver.x_block().transpose().format(kMatrixFmt) << std::endl;
+  std::cout << "y = " << solver.y_block().transpose().format(kMatrixFmt) << std::endl;
+  std::cout << "s = " << solver.s_block().transpose().format(kMatrixFmt) << std::endl;
+  std::cout << "z = " << solver.z_block().transpose().format(kMatrixFmt) << std::endl;
 }
 
 }  // namespace mini_opt
