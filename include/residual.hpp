@@ -24,11 +24,12 @@ struct ResidualBase {
   virtual double Error(const Eigen::VectorXd& params) const = 0;
 
   // Update a system of equations Hx=b by writing to `H` and `b`.
-  // Returns the value of `Error` as well.
+  // Returns the value of `Error` as well (the constant part of the quadratic).
   virtual double UpdateHessian(const Eigen::VectorXd& params, Eigen::MatrixXd* const H,
                                Eigen::VectorXd* const b) const = 0;
 
   // Output the jacobian for the linear system: J * dx + b
+  // `J_out` and `b_out` are set to the correct rows of a larger matrix.
   virtual void UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
                               Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
 };
@@ -98,6 +99,7 @@ typename Residual<ResidualDim, NumParams>::ParamType
 Residual<ResidualDim, NumParams>::GetParamSlice(const Eigen::VectorXd& params) const {
   ParamType sliced;
   if (NumParams == Eigen::Dynamic) {
+    // TODO(gareth): Create cached storage for this?
     sliced.resize(index.size());
   }
   for (std::size_t local = 0; local < index.size(); ++local) {
@@ -147,10 +149,8 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
     ASSERT(row_global < H->rows(), "Index %i exceeds the bounds of the hessian (rows = %i)",
            row_global, H->rows());
     for (int col_local = 0; col_local <= row_local; ++col_local) {
-      // pull column index
       // because col_local <= row_local, we already checked this global index
       const int col_global = index[col_local];
-
       // each param is a single column, so we can just do dot product
       const double JtT = J.col(row_local).dot(J.col(col_local));
       // swap so we only update the lower triangular part

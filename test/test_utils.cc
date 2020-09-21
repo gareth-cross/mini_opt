@@ -6,6 +6,8 @@
 
 namespace test_utils {
 
+const Eigen::IOFormat kNumPyMatrixFmt(Eigen::FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
+
 std::vector<double> Range(double start, double end, double step) {
   std::vector<double> values;
   while (start < end) {

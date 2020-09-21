@@ -17,6 +17,10 @@ static constexpr double kPico = 1.0e-12;
 // Print variable w/ name.
 #define PRINT(x) printImpl(#x, x)
 
+// Print a matrix.
+#define PRINT_MATRIX(x) \
+  { std::cout << #x << ":\n" << (x).eval().format(test_utils::kNumPyMatrixFmt) << "\n"; }
+
 template <typename Xpr>
 void printImpl(const std::string& name, Xpr xpr) {
   std::cout << name << "=" << xpr << std::endl;
@@ -35,6 +39,9 @@ void printImpl(const std::string& name, Xpr xpr) {
 // TODO(gareth): This is all copy-pasta from other repos I have. Should put it in a
 // common place.
 namespace test_utils {
+
+// Used by PRINT_MATRIX.
+extern const Eigen::IOFormat kNumPyMatrixFmt;
 
 // Compare two eigen matrices. Use EXPECT_EIGEN_NEAR()
 template <typename Ta, typename Tb>
