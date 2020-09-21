@@ -217,7 +217,7 @@ struct QPInteriorPointSolver {
   };
 
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
-  explicit QPInteriorPointSolver(const QP& problem);
+  explicit QPInteriorPointSolver(const QP& problem, const bool check_feasible = false);
 
   /*
    * Iterate until one of the following conditions is met:
@@ -268,8 +268,24 @@ struct QPInteriorPointSolver {
     double mu_affine{std::numeric_limits<double>::quiet_NaN()};
   };
 
-  using LoggingCallback = std::function<void(double kkt_2_prev, double kkt_2_after,
-                                             const IterationOutputs& iter_outputs)>;
+  // Squared errors in the first order KKT conditions.
+  // At a point that satisfies the conditions, these should all be zero.
+  struct KKTError {
+    double r_dual{0};         // The dual objective: Gx + c - A_e^T * y - A_i * z
+    double r_comp{0};         // Complementarity condition: s^T * z
+    double r_primal_eq{0};    // Primal equality constraint: A_e*x + b_e
+    double r_primal_ineq{0};  // Primal inequality constraint: A_i*x + b_i - s
+
+    // Total squared error.
+    double Total() const { return r_dual + r_comp + r_primal_eq + r_primal_ineq; }
+  };
+
+  using LoggingCallback =
+      std::function<void(const QPInteriorPointSolver& solver, const KKTError& kkt_2_prev,
+                         const KKTError& kkt_2_after, const IterationOutputs& iter_outputs)>;
+
+  // Access the problem itself.
+  const QP& problem() const { return p_; }
 
  private:
   const QP& p_;
@@ -319,6 +335,9 @@ struct QPInteriorPointSolver {
   // Fill out the matrix `r_` with the KKT conditions (equations 19.2a-d).
   // Does not apply the `mu` term, which is added later. (ie. mu = 0)
   void EvaluateKKTConditions();
+
+  // Fill out the KKTError struct from `r_.
+  KKTError ComputeSquaredErrors() const;
 
   // Compute the largest step size we can execute that satisfies constraints.
   void ComputeAlpha(AlphaValues* const output, const double tau) const;
@@ -402,7 +421,7 @@ struct ConstrainedNonlinearLeastSquares {
   explicit ConstrainedNonlinearLeastSquares(const Problem* const problem);
 
   // Linearize and take a step.
-  void LinearizeAndSolve();
+  void LinearizeAndSolve(const double lambda = 0);
 
   // Set the variables.
   void SetVariables(const Eigen::VectorXd& variables) { variables_ = variables; }

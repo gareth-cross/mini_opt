@@ -3,6 +3,7 @@
 
 #include <Eigen/Jacobi>
 #include <chrono>
+#include <fstream>
 #include <numeric>
 #include <random>
 
@@ -356,21 +357,50 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
-  // TODO(gareth): Would really like to use libfmt for this instead...
-  static void ProgressPrinter(const QPInteriorPointSolver* const solver, const double kkt2_prev,
-                              const double kkt2_after,
-                              const QPInteriorPointSolver::IterationOutputs& outputs) {
+  static void ProgressPrinterNoState(const QPInteriorPointSolver& solver,
+                                     const QPInteriorPointSolver::KKTError& kkt2_prev,
+                                     const QPInteriorPointSolver::KKTError& kkt2_after,
+                                     const QPInteriorPointSolver::IterationOutputs& outputs) {
+    (void)solver;
     std::cout << "Iteration summary: ";
-    std::cout << "||kkt||^2: " << kkt2_prev << " --> " << kkt2_after << ", mu = " << outputs.mu
-              << ", sigma = " << outputs.sigma << ", a_p = " << outputs.alpha.primal
-              << ", a_d = " << outputs.alpha.dual << "\n";
+    std::cout << "||kkt||^2: " << kkt2_prev.Total() << " --> " << kkt2_after.Total()
+              << ", mu = " << outputs.mu << ", sigma = " << outputs.sigma
+              << ", a_p = " << outputs.alpha.primal << ", a_d = " << outputs.alpha.dual << "\n";
 
+    std::cout << "KKT errors:\n";
+    std::cout << "  r_dual = " << kkt2_prev.r_dual << " --> " << kkt2_after.r_dual << "\n";
+    std::cout << "  r_comp = " << kkt2_prev.r_comp << " --> " << kkt2_after.r_comp << "\n";
+    std::cout << "  r_p_eq = " << kkt2_prev.r_primal_eq << " --> " << kkt2_after.r_primal_eq
+              << "\n";
+    std::cout << "  r_p_ineq = " << kkt2_prev.r_primal_ineq << " --> " << kkt2_after.r_primal_ineq
+              << "\n";
+  }
+
+  // TODO(gareth): Would really like to use libfmt for this instead...
+  static void ProgressPrinter(const QPInteriorPointSolver& solver,
+                              const QPInteriorPointSolver::KKTError& kkt2_prev,
+                              const QPInteriorPointSolver::KKTError& kkt2_after,
+                              const QPInteriorPointSolver::IterationOutputs& outputs) {
+    ProgressPrinterNoState(solver, kkt2_prev, kkt2_after, outputs);
     // dump the state with labels
     std::cout << "After update:\n";
-    std::cout << "  x = " << solver->x_block().transpose().format(kMatrixFmt) << "\n";
-    std::cout << "  s = " << solver->s_block().transpose().format(kMatrixFmt) << "\n";
-    std::cout << "  y = " << solver->y_block().transpose().format(kMatrixFmt) << "\n";
-    std::cout << "  z = " << solver->z_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  x = " << solver.x_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  s = " << solver.s_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  y = " << solver.y_block().transpose().format(kMatrixFmt) << "\n";
+    std::cout << "  z = " << solver.z_block().transpose().format(kMatrixFmt) << "\n";
+
+    // summarize the inequality constraints
+    std::cout << "Constraints:\n";
+    std::size_t i = 0;
+    for (const LinearInequalityConstraint& c : solver.problem().constraints) {
+      std::cout << "  Constraint " << i << ": ax[" << c.variable
+                << "] + b - s == " << c.a * solver.x_block()[c.variable] + c.b - solver.s_block()[i]
+                << "  (" << c.a << " * " << solver.x_block()[c.variable] << " + " << c.b << " - "
+                << solver.s_block()[i] << ")\n";
+      ++i;
+    }
+
+    std::cout << "H_inv:\n" << solver.H_inv_.format(kMatrixFmt) << "\n";
   }
 
   // Scalar quadratic equation with a single inequality constraint.
@@ -396,9 +426,7 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(0) <= 4);
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
-                                       std::placeholders::_1, std::placeholders::_2,
-                                       std::placeholders::_3));
+    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
 
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
@@ -437,9 +465,8 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(1) >= -3.0);
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
-                                       std::placeholders::_1, std::placeholders::_2,
-                                       std::placeholders::_3));
+    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
@@ -473,9 +500,8 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(0) >= -3.5);  //  irrelevant
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
-                                       std::placeholders::_1, std::placeholders::_2,
-                                       std::placeholders::_3));
+    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
@@ -506,9 +532,8 @@ class QPSolverTest : public ::testing::Test {
     qp.b_eq[1] = -2.0;
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
-                                       std::placeholders::_1, std::placeholders::_2,
-                                       std::placeholders::_3));
+    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
@@ -531,9 +556,7 @@ class QPSolverTest : public ::testing::Test {
     qp.b_eq = -Vector3d{1., 2., 3.};
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
-                                       std::placeholders::_1, std::placeholders::_2,
-                                       std::placeholders::_3));
+    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
 
     // solve it in a single step
     QPInteriorPointSolver::Params params{};
@@ -562,10 +585,7 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver solver(qp);
     PRINT_MATRIX(solver.variables_.transpose());
-
-    solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
-                                       std::placeholders::_1, std::placeholders::_2,
-                                       std::placeholders::_3));
+    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
 
     solver.EvaluateKKTConditions();
     PRINT_MATRIX(solver.r_.transpose());
@@ -663,9 +683,7 @@ class QPSolverTest : public ::testing::Test {
         for (const LinearInequalityConstraint& c : qp.constraints) {
           std::cout << "x[" << c.variable << "] * " << c.a << " + " << c.b << " >= 0\n";
         }
-        solver.SetLoggerCallback(std::bind(&QPSolverTest::ProgressPrinter, &solver,
-                                           std::placeholders::_1, std::placeholders::_2,
-                                           std::placeholders::_3));
+        solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
       }
 
       const auto term_state = solver.Solve(params);
@@ -712,6 +730,9 @@ struct Pose {
     return Pose(rotation * other.rotation, translation + rotation * other.translation);
   }
 
+  // Invert the pose.
+  Pose Inverse() const { return Pose(rotation.inverse(), rotation.inverse() * -translation); }
+
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 };
 
@@ -724,9 +745,6 @@ struct ChainComputationBuffer {
 
   // Derivatives of `root_t_effector` wrt joint angles.
   math::Matrix<double, 3, Eigen::Dynamic> translation_D_tangent;
-
-  // Buffer for rotations of the joints, forward direction.
-  AlignedVector<math::Quaternion<double>> start_R_i_plus_1;
 
   // Buffer for rotations of the joints, backwards direction.
   AlignedVector<math::Quaternion<double>> i_R_end;
@@ -745,7 +763,6 @@ void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const 
     // no iteration to do
     c->orientation_D_tangent.resize(3, 0);
     c->translation_D_tangent.resize(3, 0);
-    c->start_R_i_plus_1.clear();
     c->i_R_end.clear();
     c->i_t_end.resize(3, 0);
     return;
@@ -753,10 +770,10 @@ void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const 
   const int N = static_cast<int>(links.size());
 
   // Compute backwards rotations (right to left)
-  // Bucket `i` stores [i]_R_end. We don't store N_R_end since this is identity.
-  c->i_R_end.resize(N);
-  c->i_R_end[N - 1] = links[N - 1].rotation;  // previous_R_current
-  for (int i = N - 2; i >= 0; --i) {
+  // Bucket `i` stores [i]_R_end.
+  c->i_R_end.resize(N + 1);
+  c->i_R_end[N].setIdentity();
+  for (int i = N - 1; i >= 0; --i) {
     // rotation = previous_R_current
     c->i_R_end[i] = links[i].rotation * c->i_R_end[i + 1];
   }
@@ -764,32 +781,26 @@ void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const 
   // Now compute translations.
   // We are multiplying the transforms, going right to left. The last element (i==0) is
   // root_t_effector.
-  c->i_t_end.resize(3, N);
-  c->i_t_end.col(N - 1) = links[N - 1].translation;  //  previous_t_current
-  for (int i = N - 2; i >= 0; --i) {
+  c->i_t_end.resize(3, N + 1);
+  c->i_t_end.col(N).setZero();
+  for (int i = N - 1; i >= 0; --i) {
     // rotation = previous_R_current
     c->i_t_end.col(i).noalias() = links[i].rotation * c->i_t_end.col(i + 1) + links[i].translation;
-  }
-
-  // Compute forward rotations.
-  // Bucket `i` stores start_R_[i+1] (we don't store the first one, since it would be identity)
-  c->start_R_i_plus_1.resize(N);
-  c->start_R_i_plus_1[0] = links[0].rotation;  //  previous_R_current
-  for (int i = 1; i < N; ++i) {
-    c->start_R_i_plus_1[i] = c->start_R_i_plus_1[i - 1] * links[i].rotation;  // previous_R_current
   }
 
   // Compute derivative of translation at the end wrt angle i.
   // d(0_t_N) / d(theta_[i]) = start_R_i * d(i_R_[i+1] * [i+1]_t_N) / d(theta_[i])
   //  = start_D_[i+1] * [-[i+1]_t_N]_x
   c->translation_D_tangent.resize(3, N * 3);
+  Quaternion<double> start_R_i_plus_1 = Quaternion<double>::Identity();  //  forward rotation
   for (int i = 0; i < N - 1; ++i) {
+    start_R_i_plus_1 *= links[i].rotation;
     c->translation_D_tangent.middleCols(i * 3, 3).noalias() =
-        c->start_R_i_plus_1[i].matrix() * math::Skew3(-c->i_t_end.col(i + 1));
+        start_R_i_plus_1.matrix() * math::Skew3(-c->i_t_end.col(i + 1));
   }
   c->translation_D_tangent.rightCols<3>().setZero();  //  last angle does not affect translation
 
-  //// Compute derivative of rotation at the end wrt angle i.
+  // Compute derivative of rotation at the end wrt angle i.
   c->orientation_D_tangent.resize(3, N * 3);
   for (int i = 0; i < N - 1; ++i) {
     // d(root_R_eff)/d(theta_i) = n_R_[i+1]
@@ -849,6 +860,24 @@ TEST(LinkTest, TestRotation) {
   ASSERT_EIGEN_NEAR(J_trans_rotational, c.orientation_D_tangent, tol::kNano);
   PRINT_MATRIX(J_trans_rotational);
   PRINT_MATRIX(c.orientation_D_tangent);
+
+  // pull out poses
+  ASSERT_EQ(links.size() + 1, c.i_R_end.size());
+  ASSERT_EQ(c.i_R_end.size(), static_cast<size_t>(c.i_t_end.cols()));
+  const Pose start_T_end{c.i_R_end.front(), c.i_t_end.leftCols<1>()};
+
+  // note we are iterating over inverted poses `i_T_end`, so i = 0 is in fact the full transform
+  Pose start_T_current{};
+  for (int i = 0; i < c.i_R_end.size(); ++i) {
+    const Pose start_T_i = start_T_end * Pose(c.i_R_end[i], c.i_t_end.col(i)).Inverse();
+    // compare poses
+    ASSERT_EIGEN_NEAR(start_T_current.translation, start_T_i.translation, tol::kNano)
+        << "i = " << i;
+    ASSERT_EIGEN_NEAR(start_T_current.rotation.matrix(), start_T_i.rotation.matrix(), tol::kNano)
+        << "i = " << i;
+    // advance
+    start_T_current = start_T_current * links[i];
+  }
 }
 
 struct ActuatorLink {
@@ -919,7 +948,7 @@ struct ActuatorChain {
   // Current poses in the chain.
   std::vector<ActuatorLink> links;
 
- private:
+  // private:
   // Poses.
   std::vector<Pose> pose_buffer_;
 
@@ -1018,7 +1047,7 @@ template <int ResidualDim, int NumParams>
 void TestResidualFunctionDerivative(
     const std::function<Eigen::Matrix<double, ResidualDim, 1>(
         const Eigen::Matrix<double, NumParams, 1>&,
-        Eigen::Matrix<double, ResidualDim, NumParams, 1>* const)>& function,
+        Eigen::Matrix<double, ResidualDim, NumParams>* const)>& function,
     const Eigen::Matrix<double, NumParams, 1>& params, const double tol = tol::kNano) {
   static_assert(ResidualDim != Eigen::Dynamic, "ResidualDim cannot be dynamic");
 
@@ -1066,6 +1095,18 @@ class ConstrainedNLSTest : public ::testing::Test {
       return Matrix<double, 1, 1>{effector_xyz.y() - 0.1};
     };
 
+    // make a cost that minimizes the sum of squares of the angles
+    /*Residual<2, Dynamic> ss_residual;
+    ss_residual.index = {{0, 1}};
+    ss_residual.function = [&](const VectorXd& params,
+                               Matrix<double, 2, Dynamic>* const J_out) -> Matrix<double, 2, 1> {
+      if (J_out) {
+        J_out->setZero();
+        J_out->diagonal().setConstant(0.1);
+      }
+      return 0.1 * params;
+    };*/
+
     // make an equality constraint on x
     Residual<1, Dynamic> x_eq_constraint;
     x_eq_constraint.index = {0, 1};
@@ -1082,46 +1123,150 @@ class ConstrainedNLSTest : public ::testing::Test {
       return Matrix<double, 1, 1>{effector_xyz.x() - 0.3};
     };
 
+    Residual<2, Dynamic> combined_soft;
+    combined_soft.index = {0, 1};
+    combined_soft.function = [&](const VectorXd& params,
+                                 Matrix<double, 2, Dynamic>* const J_out) -> Matrix<double, 2, 1> {
+      // todo: don't evaluate full xyz jacobian here
+      Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
+      const Vector3d effector_xyz =
+          chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
+      if (J_out) {
+        ASSERT(J_out->cols() == 2);
+        *J_out = J_full.topRows<2>();
+      }
+      return effector_xyz.head<2>() - Vector2d{0.3, 0.1};
+    };
+
+    std::vector<double> angles;
+    for (double angle = -M_PI * 0.999; angle <= M_PI * 0.999; angle += (0.5 * M_PI / 180.0)) {
+      angles.push_back(angle);
+    }
+
+    Eigen::MatrixXd costs(angles.size(), angles.size());
+    /* Eigen::MatrixXd gradients(angles.size(), angles.size() * 2);
+     Eigen::MatrixXd hessian_det(angles.size(), angles.size());*/
+    for (int row = 0; row < angles.size(); ++row) {
+      for (int col = 0; col < angles.size(); ++col) {
+        const Vector2d angles_pt(angles[row], angles[col]);
+
+        /* const Eigen::Vector2d gradient =
+             math::NumericalJacobian(angles_pt, [&](const Vector2d& angles_pt) -> double {
+               return combined_soft.function(angles_pt, nullptr).squaredNorm();
+             }).transpose();
+
+         const Eigen::Matrix2d hessian =
+             math::NumericalJacobian(angles_pt, [&](const Vector2d& angles_pt) -> Vector2d {
+               return math::NumericalJacobian(
+                          angles_pt,
+                          [&](const Vector2d& angles_pt) -> double {
+                            return combined_soft.function(angles_pt, nullptr).squaredNorm();
+                          })
+                   .transpose();
+             });
+         hessian_det(row, col) = hessian.determinant();
+
+         gradients(row, col) = gradient[0];
+         gradients(row, angles.size() + col) = gradient[1];*/
+
+        costs(row, col) = 0.5 * combined_soft.function(angles_pt, nullptr).squaredNorm();
+      }
+    }
+
+    Eigen::Index min_row, min_col;
+    const double min_coeff = costs.minCoeff(&min_row, &min_col);
+
+    PRINT(min_coeff);
+    PRINT(angles[min_row]);
+    PRINT(angles[min_col]);
+
+    const IOFormat csv_format(FullPrecision, 0, ", ", "\n", "", "", "", "");
+    std::ofstream out("C:/Users/garet/Documents/test.csv");
+    out << costs.format(csv_format);
+    out.flush();
+    /*
+    std::ofstream out_gradients("C:/Users/garet/Documents/gradients.csv");
+    out_gradients << gradients.format(csv_format);
+    out_gradients.flush();
+
+    std::ofstream out_hessian("C:/Users/garet/Documents/hessian.csv");
+    out_hessian << hessian_det.format(csv_format);
+    out_hessian.flush();*/
+
+    TestResidualFunctionDerivative<2, Dynamic>(combined_soft.function,
+                                               VectorXd{Vector2d(-0.5, 0.4)});
+
     TestResidualFunctionDerivative<1, Dynamic>(y_residual.function, VectorXd{Vector2d(-0.5, 0.4)});
     TestResidualFunctionDerivative<1, Dynamic>(x_eq_constraint.function,
                                                VectorXd{Vector2d(0.3, -0.6)});
 
     Problem problem{};
-    problem.costs.emplace_back(new Residual<1, Dynamic>(y_residual));
-    problem.equality_constraints.emplace_back(new Residual<1, Dynamic>(x_eq_constraint));
+    // problem.costs.emplace_back(new Residual<1, Dynamic>(y_residual));
+    problem.costs.emplace_back(new Residual<2, Dynamic>(combined_soft));
+    // problem.costs.emplace_back(new Residual<2, Dynamic>(ss_residual));
+    // problem.equality_constraints.emplace_back(new Residual<1, Dynamic>(x_eq_constraint));
     // problem.inequality_constraints.push_back(Var(0) <= 3 * M_PI / 4);
-    // problem.inequality_constraints.push_back(Var(0) >= 0);
+    // problem.inequality_constraints.push_back(Var(0) >= -3 * M_PI / 4);
     // problem.inequality_constraints.push_back(Var(1) <= 3 * M_PI / 4);
     // problem.inequality_constraints.push_back(Var(1) >= -3 * M_PI / 4);
     problem.dimension = 2;
 
     ConstrainedNonlinearLeastSquares nls(&problem);
-    nls.SetQPLoggingCallback([](const double kkt2_prev, const double kkt2_after,
-                                const QPInteriorPointSolver::IterationOutputs& outputs) {
-      std::cout << "Iteration summary: ";
-      std::cout << "||kkt||^2: " << kkt2_prev << " --> " << kkt2_after << ", mu = " << outputs.mu
-                << ", sigma = " << outputs.sigma << ", a_p = " << outputs.alpha.primal
-                << ", a_d = " << outputs.alpha.dual << "\n";
-    });
+    nls.SetQPLoggingCallback(&QPSolverTest::ProgressPrinter);
 
     const Vector2d initial_values{M_PI / 4, -M_PI / 6};
     nls.SetVariables(initial_values);
+    nls.LinearizeAndSolve(10.0);
     nls.LinearizeAndSolve();
     nls.LinearizeAndSolve();
     nls.LinearizeAndSolve();
-    nls.LinearizeAndSolve();
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(0.1);
+    nls.LinearizeAndSolve(0.01);
+    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(0.1);
+    nls.LinearizeAndSolve(0.1);
+    nls.LinearizeAndSolve(0.1);
+    nls.LinearizeAndSolve(0.1);
+    nls.LinearizeAndSolve(0.1);
 
     const VectorXd angles_out = nls.variables();
     PRINT_MATRIX(chain->ComputeEffectorPosition(angles_out).transpose());
 
-    PRINT(y_residual.Error(angles_out));
-    PRINT(x_eq_constraint.Error(angles_out));
+    /*   const Eigen::Matrix2d hessian =
+           math::NumericalJacobian(Vector2d(angles_out), [&](const Vector2d& angles_pt) -> Vector2d
+       { return math::NumericalJacobian( angles_pt,
+                        [&](const Vector2d& angles_pt) -> double {
+                          return combined_soft.function(angles_pt, nullptr).squaredNorm();
+                        })
+                 .transpose();
+           });
 
-    MatrixXd J(1, 2);
-    VectorXd b(1);
-    y_residual.UpdateJacobian(angles_out, J.block(0, 0, 1, 2), b.segment(0, 1));
-    PRINT_MATRIX(J);
-    PRINT_MATRIX(b);
+       PRINT_MATRIX(hessian);*/
+
+    // PRINT(y_residual.Error(angles_out));
+    // PRINT(x_eq_constraint.Error(angles_out));
+    PRINT(combined_soft.Error(angles_out));
+
+    combined_soft.Error(Vector2d(M_PI/4, 0.0));
+    const Pose start_T_end = chain->chain_buffer_.start_T_end();
+
+    for (int i = 0; i < chain->chain_buffer_.i_t_end.cols(); ++i) {
+      const Quaterniond i_R_end = chain->chain_buffer_.i_R_end[i];
+      const Vector3d& i_t_end = chain->chain_buffer_.i_t_end.col(i);
+      const Pose start_T_i = start_T_end * Pose(i_R_end, i_t_end).Inverse();
+
+      PRINT(i);
+      PRINT_MATRIX(start_T_i.translation);
+    }
   }
 };
 

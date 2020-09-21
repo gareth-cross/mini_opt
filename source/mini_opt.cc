@@ -15,7 +15,8 @@ bool LinearInequalityConstraint::IsFeasible(double x) const {
   return a * x - b < 0.0;
 }
 
-QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem) : p_(problem) {
+QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const bool check_feasible)
+    : p_(problem) {
   ASSERT(p_.G.rows() == p_.G.cols(), "G must be square");
   ASSERT(p_.G.rows() == p_.c.rows(), "Dims of G and c must match");
   ASSERT(p_.A_eq.rows() == p_.b_eq.rows(), "Rows of A_e and b_e must match");
@@ -61,7 +62,6 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem) : p_(problem) {
   delta_affine_.resizeLike(variables_);
   delta_affine_.setZero();
 
-  const bool check_feasible = false;  // TODO(gareth): Param?
   for (const LinearInequalityConstraint& c : p_.constraints) {
     ASSERT(c.variable < static_cast<int>(dims_.N), "Constraint index is out of bounds");
     const bool is_feasible = c.IsFeasible(variables_[c.variable]);
@@ -97,7 +97,7 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
     prev_variables_ = variables_;
 
     // compute squared norm of the residual, prior to any updates
-    const double kkt2 = r_.squaredNorm();
+    const KKTError kkt2_prev = ComputeSquaredErrors();
 
     // solve for the update
     const IterationOutputs iteration_outputs = Iterate(sigma, params.barrier_strategy);
@@ -105,13 +105,14 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
     // evaluate the residual again, which fills `r_` for the next iteration
     EvaluateKKTConditions();
 
-    const double kkt2_after = r_.squaredNorm();
+    const KKTError kkt2_after = ComputeSquaredErrors();
     if (logger_callback_) {
       // pass progress to the logger callback for printing in the test
-      logger_callback_(kkt2, kkt2_after, iteration_outputs);
+      logger_callback_(const_cast<const QPInteriorPointSolver&>(*this), kkt2_prev, kkt2_after,
+                       iteration_outputs);
     }
 
-    if (kkt2_after < params.termination_kkt2_tol) {
+    if (kkt2_after.Total() < params.termination_kkt2_tol) {
       // error is low enough, stop
       return TerminationState::SATISFIED_KKT_TOL;
     }
@@ -272,7 +273,9 @@ void QPInteriorPointSolver::ComputeLDLT() {
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
     std::stringstream ss;
-    ss << "Failed to solve system:\n" << H_.format(kMatrixFmt) << "\n";
+    ss << "Failed to solve self-adjoint system:\n"
+       << H_.format(kMatrixFmt) << "\n"
+       << "The hessian may not be positive semi-definite.";
     throw FailedFactorization(ss.str());
   }
 
@@ -300,15 +303,15 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   const auto r_pi = ConstZBlock(dims_, r_);
 
   // relevant for MPC (zero if not doing the corrector step)
-  const auto s_aff = ConstSBlock(dims_, delta_affine_);
-  const auto z_aff = ConstZBlock(dims_, delta_affine_);
+  const auto ds_aff = ConstSBlock(dims_, delta_affine_);
+  const auto dz_aff = ConstZBlock(dims_, delta_affine_);
 
   // apply the variable elimination, which updates r_d (make a copy to save the original)
   r_dual_aug_.noalias() = r_d;
   for (std::size_t i = 0; i < M; ++i) {
     const LinearInequalityConstraint& c = p_.constraints[i];
     r_dual_aug_[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
-    r_dual_aug_[c.variable] += c.a * (r_comp[i] + (s_aff[i] * z_aff[i]) - mu) / s[i];
+    r_dual_aug_[c.variable] += c.a * (r_comp[i] + (ds_aff[i] * dz_aff[i]) - mu) / s[i];
   }
 
   // compute [px, -py]
@@ -329,7 +332,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   for (std::size_t i = 0; i < M; ++i) {
     const LinearInequalityConstraint& c = p_.constraints[i];
     ds[i] = c.a * dx[c.variable] + r_pi[i];
-    dz[i] = -(z[i] / s[i]) * ds[i] - (1 / s[i]) * (r_comp[i] + (s_aff[i] * z_aff[i]) - mu);
+    dz[i] = -(z[i] / s[i]) * ds[i] - (1 / s[i]) * (r_comp[i] + (ds_aff[i] * dz_aff[i]) - mu);
   }
 }
 
@@ -365,6 +368,19 @@ void QPInteriorPointSolver::EvaluateKKTConditions() {
   }
 }
 
+QPInteriorPointSolver::KKTError QPInteriorPointSolver::ComputeSquaredErrors() const {
+  KKTError result{};
+  result.r_dual = ConstXBlock(dims_, r_).squaredNorm();
+  if (dims_.K > 0) {
+    result.r_primal_eq = ConstYBlock(dims_, r_).squaredNorm();
+  }
+  if (HasInequalityConstraints()) {
+    result.r_comp = ConstSBlock(dims_, r_).squaredNorm();
+    result.r_primal_ineq = ConstZBlock(dims_, r_).squaredNorm();
+  }
+  return result;
+}
+
 // Formula 19.9
 void QPInteriorPointSolver::ComputeAlpha(AlphaValues* const output, const double tau) const {
   ASSERT(output != nullptr);
@@ -395,8 +411,8 @@ double QPInteriorPointSolver::ComputePredictorCorrectorMuAffine(
     const double mu, const AlphaValues& alpha_probe) const {
   const auto s = ConstSBlock(dims_, variables_);
   const auto z = ConstZBlock(dims_, variables_);
-  const auto ds = ConstSBlock(dims_, delta_);
-  const auto dz = ConstZBlock(dims_, delta_);
+  const auto ds = ConstSBlock(dims_, delta_affine_);
+  const auto dz = ConstZBlock(dims_, delta_affine_);
 
   // here we just compute the missing terms from (s + ds * a_p)^T * (z + dz * a_d)
   double mu_affine = mu;
@@ -558,7 +574,13 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   variables_.resize(p_->dimension);
 }
 
-void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
+// lazy man's mod-2pi
+static double Mod2Pi(double value) {
+  const std::complex<double> c{std::cos(value), std::sin(value)};
+  return std::arg(c);
+}
+
+void ConstrainedNonlinearLeastSquares::LinearizeAndSolve(const double lambda) {
   ASSERT(p_ != nullptr);
   ASSERT(static_cast<Eigen::Index>(p_->dimension) == variables_.rows());
 
@@ -569,6 +591,7 @@ void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
   for (const ResidualBase::unique_ptr& cost : p_->costs) {
     total_l2 += cost->UpdateHessian(variables_, &qp_.G, &qp_.c);
   }
+  qp_.G.diagonal().array() += lambda;
 
   // linearize equality constraints
   qp_.A_eq.setZero();
@@ -588,8 +611,8 @@ void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
 
   // TODO(gareth): Cache this object!
   // tune all these params.
-  QPInteriorPointSolver solver(qp_);
-  solver.SetLoggerCallback(qp_logger_callback_);
+  QPInteriorPointSolver solver(qp_, true);
+  //solver.SetLoggerCallback(qp_logger_callback_);
 
   // Initialize z near zero, so inequalities are initially inactive
   solver.z_block().setConstant(1.0e-3);
@@ -597,16 +620,23 @@ void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
   QPInteriorPointSolver::Params params{};
   params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
   params.max_iterations = 10;
-  params.termination_kkt2_tol = 1.0e-5;
+  params.termination_kkt2_tol = 1.0e-8;
 
   // solve it
   const QPInteriorPointSolver::TerminationState term_state = solver.Solve(params);
 
+  std::cout << qp_.G.selfadjointView<Eigen::Lower>().eigenvalues().transpose() << std::endl;
+  std::cout << "lambda = " << lambda << std::endl;
   std::cout << "error before = " << total_l2 << std::endl;
   std::cout << "termination state = " << term_state << std::endl;
 
   // get the update and retract it onto the state
   variables_ += solver.x_block();
+  for (int i = 0; i < variables_.rows(); ++i) {
+    variables_[i] = Mod2Pi(variables_[i]);
+  }
+
+  std::cout << "variables: " << variables_.transpose() << "\n";
 
   // compute the error after
   double total_l2_after = 0;
@@ -617,11 +647,6 @@ void ConstrainedNonlinearLeastSquares::LinearizeAndSolve() {
 
   std::cout << "A_eq = \n" << qp_.A_eq.format(kMatrixFmt) << std::endl;
   std::cout << "b_eq = " << qp_.b_eq.transpose().format(kMatrixFmt) << std::endl;
-
-  std::cout << "x = " << solver.x_block().transpose().format(kMatrixFmt) << std::endl;
-  std::cout << "y = " << solver.y_block().transpose().format(kMatrixFmt) << std::endl;
-  std::cout << "s = " << solver.s_block().transpose().format(kMatrixFmt) << std::endl;
-  std::cout << "z = " << solver.z_block().transpose().format(kMatrixFmt) << std::endl;
 }
 
 }  // namespace mini_opt
