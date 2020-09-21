@@ -1,10 +1,11 @@
 // Copyright 2020 Gareth Cross
+#include "qp.hpp"
+
 #include <numeric>
 #include <random>
 
 #include "nonlinear.hpp"
 #include "numerical_derivative.hpp"
-#include "qp.hpp"
 #include "test_utils.hpp"
 #include "transform_chains.hpp"
 
@@ -123,6 +124,7 @@ class QPSolverTest : public ::testing::Test {
     // add one equality constraint
     qp.A_eq.resize(1, 3);
     qp.b_eq.resize(1);
+    qp.A_eq.setZero();
     qp.A_eq(0, 1) = 1.0;
     qp.A_eq(0, 2) = -1.0;
     qp.b_eq(0) = -0.5;
@@ -529,169 +531,6 @@ TEST_FIXTURE(QPSolverTest, TestWithEqualitiesOnly)
 TEST_FIXTURE(QPSolverTest, TestWithFullyConstrainedEqualities)
 TEST_FIXTURE(QPSolverTest, TestWithInequalitiesAndEqualities)
 TEST_FIXTURE(QPSolverTest, TestGeneratedProblems)
-
-struct ActuatorLink {
-  // Euler angles from the decomposed rotation.
-  // Factorized w/ order XYZ.
-  math::Vector<double, 3> rotation_xyz;
-
-  // Translational part.
-  math::Vector<double, 3> translation;
-
-  // Mask of angles that are active in the optimization.
-  std::array<uint8_t, 3> active;
-
-  // Number of active angles.
-  int ActiveCount() const {
-    return static_cast<int>(
-        std::count_if(active.begin(), active.end(), [](auto b) { return b > 0; }));
-  }
-
-  // Construct from Pose and mask.
-  ActuatorLink(const Pose& pose, const std::array<uint8_t, 3>& mask)
-      : rotation_xyz(math::EulerAnglesFromSO3(pose.rotation.conjugate())),
-        translation(pose.translation),
-        active(mask) {}
-
-  // Return pose representing this transform, given the euler angles.
-  Pose Compute(const math::Vector<double>& angles, const int position,
-               math::Matrix<double, 3, Dynamic>* const J_out) const {
-    // Pull out just the angles we care about.
-    math::Vector<double, 3> xyz_copy = rotation_xyz;
-    for (int i = 0, angle_pos = position; i < 3; ++i) {
-      if (active[i]) {
-        xyz_copy[i] = angles[angle_pos++];
-      }
-    }
-    // compute rotation and derivatives
-    const math::SO3FromEulerAngles_<double> rot =
-        math::SO3FromEulerAngles(xyz_copy, math::CompositionOrder::XYZ);
-    if (J_out) {
-      // copy out derivative blocks we'll need later
-      for (int i = 0, angle_pos = position; i < 3; ++i) {
-        if (active[i]) {
-          J_out->col(angle_pos++) = rot.rotation_D_angles.col(i);
-        }
-      }
-    }
-    // Return a pose w/ our fixed translation.
-    // TODO(gareth): Dumb that we have to copy the fixed translation always...
-    return Pose{rot.q, translation};
-  }
-
-  void FillJacobian(
-      const Block<const Matrix<double, 3, Dynamic>, 3, 3, true>& output_D_tangent,
-      const Block<const Matrix<double, 3, Dynamic>, 3, Dynamic, true>& tangent_D_angles,
-      Block<Eigen::Matrix<double, 3, Dynamic>, 3, Dynamic, true> J_out) const {
-    // Output buffer should be correct size already.
-    ASSERT(J_out.cols() == ActiveCount());
-    if (!active[0] && !active[1] && active[2]) {
-      // Fast path for common case, we know dz = [0, 0, 1]
-      J_out = output_D_tangent.rightCols<1>();
-    } else {
-      J_out.noalias() = output_D_tangent * tangent_D_angles;
-    }
-  }
-};
-
-struct ActuatorChain {
-  // Current poses in the chain.
-  std::vector<ActuatorLink> links;
-
-  // private:
-  // Poses.
-  std::vector<Pose> pose_buffer_;
-
-  // Buffer of rotations derivatives.
-  math::Matrix<double, 3, Dynamic> rotation_D_angles_;
-
-  // Cached products while doing computations.
-  ChainComputationBuffer chain_buffer_;
-
-  // Cached angles
-  math::Vector<double> angles_cached_;
-
-  // Iterate over the chain and compute the effector pose.
-  // Derivatives wrt all the input angles are computed and cached locally.
-  void Update(const math::Vector<double>& angles) {
-    if (!ShouldUpdate(angles)) {
-      return;
-    }
-    angles_cached_ = angles;
-
-    // Recompute.
-    if (rotation_D_angles_.size() == 0) {
-      // compute total active
-      const int total_active = TotalActive();
-      ASSERT(angles.rows() == total_active);
-      // allocate space
-      rotation_D_angles_.resize(3, total_active);
-    }
-
-    // compute poses and rotational derivatives
-    pose_buffer_.resize(links.size());
-    for (int i = 0, position = 0; i < links.size(); ++i) {
-      const ActuatorLink& link = links[i];
-      const int num_active = link.ActiveCount();
-      pose_buffer_[i] = link.Compute(angles, position, &rotation_D_angles_);
-      position += num_active;
-    }
-
-    // linearize
-    ComputeChain(pose_buffer_, &chain_buffer_);
-  }
-
-  // Return true if the angles have changed since the last time this was called.
-  // Allows us to re-use intermediate values.
-  bool ShouldUpdate(const math::Vector<double>& angles) const {
-    if (angles_cached_.rows() != angles.rows()) {
-      return true;
-    }
-    for (int i = 0; i < angles.rows(); ++i) {
-      if (std::abs(angles_cached_[i] - angles[i]) > 1.0e-6) {
-        return true;
-      }
-    }
-    return false;
-  }
-
- public:
-  // Compute rotation and translation of the effector.
-  math::Vector<double, 3> ComputeEffectorPosition(
-      const math::Vector<double>& angles,
-      math::Matrix<double, 3, Eigen::Dynamic>* const J = nullptr) {
-    Update(angles);
-
-    // chain rule
-    if (J) {
-      ASSERT(J->cols() == TotalActive());
-      for (int i = 0, position = 0; i < links.size(); ++i) {
-        const ActuatorLink& link = links[i];
-        const int active_count = link.ActiveCount();
-        if (active_count == 0) {
-          continue;
-        }
-
-        // Need const-references so we can get const-blocks.
-        const ChainComputationBuffer& const_buffer = chain_buffer_;
-        const math::Matrix<double, 3, Dynamic>& const_rotation_D_angles = rotation_D_angles_;
-
-        // Chain rule w/ the angle representation.
-        link.FillJacobian(const_buffer.translation_D_tangent.middleCols<3>(i * 3),
-                          const_rotation_D_angles.middleCols(position, active_count),
-                          J->middleCols(position, active_count));
-
-        position += link.ActiveCount();
-      }
-    }
-    return chain_buffer_.start_T_end().translation;
-  }
-
-  int TotalActive() const {
-    return std::accumulate(links.begin(), links.end(), 0,
-                           [](const int t, const ActuatorLink& l) { return t + l.ActiveCount(); });
-  }
-};
 
 template <int ResidualDim, int NumParams>
 void TestResidualFunctionDerivative(

@@ -1,4 +1,5 @@
 // Copyright 2020 Gareth Cross
+#include <array>
 #include <vector>
 
 #include "so3.hpp"
@@ -9,6 +10,8 @@ namespace mini_opt {
 
 /*
  * A simple 3D Pose type: rotation + translation.
+ *
+ * TODO(gareth): Template on double vs. float.
  */
 struct Pose {
   // Construct w/ rotation and translation.
@@ -43,7 +46,7 @@ struct Pose {
 template <typename T>
 using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 
-/*
+/**
  * Store intermediate quantities that are generated when iterating down a sequence of
  * joints. This is used to compute the transform of an effector wrt the root of the
  * chain, as well as the derivatives of its orientation and translation wrt the intermediate
@@ -77,12 +80,85 @@ struct ChainComputationBuffer {
   Pose start_T_end() const;
 };
 
-/*
+/**
  * Fill `ChainComputationBuffer` instance by composing all the poses in a chain, computing
  * the derivatives in the process.
  *
  * If `links` is empty, we clear the buffer.
  */
 void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const c);
+
+/**
+ *
+ */
+struct ActuatorLink {
+  // Euler angles from the decomposed rotation.
+  // Factorized w/ order XYZ.
+  math::Vector<double, 3> rotation_xyz;
+
+  // Translational part.
+  math::Vector<double, 3> translation;
+
+  // Mask of angles that are active in the optimization.
+  std::array<uint8_t, 3> active;
+
+  // Number of active angles.
+  int ActiveCount() const {
+    return static_cast<int>(
+        std::count_if(active.begin(), active.end(), [](auto b) { return b > 0; }));
+  }
+
+  // Construct from Pose and mask.
+  ActuatorLink(const Pose& pose, const std::array<uint8_t, 3>& mask)
+      : rotation_xyz(math::EulerAnglesFromSO3(pose.rotation.conjugate())),
+        translation(pose.translation),
+        active(mask) {}
+
+  // Return pose representing this transform, given the euler angles.
+  Pose Compute(const math::Vector<double>& angles, const int position,
+               math::Matrix<double, 3, Eigen::Dynamic>* const J_out) const;
+
+  void FillJacobian(
+      const Eigen::Block<const Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, 3, true>&
+          output_D_tangent,
+      const Eigen::Block<const Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, Eigen::Dynamic, true>&
+          tangent_D_angles,
+      Eigen::Block<Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, Eigen::Dynamic, true> J_out) const;
+};
+
+// TODO(gareth): comments...
+struct ActuatorChain {
+  // Current poses in the chain.
+  std::vector<ActuatorLink> links;
+
+  // private:
+  // Poses.
+  std::vector<Pose> pose_buffer_;
+
+  // Buffer of rotations derivatives.
+  math::Matrix<double, 3, Eigen::Dynamic> rotation_D_angles_;
+
+  // Cached products while doing computations.
+  ChainComputationBuffer chain_buffer_;
+
+  // Cached angles
+  math::Vector<double> angles_cached_;
+
+  // Iterate over the chain and compute the effector pose.
+  // Derivatives wrt all the input angles are computed and cached locally.
+  void Update(const math::Vector<double>& angles);
+
+  // Return true if the angles have changed since the last time this was called.
+  // Allows us to re-use intermediate values.
+  bool ShouldUpdate(const math::Vector<double>& angles) const;
+
+ public:
+  // Compute rotation and translation of the effector.
+  math::Vector<double, 3> ComputeEffectorPosition(
+      const math::Vector<double>& angles,
+      math::Matrix<double, 3, Eigen::Dynamic>* const J = nullptr);
+
+  int TotalActive() const;
+};
 
 }  // namespace mini_opt
