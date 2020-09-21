@@ -3,10 +3,10 @@
 #include <random>
 
 #include "nonlinear.hpp"
-#include "numerical_derivative.hpp"  //  from geometry_utils
+#include "numerical_derivative.hpp"
 #include "qp.hpp"
-#include "so3.hpp"  //  from geometry_utils
 #include "test_utils.hpp"
+#include "transform_chains.hpp"
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -46,6 +46,7 @@ class QPSolverTest : public ::testing::Test {
     return constant;
   }
 
+  // Variant of the above that operates on an Eigen vector instead.
   double BuildQuadraticVector(const Eigen::VectorXd& roots, QP* const output) {
     std::vector<Root> roots_structs;
     for (int i = 0; i < roots.rows(); ++i) {
@@ -528,177 +529,6 @@ TEST_FIXTURE(QPSolverTest, TestWithEqualitiesOnly)
 TEST_FIXTURE(QPSolverTest, TestWithFullyConstrainedEqualities)
 TEST_FIXTURE(QPSolverTest, TestWithInequalitiesAndEqualities)
 TEST_FIXTURE(QPSolverTest, TestGeneratedProblems)
-
-// TODO(gareth): Template?
-struct Pose {
-  // Construct w/ rotation and translation.
-  Pose(const math::Quaternion<double>& q, const math::Vector<double, 3>& t)
-      : rotation(q), translation(t) {}
-
-  Pose()
-      : rotation(math::Quaternion<double>::Identity()),
-        translation(math::Vector<double, 3>::Zero()) {}
-
-  // Rotation.
-  math::Quaternion<double> rotation;
-
-  // Translation.
-  math::Vector<double, 3> translation;
-
-  // Multiply together.
-  Pose operator*(const Pose& other) const {
-    return Pose(rotation * other.rotation, translation + rotation * other.translation);
-  }
-
-  // Invert the pose.
-  Pose Inverse() const { return Pose(rotation.inverse(), rotation.inverse() * -translation); }
-
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-};
-
-template <typename T>
-using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
-
-struct ChainComputationBuffer {
-  // Derivatives of `root_R_effector` wrt joint angles.
-  math::Matrix<double, 3, Eigen::Dynamic> orientation_D_tangent;
-
-  // Derivatives of `root_t_effector` wrt joint angles.
-  math::Matrix<double, 3, Eigen::Dynamic> translation_D_tangent;
-
-  // Buffer for rotations of the joints, backwards direction.
-  AlignedVector<math::Quaternion<double>> i_R_end;
-
-  // Buffer for translations.
-  math::Matrix<double, 3, Eigen::Dynamic> i_t_end;
-
-  Pose start_T_end() const {
-    ASSERT(!i_R_end.empty() && i_t_end.cols() > 0);
-    return Pose{i_R_end.front(), i_t_end.leftCols<1>()};
-  }
-};
-
-void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const c) {
-  if (links.empty()) {
-    // no iteration to do
-    c->orientation_D_tangent.resize(3, 0);
-    c->translation_D_tangent.resize(3, 0);
-    c->i_R_end.clear();
-    c->i_t_end.resize(3, 0);
-    return;
-  }
-  const int N = static_cast<int>(links.size());
-
-  // Compute backwards rotations (right to left)
-  // Bucket `i` stores [i]_R_end.
-  c->i_R_end.resize(N + 1);
-  c->i_R_end[N].setIdentity();
-  for (int i = N - 1; i >= 0; --i) {
-    // rotation = previous_R_current
-    c->i_R_end[i] = links[i].rotation * c->i_R_end[i + 1];
-  }
-
-  // Now compute translations.
-  // We are multiplying the transforms, going right to left. The last element (i==0) is
-  // root_t_effector.
-  c->i_t_end.resize(3, N + 1);
-  c->i_t_end.col(N).setZero();
-  for (int i = N - 1; i >= 0; --i) {
-    // rotation = previous_R_current
-    c->i_t_end.col(i).noalias() = links[i].rotation * c->i_t_end.col(i + 1) + links[i].translation;
-  }
-
-  // Compute derivative of translation at the end wrt angle i.
-  // d(0_t_N) / d(theta_[i]) = start_R_i * d(i_R_[i+1] * [i+1]_t_N) / d(theta_[i])
-  //  = start_D_[i+1] * [-[i+1]_t_N]_x
-  c->translation_D_tangent.resize(3, N * 3);
-  Quaternion<double> start_R_i_plus_1 = Quaternion<double>::Identity();  //  forward rotation
-  for (int i = 0; i < N - 1; ++i) {
-    start_R_i_plus_1 *= links[i].rotation;
-    c->translation_D_tangent.middleCols(i * 3, 3).noalias() =
-        start_R_i_plus_1.matrix() * math::Skew3(-c->i_t_end.col(i + 1));
-  }
-  c->translation_D_tangent.rightCols<3>().setZero();  //  last angle does not affect translation
-
-  // Compute derivative of rotation at the end wrt angle i.
-  c->orientation_D_tangent.resize(3, N * 3);
-  for (int i = 0; i < N - 1; ++i) {
-    // d(root_R_eff)/d(theta_i) = n_R_[i+1]
-    c->orientation_D_tangent.middleCols(i * 3, 3).noalias() =
-        c->i_R_end[i + 1].conjugate().matrix();
-  }
-  c->orientation_D_tangent.rightCols<3>().setIdentity();
-}
-
-TEST(LinkTest, TestRotation) {
-  // create some links
-  // clang-format off
-  const std::vector<Pose> links = {
-    {math::QuaternionExp(Vector3d{-0.5, 0.5, 0.3}), {1.0, 0.5, 2.0}}, 
-    {math::QuaternionExp(Vector3d{0.8, 0.5, 1.2}), {0.5, 0.75, -0.5}},
-    {math::QuaternionExp(Vector3d{1.5, -0.2, 0.0}), {1.2, -0.5, 0.1}},
-    {math::QuaternionExp(Vector3d{0.2, -0.1, 0.3}), {0.1, -0.1, 0.2}}
-  };
-  // clang-format on
-
-  const auto translation_lambda = [&](const VectorXd& angles) -> Vector3d {
-    ASSERT(angles.rows() == 12);
-    std::vector<Pose> links_copied = links;
-    for (int i = 0; i < angles.rows() / 3; ++i) {
-      links_copied[i].rotation *= math::QuaternionExp(angles.segment(i * 3, 3));
-    }
-    ChainComputationBuffer c{};
-    ComputeChain(links_copied, &c);
-    return c.i_t_end.leftCols<1>();
-  };
-
-  const auto rotation_lambda = [&](const VectorXd& angles) -> Quaterniond {
-    ASSERT(angles.rows() == 12);
-    std::vector<Pose> links_copied = links;
-    for (int i = 0; i < angles.rows() / 3; ++i) {
-      links_copied[i].rotation *= math::QuaternionExp(angles.segment(i * 3, 3));
-    }
-    ChainComputationBuffer c{};
-    ComputeChain(links_copied, &c);
-    return c.i_R_end.front();
-  };
-
-  // compute numerically
-  const Matrix<double, 3, 12> J_trans_numerical =
-      math::NumericalJacobian(Matrix<double, 12, 1>::Zero(), translation_lambda);
-  const Matrix<double, 3, 12> J_trans_rotational =
-      math::NumericalJacobian(Matrix<double, 12, 1>::Zero(), rotation_lambda);
-
-  // check against anlytical
-  ChainComputationBuffer c{};
-  ComputeChain(links, &c);
-
-  ASSERT_EIGEN_NEAR(J_trans_numerical, c.translation_D_tangent, tol::kNano);
-  PRINT_MATRIX(J_trans_numerical);
-  PRINT_MATRIX(c.translation_D_tangent);
-
-  ASSERT_EIGEN_NEAR(J_trans_rotational, c.orientation_D_tangent, tol::kNano);
-  PRINT_MATRIX(J_trans_rotational);
-  PRINT_MATRIX(c.orientation_D_tangent);
-
-  // pull out poses
-  ASSERT_EQ(links.size() + 1, c.i_R_end.size());
-  ASSERT_EQ(c.i_R_end.size(), static_cast<size_t>(c.i_t_end.cols()));
-  const Pose start_T_end{c.i_R_end.front(), c.i_t_end.leftCols<1>()};
-
-  // note we are iterating over inverted poses `i_T_end`, so i = 0 is in fact the full transform
-  Pose start_T_current{};
-  for (int i = 0; i < c.i_R_end.size(); ++i) {
-    const Pose start_T_i = start_T_end * Pose(c.i_R_end[i], c.i_t_end.col(i)).Inverse();
-    // compare poses
-    ASSERT_EIGEN_NEAR(start_T_current.translation, start_T_i.translation, tol::kNano)
-        << "i = " << i;
-    ASSERT_EIGEN_NEAR(start_T_current.rotation.matrix(), start_T_i.rotation.matrix(), tol::kNano)
-        << "i = " << i;
-    // advance
-    start_T_current = start_T_current * links[i];
-  }
-}
 
 struct ActuatorLink {
   // Euler angles from the decomposed rotation.
