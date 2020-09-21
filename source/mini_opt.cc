@@ -611,8 +611,8 @@ void ConstrainedNonlinearLeastSquares::LinearizeAndSolve(const double lambda) {
 
   // TODO(gareth): Cache this object!
   // tune all these params.
-  QPInteriorPointSolver solver(qp_, true);
-  //solver.SetLoggerCallback(qp_logger_callback_);
+  QPInteriorPointSolver solver(qp_, false);
+  solver.SetLoggerCallback(qp_logger_callback_);
 
   // Initialize z near zero, so inequalities are initially inactive
   solver.z_block().setConstant(1.0e-3);
@@ -625,7 +625,6 @@ void ConstrainedNonlinearLeastSquares::LinearizeAndSolve(const double lambda) {
   // solve it
   const QPInteriorPointSolver::TerminationState term_state = solver.Solve(params);
 
-  std::cout << qp_.G.selfadjointView<Eigen::Lower>().eigenvalues().transpose() << std::endl;
   std::cout << "lambda = " << lambda << std::endl;
   std::cout << "error before = " << total_l2 << std::endl;
   std::cout << "termination state = " << term_state << std::endl;

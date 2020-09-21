@@ -1074,9 +1074,9 @@ class ConstrainedNLSTest : public ::testing::Test {
     // Two actuators can effectuate translation, whereas the last one can only rotate the effector.
     std::unique_ptr<ActuatorChain> chain = std::make_unique<ActuatorChain>();
     const std::array<uint8_t, 3> mask = {{0, 0, 1}};
-    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.25, 0.1, 0.0}), mask);
-    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.6, 0.05, 0.0}), mask);
-    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}),
+    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.0, 0.0, 0.0}), mask);
+    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.4, 0.0, 0.0}), mask);
+    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.4, 0.0, 0.0}),
                               std::array<uint8_t, 3>{{0, 0, 0}} /* turn off for now */);
 
     // make a cost that we want to achieve a specific point vertically
@@ -1089,10 +1089,9 @@ class ConstrainedNLSTest : public ::testing::Test {
       const Vector3d effector_xyz =
           chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
       if (J_out) {
-        ASSERT(J_out->cols() == 2);
         *J_out = J_full.middleRows<1>(1);
       }
-      return Matrix<double, 1, 1>{effector_xyz.y() - 0.1};
+      return Matrix<double, 1, 1>{effector_xyz.y() - 0.6};
     };
 
     // make a cost that minimizes the sum of squares of the angles
@@ -1117,10 +1116,9 @@ class ConstrainedNLSTest : public ::testing::Test {
       const Vector3d effector_xyz =
           chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
       if (J_out) {
-        ASSERT(J_out->cols() == 2);
         *J_out = J_full.topRows<1>();
       }
-      return Matrix<double, 1, 1>{effector_xyz.x() - 0.3};
+      return Matrix<double, 1, 1>{effector_xyz.x() - 0.45};
     };
 
     Residual<2, Dynamic> combined_soft;
@@ -1135,7 +1133,7 @@ class ConstrainedNLSTest : public ::testing::Test {
         ASSERT(J_out->cols() == 2);
         *J_out = J_full.topRows<2>();
       }
-      return effector_xyz.head<2>() - Vector2d{0.3, 0.1};
+      return effector_xyz.head<2>() - Vector2d{0.45, 0.6};
     };
 
     std::vector<double> angles;
@@ -1143,47 +1141,47 @@ class ConstrainedNLSTest : public ::testing::Test {
       angles.push_back(angle);
     }
 
-    Eigen::MatrixXd costs(angles.size(), angles.size());
-    /* Eigen::MatrixXd gradients(angles.size(), angles.size() * 2);
-     Eigen::MatrixXd hessian_det(angles.size(), angles.size());*/
-    for (int row = 0; row < angles.size(); ++row) {
-      for (int col = 0; col < angles.size(); ++col) {
-        const Vector2d angles_pt(angles[row], angles[col]);
+    // Eigen::MatrixXd costs(angles.size(), angles.size());
+    ///* Eigen::MatrixXd gradients(angles.size(), angles.size() * 2);
+    // Eigen::MatrixXd hessian_det(angles.size(), angles.size());*/
+    // for (int row = 0; row < angles.size(); ++row) {
+    //  for (int col = 0; col < angles.size(); ++col) {
+    //    const Vector2d angles_pt(angles[row], angles[col]);
 
-        /* const Eigen::Vector2d gradient =
-             math::NumericalJacobian(angles_pt, [&](const Vector2d& angles_pt) -> double {
-               return combined_soft.function(angles_pt, nullptr).squaredNorm();
-             }).transpose();
+    //    /* const Eigen::Vector2d gradient =
+    //         math::NumericalJacobian(angles_pt, [&](const Vector2d& angles_pt) -> double {
+    //           return combined_soft.function(angles_pt, nullptr).squaredNorm();
+    //         }).transpose();
 
-         const Eigen::Matrix2d hessian =
-             math::NumericalJacobian(angles_pt, [&](const Vector2d& angles_pt) -> Vector2d {
-               return math::NumericalJacobian(
-                          angles_pt,
-                          [&](const Vector2d& angles_pt) -> double {
-                            return combined_soft.function(angles_pt, nullptr).squaredNorm();
-                          })
-                   .transpose();
-             });
-         hessian_det(row, col) = hessian.determinant();
+    //     const Eigen::Matrix2d hessian =
+    //         math::NumericalJacobian(angles_pt, [&](const Vector2d& angles_pt) -> Vector2d {
+    //           return math::NumericalJacobian(
+    //                      angles_pt,
+    //                      [&](const Vector2d& angles_pt) -> double {
+    //                        return combined_soft.function(angles_pt, nullptr).squaredNorm();
+    //                      })
+    //               .transpose();
+    //         });
+    //     hessian_det(row, col) = hessian.determinant();
 
-         gradients(row, col) = gradient[0];
-         gradients(row, angles.size() + col) = gradient[1];*/
+    //     gradients(row, col) = gradient[0];
+    //     gradients(row, angles.size() + col) = gradient[1];*/
 
-        costs(row, col) = 0.5 * combined_soft.function(angles_pt, nullptr).squaredNorm();
-      }
-    }
+    //    costs(row, col) = 0.5 * combined_soft.function(angles_pt, nullptr).squaredNorm();
+    //  }
+    //}
 
-    Eigen::Index min_row, min_col;
-    const double min_coeff = costs.minCoeff(&min_row, &min_col);
+    // Eigen::Index min_row, min_col;
+    // const double min_coeff = costs.minCoeff(&min_row, &min_col);
 
-    PRINT(min_coeff);
+    /*PRINT(min_coeff);
     PRINT(angles[min_row]);
-    PRINT(angles[min_col]);
+    PRINT(angles[min_col]);*/
 
-    const IOFormat csv_format(FullPrecision, 0, ", ", "\n", "", "", "", "");
+    /*const IOFormat csv_format(FullPrecision, 0, ", ", "\n", "", "", "", "");
     std::ofstream out("C:/Users/garet/Documents/test.csv");
     out << costs.format(csv_format);
-    out.flush();
+    out.flush();*/
     /*
     std::ofstream out_gradients("C:/Users/garet/Documents/gradients.csv");
     out_gradients << gradients.format(csv_format);
@@ -1195,20 +1193,19 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     TestResidualFunctionDerivative<2, Dynamic>(combined_soft.function,
                                                VectorXd{Vector2d(-0.5, 0.4)});
-
     TestResidualFunctionDerivative<1, Dynamic>(y_residual.function, VectorXd{Vector2d(-0.5, 0.4)});
     TestResidualFunctionDerivative<1, Dynamic>(x_eq_constraint.function,
                                                VectorXd{Vector2d(0.3, -0.6)});
 
     Problem problem{};
-    // problem.costs.emplace_back(new Residual<1, Dynamic>(y_residual));
-    problem.costs.emplace_back(new Residual<2, Dynamic>(combined_soft));
+    problem.costs.emplace_back(new Residual<1, Dynamic>(y_residual));
+    // problem.costs.emplace_back(new Residual<2, Dynamic>(combined_soft));
     // problem.costs.emplace_back(new Residual<2, Dynamic>(ss_residual));
-    // problem.equality_constraints.emplace_back(new Residual<1, Dynamic>(x_eq_constraint));
+    problem.equality_constraints.emplace_back(new Residual<1, Dynamic>(x_eq_constraint));
     // problem.inequality_constraints.push_back(Var(0) <= 3 * M_PI / 4);
     // problem.inequality_constraints.push_back(Var(0) >= -3 * M_PI / 4);
     // problem.inequality_constraints.push_back(Var(1) <= 3 * M_PI / 4);
-    // problem.inequality_constraints.push_back(Var(1) >= -3 * M_PI / 4);
+    problem.inequality_constraints.push_back(Var(1) >= 0);
     problem.dimension = 2;
 
     ConstrainedNonlinearLeastSquares nls(&problem);
@@ -1216,11 +1213,17 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     const Vector2d initial_values{M_PI / 4, -M_PI / 6};
     nls.SetVariables(initial_values);
+    // try {
     nls.LinearizeAndSolve(10.0);
-    nls.LinearizeAndSolve();
-    nls.LinearizeAndSolve();
-    nls.LinearizeAndSolve();
-    nls.LinearizeAndSolve(1.0);
+    nls.LinearizeAndSolve(0.001);
+    nls.LinearizeAndSolve(0.001);
+    nls.LinearizeAndSolve(0.001);
+    nls.LinearizeAndSolve(0.001);
+    nls.LinearizeAndSolve(0.001);
+    //} catch (const FailedFactorization&) {
+    //}
+
+    /*nls.LinearizeAndSolve(1.0);
     nls.LinearizeAndSolve(1.0);
     nls.LinearizeAndSolve(1.0);
     nls.LinearizeAndSolve(1.0);
@@ -1236,7 +1239,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     nls.LinearizeAndSolve(0.1);
     nls.LinearizeAndSolve(0.1);
     nls.LinearizeAndSolve(0.1);
-    nls.LinearizeAndSolve(0.1);
+    nls.LinearizeAndSolve(0.1);*/
 
     const VectorXd angles_out = nls.variables();
     PRINT_MATRIX(chain->ComputeEffectorPosition(angles_out).transpose());
@@ -1256,7 +1259,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     // PRINT(x_eq_constraint.Error(angles_out));
     PRINT(combined_soft.Error(angles_out));
 
-    combined_soft.Error(Vector2d(M_PI/4, 0.0));
+    combined_soft.Error(angles_out);
     const Pose start_T_end = chain->chain_buffer_.start_T_end();
 
     for (int i = 0; i < chain->chain_buffer_.i_t_end.cols(); ++i) {
