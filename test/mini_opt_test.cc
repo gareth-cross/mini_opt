@@ -1,5 +1,5 @@
 // Copyright 2020 Gareth Cross
-#include "mini_opt.hpp"
+#include "qp.hpp"
 
 #include <Eigen/Jacobi>
 #include <chrono>

@@ -1,4 +1,4 @@
-#include "mini_opt.hpp"
+#include "qp.hpp"
 
 #include <Eigen/Dense>
 #include <iostream>
