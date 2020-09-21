@@ -58,15 +58,19 @@ using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
  */
 struct ChainComputationBuffer {
   // Derivatives of `root_R_effector` wrt tangent of SO(3).
+  // Dimension is [3, N * 3]
   math::Matrix<double, 3, Eigen::Dynamic> orientation_D_tangent;
 
   // Derivatives of `root_t_effector` wrt tangent of SO(3).
+  // Dimension is [3, N * 3]
   math::Matrix<double, 3, Eigen::Dynamic> translation_D_tangent;
 
   // Buffer for the end frame wrt all intermediate frames.
+  // Dimension is N + 1
   AlignedVector<math::Quaternion<double>> i_R_end;
 
   // Buffer for translation of the end frame wrt all intermediate frames.
+  // Dimension is N + 1
   math::Matrix<double, 3, Eigen::Dynamic> i_t_end;
 
   // Return the transform expressing the `end` frame wrt the `start` (i = 0) frame.
