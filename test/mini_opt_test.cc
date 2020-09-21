@@ -1,13 +1,13 @@
 // Copyright 2020 Gareth Cross
-#include "qp.hpp"
-
 #include <Eigen/Jacobi>
 #include <chrono>
 #include <fstream>
 #include <numeric>
 #include <random>
 
+#include "nonlinear.hpp"
 #include "numerical_derivative.hpp"
+#include "qp.hpp"
 #include "so3.hpp"  //  from geometry_utils
 #include "test_utils.hpp"
 
