@@ -123,8 +123,8 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
   return TerminationState::MAX_ITERATIONS;
 }
 
-QPInteriorPointSolver::IterationOutputs QPInteriorPointSolver::Iterate(
-    const double sigma, const BarrierStrategy& strategy) {
+IterationOutputs QPInteriorPointSolver::Iterate(const double sigma,
+                                                const BarrierStrategy& strategy) {
   // fill out `r_`
   EvaluateKKTConditions();
 
@@ -366,7 +366,7 @@ void QPInteriorPointSolver::EvaluateKKTConditions() {
   }
 }
 
-QPInteriorPointSolver::KKTError QPInteriorPointSolver::ComputeSquaredErrors() const {
+KKTError QPInteriorPointSolver::ComputeSquaredErrors() const {
   KKTError result{};
   result.r_dual = ConstXBlock(dims_, r_).squaredNorm();
   if (dims_.K > 0) {

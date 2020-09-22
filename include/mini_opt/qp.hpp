@@ -113,6 +113,41 @@ enum class BarrierStrategy {
   PREDICTOR_CORRECTOR,
 };
 
+struct AlphaValues {
+  // Alpha in the primal variables (x an s), set to 1 if we have no s
+  double primal{1.};
+  // Alpha in the dual variables (y and z), set to 1 if we have no z
+  double dual{1.};
+};
+
+// Some intermediate values we compute during Iterate.
+struct IterationOutputs {
+  // Mu, the complementarity condition: s^T * z / M (Equation 16.56).
+  double mu{0.};
+  // The value of sigma used during the iteration.
+  double sigma{1.};
+  // Alpha as defined by equation (19.9).
+  AlphaValues alpha{};
+  // Optional alpha values computing during the MPC probing step.
+  AlphaValues alpha_probe{std::numeric_limits<double>::quiet_NaN(),
+                          std::numeric_limits<double>::quiet_NaN()};
+  // Mu as determined by taking a step with mu=0, then evaluating equation (19.21).
+  // Only relevant in predictor-corrector mode.
+  double mu_affine{std::numeric_limits<double>::quiet_NaN()};
+};
+
+// Squared errors in the first order KKT conditions.
+// At a point that satisfies the conditions, these should all be zero.
+struct KKTError {
+  double r_dual{0};         // The dual objective: Gx + c - A_e^T * y - A_i * z
+  double r_comp{0};         // Complementarity condition: s^T * z
+  double r_primal_eq{0};    // Primal equality constraint: A_e*x + b_e
+  double r_primal_ineq{0};  // Primal inequality constraint: A_i*x + b_i - s
+
+  // Total squared error.
+  double Total() const { return r_dual + r_comp + r_primal_eq + r_primal_ineq; }
+};
+
 /*
  * Minimize quadratic cost function with inequality constraints using interior point method.
  *
@@ -173,41 +208,6 @@ struct QPInteriorPointSolver {
   VectorBlock s_block();
   VectorBlock y_block();
   VectorBlock z_block();
-
-  struct AlphaValues {
-    // Alpha in the primal variables (x an s), set to 1 if we have no s
-    double primal{1.};
-    // Alpha in the dual variables (y and z), set to 1 if we have no z
-    double dual{1.};
-  };
-
-  // Some derivative values we compute during Iterate.
-  struct IterationOutputs {
-    // Mu, the complementarity condition: s^T * z / M (Equation 16.56).
-    double mu{0.};
-    // The value of sigma used during the iteration.
-    double sigma{1.};
-    // Alpha as defined by equation (19.9).
-    AlphaValues alpha{};
-    // Optional alpha values computing during the MPC probing step.
-    AlphaValues alpha_probe{std::numeric_limits<double>::quiet_NaN(),
-                            std::numeric_limits<double>::quiet_NaN()};
-    // Mu as determined by taking a step with mu=0, then evaluating equation (19.21).
-    // Only relevant in predictor-corrector mode.
-    double mu_affine{std::numeric_limits<double>::quiet_NaN()};
-  };
-
-  // Squared errors in the first order KKT conditions.
-  // At a point that satisfies the conditions, these should all be zero.
-  struct KKTError {
-    double r_dual{0};         // The dual objective: Gx + c - A_e^T * y - A_i * z
-    double r_comp{0};         // Complementarity condition: s^T * z
-    double r_primal_eq{0};    // Primal equality constraint: A_e*x + b_e
-    double r_primal_ineq{0};  // Primal inequality constraint: A_i*x + b_i - s
-
-    // Total squared error.
-    double Total() const { return r_dual + r_comp + r_primal_eq + r_primal_ineq; }
-  };
 
   // Type for a callback that we call after each iteration, used for logging stats, tests.
   using LoggingCallback =

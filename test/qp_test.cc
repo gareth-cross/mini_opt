@@ -188,10 +188,8 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
-  static void ProgressPrinterNoState(const QPInteriorPointSolver& solver,
-                                     const QPInteriorPointSolver::KKTError& kkt2_prev,
-                                     const QPInteriorPointSolver::KKTError& kkt2_after,
-                                     const QPInteriorPointSolver::IterationOutputs& outputs) {
+  static void ProgressPrinterNoState(const QPInteriorPointSolver& solver, const KKTError& kkt2_prev,
+                                     const KKTError& kkt2_after, const IterationOutputs& outputs) {
     (void)solver;
     std::cout << "Iteration summary: ";
     std::cout << "||kkt||^2: " << kkt2_prev.Total() << " --> " << kkt2_after.Total()
@@ -208,10 +206,8 @@ class QPSolverTest : public ::testing::Test {
   }
 
   // TODO(gareth): Would really like to use libfmt for this instead...
-  static void ProgressPrinter(const QPInteriorPointSolver& solver,
-                              const QPInteriorPointSolver::KKTError& kkt2_prev,
-                              const QPInteriorPointSolver::KKTError& kkt2_after,
-                              const QPInteriorPointSolver::IterationOutputs& outputs) {
+  static void ProgressPrinter(const QPInteriorPointSolver& solver, const KKTError& kkt2_prev,
+                              const KKTError& kkt2_after, const IterationOutputs& outputs) {
     ProgressPrinterNoState(solver, kkt2_prev, kkt2_after, outputs);
     // dump the state with labels
     std::cout << "After update:\n";
