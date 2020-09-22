@@ -6,7 +6,7 @@
 using namespace Eigen;
 namespace mini_opt {
 
-const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
+static const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
 
 bool LinearInequalityConstraint::IsFeasible(double x) const {
   // There might be an argument to be made we should tolerate some epsilon > 0 here?
@@ -98,7 +98,7 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
     const KKTError kkt2_prev = ComputeSquaredErrors();
 
     // solve for the update
-    const IterationOutputs iteration_outputs = Iterate(sigma, params.barrier_strategy);
+    const IPIterationOutputs iteration_outputs = Iterate(sigma, params.barrier_strategy);
 
     // evaluate the residual again, which fills `r_` for the next iteration
     EvaluateKKTConditions();
@@ -123,13 +123,13 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
   return TerminationState::MAX_ITERATIONS;
 }
 
-IterationOutputs QPInteriorPointSolver::Iterate(const double sigma,
-                                                const BarrierStrategy& strategy) {
+IPIterationOutputs QPInteriorPointSolver::Iterate(const double sigma,
+                                                  const BarrierStrategy& strategy) {
   // fill out `r_`
   EvaluateKKTConditions();
 
   // evaluate the complementarity condition
-  IterationOutputs outputs{};
+  IPIterationOutputs outputs{};
   if (HasInequalityConstraints()) {
     outputs.mu = ConstSBlock(dims_, r_).sum() / static_cast<double>(dims_.M);
   }

@@ -4,6 +4,7 @@
 #include <numeric>
 #include <random>
 
+#include "mini_opt/logging.hpp"
 #include "test_utils.hpp"
 
 #ifdef _MSC_VER
@@ -13,6 +14,7 @@
 
 namespace mini_opt {
 using namespace Eigen;
+using namespace std::placeholders;
 
 TEST(LinearInequalityConstraintTest, Test) {
   const LinearInequalityConstraint c1(3, 2.0, -4.0);
@@ -119,7 +121,7 @@ class QPSolverTest : public ::testing::Test {
     ASSERT_EIGEN_NEAR(update, solver.delta_, tol::kPico);
   }
 
-  void TestSolveNoConstraints() {
+  void TestEliminationNoConstraints() {
     QP qp{};
     BuildQuadratic({Root(0.5, 2.0), Root(5.0, 25.0), Root(3.0, 9.0)}, &qp);
 
@@ -127,7 +129,7 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
-  void TestSolveEqualityConstraints() {
+  void TestEliminationEqualityConstraints() {
     QP qp{};
     BuildQuadratic({Root(1.0, -0.5), Root(2.0, -2.0), Root(-4.0, 5.0)}, &qp);
 
@@ -143,7 +145,7 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
-  void TestSolveInequalityConstraints() {
+  void TestEliminationInequalityConstraints() {
     QP qp{};
     BuildQuadratic({Root(1.5, 3.0), Root(-1.0, 4.0)}, &qp);
 
@@ -154,7 +156,7 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
-  void TestSolveAllConstraints() {
+  void TestEliminationAllConstraints() {
     QP qp{};
     const double constant = BuildQuadratic(
         // make a quadratic in 7 variables
@@ -188,49 +190,7 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
-  static void ProgressPrinterNoState(const QPInteriorPointSolver& solver, const KKTError& kkt2_prev,
-                                     const KKTError& kkt2_after, const IterationOutputs& outputs) {
-    (void)solver;
-    std::cout << "Iteration summary: ";
-    std::cout << "||kkt||^2: " << kkt2_prev.Total() << " --> " << kkt2_after.Total()
-              << ", mu = " << outputs.mu << ", sigma = " << outputs.sigma
-              << ", a_p = " << outputs.alpha.primal << ", a_d = " << outputs.alpha.dual << "\n";
-
-    std::cout << "KKT errors:\n";
-    std::cout << "  r_dual = " << kkt2_prev.r_dual << " --> " << kkt2_after.r_dual << "\n";
-    std::cout << "  r_comp = " << kkt2_prev.r_comp << " --> " << kkt2_after.r_comp << "\n";
-    std::cout << "  r_p_eq = " << kkt2_prev.r_primal_eq << " --> " << kkt2_after.r_primal_eq
-              << "\n";
-    std::cout << "  r_p_ineq = " << kkt2_prev.r_primal_ineq << " --> " << kkt2_after.r_primal_ineq
-              << "\n";
-  }
-
-  // TODO(gareth): Would really like to use libfmt for this instead...
-  static void ProgressPrinter(const QPInteriorPointSolver& solver, const KKTError& kkt2_prev,
-                              const KKTError& kkt2_after, const IterationOutputs& outputs) {
-    ProgressPrinterNoState(solver, kkt2_prev, kkt2_after, outputs);
-    // dump the state with labels
-    std::cout << "After update:\n";
-    std::cout << "  x = " << solver.x_block().transpose().format(test_utils::kNumPyMatrixFmt)
-              << "\n";
-    std::cout << "  s = " << solver.s_block().transpose().format(test_utils::kNumPyMatrixFmt)
-              << "\n";
-    std::cout << "  y = " << solver.y_block().transpose().format(test_utils::kNumPyMatrixFmt)
-              << "\n";
-    std::cout << "  z = " << solver.z_block().transpose().format(test_utils::kNumPyMatrixFmt)
-              << "\n";
-
-    // summarize the inequality constraints
-    std::cout << "Constraints:\n";
-    std::size_t i = 0;
-    for (const LinearInequalityConstraint& c : solver.problem().constraints) {
-      std::cout << "  Constraint " << i << ": ax[" << c.variable
-                << "] + b - s == " << c.a * solver.x_block()[c.variable] + c.b - solver.s_block()[i]
-                << "  (" << c.a << " * " << solver.x_block()[c.variable] << " + " << c.b << " - "
-                << solver.s_block()[i] << ")\n";
-      ++i;
-    }
-  }
+  void TestComputeAlpha() {}
 
   // Scalar quadratic equation with a single inequality constraint.
   void TestWithSingleInequality() {
@@ -255,18 +215,20 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(0) <= 4);
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+    Logger logger{};
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     const auto term_state = solver.Solve(params);
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
-    ASSERT_NEAR(0.0, solver.r_.squaredNorm(), tol::kPico);
-    ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro);
-    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro);
-    ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]);
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                   << logger.GetString();
+    ASSERT_NEAR(0.0, solver.r_.squaredNorm(), tol::kPico) << "Summary:\n" << logger.GetString();
+    ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
+    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
+    ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]) << "Summary:\n" << logger.GetString();
   }
 
   // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
@@ -294,7 +256,8 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(1) >= -3.0);
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+    Logger logger{};
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
     // solve it
     QPInteriorPointSolver::Params params{};
@@ -302,10 +265,13 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params);
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
-    ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro);
-    ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), 1.0e-8);
-    ASSERT_TRUE((solver.z_block().array() > 1).all());
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                   << logger.GetString();
+    ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro) << "Summary:\n"
+                                                                          << logger.GetString();
+    ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), 1.0e-8) << "Summary:\n"
+                                                                  << logger.GetString();
+    ASSERT_TRUE((solver.z_block().array() > 1).all()) << "Summary:\n" << logger.GetString();
   }
 
   // Quadratic in three variables, with one active and one inactive inequality.
@@ -329,7 +295,8 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(0) >= -3.5);  //  irrelevant
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+    Logger logger{};
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
     // solve it
     QPInteriorPointSolver::Params params{};
@@ -337,10 +304,13 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params);
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
-    ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro);
-    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro);  // first constraint is active
-    ASSERT_NEAR(0.0, solver.z_block()[1], tol::kMicro);  // second constraint is inactive
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                   << logger.GetString();
+    ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro)
+        << "\nSummary:\n"
+        << logger.GetString();
+    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
+    ASSERT_NEAR(0.0, solver.z_block()[1], tol::kMicro) << "Summary:\n" << logger.GetString();
   }
 
   // Test simple problem with equality constraints.
@@ -361,18 +331,21 @@ class QPSolverTest : public ::testing::Test {
     qp.b_eq[1] = -2.0;
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+    Logger logger{};
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     params.max_iterations = 1;  //  should only need one
     const auto term_state = solver.Solve(params);
-    PRINT(term_state);
 
     // shoudl be able to satisfy immediately
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL);
-    ASSERT_EIGEN_NEAR(Vector2d::Zero(), qp.A_eq * solver.x_block() + qp.b_eq, tol::kNano);
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                   << logger.GetString();
+    ASSERT_EIGEN_NEAR(Vector2d::Zero(), qp.A_eq * solver.x_block() + qp.b_eq, tol::kNano)
+        << "Summary:\n"
+        << logger.GetString();
   }
 
   // Test a problem where all the variables are locked with equality constraints.
@@ -385,7 +358,8 @@ class QPSolverTest : public ::testing::Test {
     qp.b_eq = -Vector3d{1., 2., 3.};
 
     QPInteriorPointSolver solver(qp);
-    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+    Logger logger{};
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
     // solve it in a single step
     QPInteriorPointSolver::Params params{};
@@ -394,9 +368,11 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params);
 
     // should be able to satisfy immediately
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
-    ASSERT_EIGEN_NEAR(-qp.b_eq, solver.x_block(), tol::kNano);
-    ASSERT_TRUE((solver.y_block().array() > tol::kCenti).all());
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                   << logger.GetString();
+    ASSERT_EIGEN_NEAR(-qp.b_eq, solver.x_block(), tol::kNano) << "Summary:\n" << logger.GetString();
+    ASSERT_TRUE((solver.y_block().array() > tol::kCenti).all()) << "Summary:\n"
+                                                                << logger.GetString();
   }
 
   // Test with both types of constraint.
@@ -413,13 +389,9 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.push_back(Var(1) >= -1.0);
 
     QPInteriorPointSolver solver(qp);
-    PRINT_MATRIX(solver.variables_.transpose());
-    solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
+    Logger logger{};
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
-    solver.EvaluateKKTConditions();
-    PRINT_MATRIX(solver.r_.transpose());
-
-    // solve it in a single step
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     params.initial_sigma = 1;
@@ -428,9 +400,13 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params);
 
     // both inequalities should be active
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state;
-    ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro);
-    ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), tol::kMicro);
+    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                   << logger.GetString();
+    ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro)
+        << "\nSummary:\n"
+        << logger.GetString();
+    ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), tol::kMicro) << "Summary:\n"
+                                                                         << logger.GetString();
   }
 
   /*
@@ -506,30 +482,30 @@ class QPSolverTest : public ::testing::Test {
       // a strategy for this, but for now I'm gonna crank this up.
       params.max_iterations = 30;
 
-      // can turn on for debugging...
-      if (p == -1) {
-        PRINT_MATRIX(x_solution);
-        for (const LinearInequalityConstraint& c : qp.constraints) {
-          std::cout << "x[" << c.variable << "] * " << c.a << " + " << c.b << " >= 0\n";
-        }
-        solver.SetLoggerCallback(&QPSolverTest::ProgressPrinter);
-      }
+      Logger logger{};
+      solver.SetLoggerCallback(
+          std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
       const auto term_state = solver.Solve(params);
-      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 1.0e-4) << "Term: " << term_state << "\n"
-                                                              << "Problem p = " << p;
+      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 1.0e-4)
+          << "Term: " << term_state << "\n"
+          << "Problem p = " << p << "\nSummary:\n"
+          << logger.GetString();
+
       // check the variables that are constrained
       ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 1.0e-4)
           << "Term: " << term_state << "\n"
-          << "Problem p = " << p;
+          << "Problem p = " << p << "\nSummary:\n"
+          << logger.GetString();
     }
   }
 };
 
-TEST_FIXTURE(QPSolverTest, TestSolveNoConstraints)
-TEST_FIXTURE(QPSolverTest, TestSolveEqualityConstraints)
-TEST_FIXTURE(QPSolverTest, TestSolveInequalityConstraints)
-TEST_FIXTURE(QPSolverTest, TestSolveAllConstraints)
+TEST_FIXTURE(QPSolverTest, TestEliminationNoConstraints)
+TEST_FIXTURE(QPSolverTest, TestEliminationEqualityConstraints)
+TEST_FIXTURE(QPSolverTest, TestEliminationInequalityConstraints)
+TEST_FIXTURE(QPSolverTest, TestEliminationAllConstraints)
+TEST_FIXTURE(QPSolverTest, TestComputeAlpha)
 TEST_FIXTURE(QPSolverTest, TestWithSingleInequality)
 TEST_FIXTURE(QPSolverTest, TestWithInequalitiesActive)
 TEST_FIXTURE(QPSolverTest, TestWithInequalitiesPartiallyActive)

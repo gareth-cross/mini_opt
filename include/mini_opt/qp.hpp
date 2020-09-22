@@ -120,8 +120,8 @@ struct AlphaValues {
   double dual{1.};
 };
 
-// Some intermediate values we compute during Iterate.
-struct IterationOutputs {
+// Some intermediate values we compute during the iteration of the interior point solver.
+struct IPIterationOutputs {
   // Mu, the complementarity condition: s^T * z / M (Equation 16.56).
   double mu{0.};
   // The value of sigma used during the iteration.
@@ -212,7 +212,7 @@ struct QPInteriorPointSolver {
   // Type for a callback that we call after each iteration, used for logging stats, tests.
   using LoggingCallback =
       std::function<void(const QPInteriorPointSolver& solver, const KKTError& kkt_2_prev,
-                         const KKTError& kkt_2_after, const IterationOutputs& iter_outputs)>;
+                         const KKTError& kkt_2_after, const IPIterationOutputs& iter_outputs)>;
 
   // Access the problem itself.
   const QP& problem() const { return p_; }
@@ -252,7 +252,7 @@ struct QPInteriorPointSolver {
   // Take a single step.
   // Computes mu, solves for the update, and takes the longest step we can while satisfying
   // constraints.
-  IterationOutputs Iterate(const double sigma, const BarrierStrategy& strategy);
+  IPIterationOutputs Iterate(const double sigma, const BarrierStrategy& strategy);
 
   // Invert the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
