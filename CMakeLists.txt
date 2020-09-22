@@ -49,7 +49,8 @@ if(MSVC)
 	# USE_MATH_DEFINES is required for M_PI
 	target_compile_options(${PROJECT_NAME} PRIVATE /W4 /WX /D_USE_MATH_DEFINES)
 else()
-	target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -pedantic -Werror)
+        target_compile_options(${PROJECT_NAME} PRIVATE
+            -Wall -Wextra -pedantic -Werror -Wno-sign-compare)
 endif()
 
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")

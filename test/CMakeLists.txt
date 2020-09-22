@@ -39,7 +39,8 @@ foreach(test_file ${${PROJECT_NAME}_TEST_SOURCES})
     # USE_MATH_DEFINES is required for M_PI
     target_compile_options(${test_name} PRIVATE /W4 /WX /D_USE_MATH_DEFINES)
   else()
-    target_compile_options(${test_name} PRIVATE -Wall -Wextra -pedantic -Werror)
+    target_compile_options(${test_name} PRIVATE
+        -Wall -Wextra -pedantic -Werror -Wno-sign-compare)
   endif()
 
   if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
