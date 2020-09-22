@@ -49,7 +49,7 @@ struct LinearInequalityConstraint {
     return ShiftTo(x[variable]);
   }
 
-  // Ctor
+  // Construct with index and coefficients.
   LinearInequalityConstraint(int variable, double a, double b) : variable(variable), a(a), b(b) {}
 
   LinearInequalityConstraint() = default;
@@ -274,8 +274,8 @@ struct QPInteriorPointSolver {
 
   // Compute the `alpha` step size.
   // Returns alpha such that (val[i] + d_val[i]) >= val[i] * (1 - tau)
-  double ComputeAlpha(const ConstVectorBlock& val, const ConstVectorBlock& d_val,
-                      const double tau) const;
+  static double ComputeAlpha(const ConstVectorBlock& val, const ConstVectorBlock& d_val,
+                             const double tau);
 
   // Compute the predictor/corrector `mu_affine`, equation (19.22)
   double ComputePredictorCorrectorMuAffine(const double mu, const AlphaValues& alpha_probe) const;

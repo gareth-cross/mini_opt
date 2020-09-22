@@ -150,7 +150,7 @@ class QPSolverTest : public ::testing::Test {
     BuildQuadratic({Root(1.5, 3.0), Root(-1.0, 4.0)}, &qp);
 
     // set up inequality constraint
-    qp.constraints.emplace_back(1, 1.0, 0.0);  // x >= 0
+    qp.constraints.emplace_back(Var(1) >= 0);  // x >= 0
 
     const VectorXd x_guess = (Matrix<double, 2, 1>() << 0.0, 2.0).finished();
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
@@ -190,7 +190,13 @@ class QPSolverTest : public ::testing::Test {
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
   }
 
-  void TestComputeAlpha() {}
+  // Check alpha computation function.
+  void TestComputeAlpha() {
+    const Eigen::VectorXd x = Vector4d{1.0, 0.8, 1.2, 0.9};
+    const Eigen::VectorXd dx = Vector4d{-2.0, 0.6, -1.3, 0.5};
+    ASSERT_NEAR(0.5, QPInteriorPointSolver::ComputeAlpha(x.head(3), dx.head(3), 1.0), tol::kPico);
+    ASSERT_NEAR(0.45, QPInteriorPointSolver::ComputeAlpha(x.head(3), dx.head(3), 0.9), tol::kPico);
+  }
 
   // Scalar quadratic equation with a single inequality constraint.
   void TestWithSingleInequality() {
@@ -206,7 +212,7 @@ class QPSolverTest : public ::testing::Test {
       return x.array() - 5.0;
     };
 
-    // linearize at x=0 (it's already linear, in reality)
+    // linearize at x=0
     const VectorXd initial_values = VectorXd::Constant(1, 0.0);
 
     // Set up problem
@@ -271,7 +277,6 @@ class QPSolverTest : public ::testing::Test {
                                                                           << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), 1.0e-8) << "Summary:\n"
                                                                   << logger.GetString();
-    ASSERT_TRUE((solver.z_block().array() > 1).all()) << "Summary:\n" << logger.GetString();
   }
 
   // Quadratic in three variables, with one active and one inactive inequality.
@@ -487,13 +492,13 @@ class QPSolverTest : public ::testing::Test {
           std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
       const auto term_state = solver.Solve(params);
-      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 1.0e-4)
+      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 2.0e-5)
           << "Term: " << term_state << "\n"
           << "Problem p = " << p << "\nSummary:\n"
           << logger.GetString();
 
       // check the variables that are constrained
-      ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 1.0e-4)
+      ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 2.0e-5)
           << "Term: " << term_state << "\n"
           << "Problem p = " << p << "\nSummary:\n"
           << logger.GetString();

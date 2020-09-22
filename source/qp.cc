@@ -387,7 +387,7 @@ void QPInteriorPointSolver::ComputeAlpha(AlphaValues* const output, const double
 }
 
 double QPInteriorPointSolver::ComputeAlpha(const ConstVectorBlock& val,
-                                           const ConstVectorBlock& d_val, const double tau) const {
+                                           const ConstVectorBlock& d_val, const double tau) {
   ASSERT(val.rows() == d_val.rows());
   ASSERT(tau > 0 && tau <= 1);
   double alpha = 1.0;
