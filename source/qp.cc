@@ -10,7 +10,7 @@ const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
 
 bool LinearInequalityConstraint::IsFeasible(double x) const {
   // There might be an argument to be made we should tolerate some epsilon > 0 here?
-  return a * x - b < 0.0;
+  return a * x + b >= 0.0;
 }
 
 QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const bool check_feasible)

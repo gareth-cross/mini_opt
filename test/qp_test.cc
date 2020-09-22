@@ -14,6 +14,19 @@
 namespace mini_opt {
 using namespace Eigen;
 
+TEST(LinearInequalityConstraintTest, Test) {
+  const LinearInequalityConstraint c1(3, 2.0, -4.0);
+  ASSERT_TRUE(c1.IsFeasible(2.1));
+  ASSERT_FALSE(c1.IsFeasible(1.9));
+
+  const LinearInequalityConstraint shifted = c1.ShiftTo(1.0);
+  ASSERT_TRUE(shifted.IsFeasible(1.1));
+  ASSERT_FALSE(shifted.IsFeasible(0.9));
+
+  ASSERT_TRUE((Var(0) >= 0.3).IsFeasible(0.5));
+  ASSERT_FALSE((Var(0) <= -0.9).IsFeasible(1.2));
+}
+
 // Tests for the QP interior point solver.
 class QPSolverTest : public ::testing::Test {
  public:
