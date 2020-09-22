@@ -39,7 +39,7 @@ struct Pose {
     return Pose(R_inv, R_inv * -translation);
   }
 
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 // Aligned std::vector for Eigen.
