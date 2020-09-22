@@ -1,5 +1,5 @@
 // Copyright 2020 Gareth Cross
-#include "nonlinear.hpp"
+#include "mini_opt/nonlinear.hpp"
 
 #include <iostream>
 

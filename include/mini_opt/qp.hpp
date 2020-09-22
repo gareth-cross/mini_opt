@@ -2,7 +2,7 @@
 #pragma once
 #include <Eigen/Core>
 
-#include "residual.hpp"
+#include "mini_opt/residual.hpp"
 
 /*
  * The reference for this implementation is:

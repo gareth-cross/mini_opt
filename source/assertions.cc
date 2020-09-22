@@ -1,5 +1,5 @@
 // Copyright 2020 Gareth Cross
-#include "assertions.hpp"
+#include "mini_opt/assertions.hpp"
 
 #include <stdarg.h>
 

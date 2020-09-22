@@ -1,7 +1,6 @@
 // Copyright 2020 Gareth Cross
 #include "test_utils.hpp"
 
-#include <Eigen/Jacobi>
 #include <random>
 
 namespace test_utils {

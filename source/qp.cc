@@ -1,5 +1,5 @@
 // Copyright 2020 Gareth Cross
-#include "qp.hpp"
+#include "mini_opt/qp.hpp"
 
 #include <Eigen/Dense>
 

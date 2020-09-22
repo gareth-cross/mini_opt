@@ -1,9 +1,9 @@
 // Copyright 2020 Gareth Cross
-#include "nonlinear.hpp"
+#include "mini_opt/nonlinear.hpp"
 
 #include "geometry_utils/numerical_derivative.hpp"
 #include "test_utils.hpp"
-#include "transform_chains.hpp"
+#include "mini_opt/transform_chains.hpp"
 
 namespace mini_opt {
 using namespace Eigen;

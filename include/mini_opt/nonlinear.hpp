@@ -1,7 +1,7 @@
 // Copyright 2020 Gareth Cross
 #pragma once
-#include "qp.hpp"
-#include "residual.hpp"
+#include "mini_opt/qp.hpp"
+#include "mini_opt/residual.hpp"
 
 namespace mini_opt {
 

@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 
-#include "assertions.hpp"
+#include "mini_opt/assertions.hpp"
 
 // Provide mechanisms of specifying non-linear residuals.
 namespace mini_opt {

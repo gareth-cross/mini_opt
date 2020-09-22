@@ -1,5 +1,5 @@
 // Copyright 2020 Gareth Cross
-#include "residual.hpp"
+#include "mini_opt/residual.hpp"
 
 #include "test_utils.hpp"
 

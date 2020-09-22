@@ -1,9 +1,9 @@
 // Copyright 2020 Gareth Cross
-#include "transform_chains.hpp"
+#include "mini_opt/transform_chains.hpp"
 
 #include <numeric>
 
-#include "assertions.hpp"
+#include "mini_opt/assertions.hpp"
 
 namespace mini_opt {
 using namespace Eigen;
