@@ -48,13 +48,17 @@ TEST(TransformChainsTest, TestChainComputationBuffer) {
   ChainComputationBuffer c{};
   ComputeChain(links, &c);
 
-  ASSERT_EIGEN_NEAR(J_trans_numerical, c.translation_D_tangent, tol::kNano);
-  PRINT_MATRIX(J_trans_numerical);
-  PRINT_MATRIX(c.translation_D_tangent);
+  ASSERT_EIGEN_NEAR(J_trans_numerical, c.translation_D_tangent, tol::kNano)
+      << "Numerical:\n"
+      << J_trans_numerical.format(test_utils::kNumPyMatrixFmt) << "\n"
+      << "Analytical:\n"
+      << c.translation_D_tangent.format(test_utils::kNumPyMatrixFmt);
 
-  ASSERT_EIGEN_NEAR(J_trans_rotational, c.orientation_D_tangent, tol::kNano);
-  PRINT_MATRIX(J_trans_rotational);
-  PRINT_MATRIX(c.orientation_D_tangent);
+  ASSERT_EIGEN_NEAR(J_trans_rotational, c.orientation_D_tangent, tol::kNano)
+      << "Numerical:\n"
+      << J_trans_rotational.format(test_utils::kNumPyMatrixFmt) << "\n"
+      << "Analytical:\n"
+      << c.orientation_D_tangent.format(test_utils::kNumPyMatrixFmt);
 
   // pull out poses
   ASSERT_EQ(links.size() + 1, c.i_R_end.size());
