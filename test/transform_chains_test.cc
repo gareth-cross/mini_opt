@@ -1,7 +1,7 @@
 // Copyright 2020 Gareth Cross
 #include "transform_chains.hpp"
 
-#include "numerical_derivative.hpp"  //  from geometry_utils
+#include "geometry_utils/numerical_derivative.hpp"
 #include "test_utils.hpp"
 
 namespace mini_opt {

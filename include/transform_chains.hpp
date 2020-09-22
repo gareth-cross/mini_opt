@@ -2,7 +2,7 @@
 #include <array>
 #include <vector>
 
-#include "so3.hpp"
+#include "geometry_utils/so3.hpp"
 
 // Code for representing and computing chains of transforms, such as you might
 // find in a robotic actuator or skeleton.

@@ -1,7 +1,7 @@
 // Copyright 2020 Gareth Cross
 #include "nonlinear.hpp"
 
-#include "numerical_derivative.hpp"
+#include "geometry_utils/numerical_derivative.hpp"
 #include "test_utils.hpp"
 #include "transform_chains.hpp"
 

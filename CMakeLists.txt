@@ -24,6 +24,7 @@ endif()
 FetchContent_Declare(
   geometry_utils
   GIT_REPOSITORY https://github.com/gareth-cross/geometry_utils
+  GIT_TAG origin/opt_improvements
 )
 FetchContent_GetProperties(geometry_utils)
 if(NOT geometry_utils_POPULATED)
