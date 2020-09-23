@@ -171,7 +171,7 @@ struct QPInteriorPointSolver {
     int max_iterations{10};
 
     // Strategy to apply to barrier parameter `mu`.
-    BarrierStrategy barrier_strategy{BarrierStrategy::SCALED_COMPLEMENTARITY};
+    BarrierStrategy barrier_strategy{BarrierStrategy::PREDICTOR_CORRECTOR};
   };
 
   // List of possible termination criteria.
@@ -220,7 +220,7 @@ struct QPInteriorPointSolver {
       std::function<void(const QPInteriorPointSolver& solver, const KKTError& kkt_2_prev,
                          const KKTError& kkt_2_after, const IPIterationOutputs& iter_outputs)>;
 
-  // Access the problem itself.
+  // Access the problem itself. Asserts that `p_` is not null.
   const QP& problem() const;
 
  private:
