@@ -89,7 +89,12 @@ struct ChainComputationBuffer {
 void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const c);
 
 /**
+ * Store a single link in a chain of actuators. Each "actuator" executes a rotation
+ * followed by a translation. Rotations are de-composed into euler angles, so that
+ * as few as one of the angles may be optimized while the others are fixed.
  *
+ * Normally we would want to optimize rotations on SO(3), but in this instance we
+ * can choose the rotation frames so that the singularity is not an issue.
  */
 struct ActuatorLink {
   // Euler angles from the decomposed rotation.
@@ -102,28 +107,18 @@ struct ActuatorLink {
   // Mask of angles that are active in the optimization.
   std::array<uint8_t, 3> active;
 
-  // Number of active angles.
-  int ActiveCount() const {
-    return static_cast<int>(
-        std::count_if(active.begin(), active.end(), [](auto b) { return b > 0; }));
-  }
+  // Number of active angles, between [0, 3].
+  int ActiveCount() const;
 
   // Construct from Pose and mask.
-  ActuatorLink(const Pose& pose, const std::array<uint8_t, 3>& mask)
-      : rotation_xyz(math::EulerAnglesFromSO3(pose.rotation.conjugate())),
-        translation(pose.translation),
-        active(mask) {}
+  ActuatorLink(const Pose& pose, const std::array<uint8_t, 3>& mask);
 
   // Return pose representing this transform, given the euler angles.
+  // Derivative is only of the rotation part, as translation is constant.
   Pose Compute(const math::Vector<double>& angles, const int position,
                math::Matrix<double, 3, Eigen::Dynamic>* const J_out) const;
 
-  void FillJacobian(
-      const Eigen::Block<const Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, 3, true>&
-          output_D_tangent,
-      const Eigen::Block<const Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, Eigen::Dynamic, true>&
-          tangent_D_angles,
-      Eigen::Block<Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, Eigen::Dynamic, true> J_out) const;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 // TODO(gareth): comments...
@@ -131,7 +126,6 @@ struct ActuatorChain {
   // Current poses in the chain.
   std::vector<ActuatorLink> links;
 
-  // private:
   // Poses.
   std::vector<Pose> pose_buffer_;
 

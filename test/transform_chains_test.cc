@@ -7,7 +7,7 @@
 namespace mini_opt {
 using namespace Eigen;
 
-TEST(TransformChainsTest, TestChainComputationBuffer) {
+TEST(ChainComputationBufferTest, TestComputeChain) {
   // create some links
   // clang-format off
   const std::vector<Pose> links = {
@@ -77,6 +77,37 @@ TEST(TransformChainsTest, TestChainComputationBuffer) {
     // advance
     start_T_current = start_T_current * links[i];
   }
+}
+
+TEST(ActuatorLinkTest, TestComputePose) {
+  const Pose pose{math::QuaternionExp(Vector3d{-0.3, 0.5, 0.4}), Vector3d(0.4, -0.2, 1.2)};
+
+  const std::array<uint8_t, 3> mask = {{true, false, true}};
+  ActuatorLink link{pose, mask};
+
+  // At least for these angles, this is true.
+  ASSERT_EIGEN_NEAR(
+      math::SO3FromEulerAngles(link.rotation_xyz, math::CompositionOrder::XYZ).q.matrix(),
+      pose.rotation.matrix(), tol::kPico);
+
+  // // compute analytically, place it somewhere in this matrix
+  // math::Matrix<double, 3, Eigen::Dynamic> J_out;
+  // J_out.resize(3, 10);
+
+  // const Vector3d input_angles{0.2, 0.1, 0.35};
+  // const Vector3d combined_angles{0.2, link.rotation_xyz[1], 0.35};
+  // const Pose computed_pose = link.Compute(input_angles, 5, &J_out);
+  // ASSERT_EIGEN_NEAR(computed_pose.translation, pose.translation, tol::kPico);
+  // ASSERT_EIGEN_NEAR(
+  //     computed_pose.rotation.matrix(),
+  //     math::SO3FromEulerAngles(combined_angles, math::CompositionOrder::XYZ).q.matrix(),
+  //     tol::kPico);
+
+  // const auto lambda = [&](const Eigen::Vector3d& angles) {
+  //   return link.Compute(angles, 0, nullptr).rotation;
+  // };
+  // const Matrix3d J_numerical = math::NumericalJacobian(combined_angles, lambda);
+  // ASSERT_EIGEN_NEAR(J_numerical, J_out.middleCols<2>(5), tol::kPico);
 }
 
 }  // namespace mini_opt

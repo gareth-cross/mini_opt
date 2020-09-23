@@ -66,6 +66,17 @@ void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const 
   c->orientation_D_tangent.rightCols<3>().setIdentity();
 }
 
+int ActuatorLink::ActiveCount() const {
+  return static_cast<int>(active[0] > 0) + static_cast<int>(active[1] > 0) +
+         static_cast<int>(active[2] > 0);
+}
+
+ActuatorLink::ActuatorLink(const Pose& pose, const std::array<uint8_t, 3>& mask)
+    // Invert here, since this function assumes the order ZYX
+    : rotation_xyz(math::EulerAnglesFromSO3(pose.rotation.conjugate())),
+      translation(pose.translation),
+      active(mask) {}
+
 // Return pose representing this transform, given the euler angles.
 Pose ActuatorLink::Compute(const math::Vector<double>& angles, const int position,
                            math::Matrix<double, 3, Eigen::Dynamic>* const J_out) const {
@@ -90,22 +101,6 @@ Pose ActuatorLink::Compute(const math::Vector<double>& angles, const int positio
   // Return a pose w/ our fixed translation.
   // TODO(gareth): Dumb that we have to copy the fixed translation always...
   return Pose{rot.q, translation};
-}
-
-void ActuatorLink::FillJacobian(
-    const Eigen::Block<const Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, 3, true>&
-        output_D_tangent,
-    const Eigen::Block<const Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, Eigen::Dynamic, true>&
-        tangent_D_angles,
-    Eigen::Block<Eigen::Matrix<double, 3, Eigen::Dynamic>, 3, Eigen::Dynamic, true> J_out) const {
-  // Output buffer should be correct size already.
-  ASSERT(J_out.cols() == ActiveCount());
-  if (!active[0] && !active[1] && active[2]) {
-    // Fast path for common case, we know dz = [0, 0, 1]
-    J_out = output_D_tangent.rightCols<1>();
-  } else {
-    J_out.noalias() = output_D_tangent * tangent_D_angles;
-  }
 }
 
 void ActuatorChain::Update(const math::Vector<double>& angles) {
@@ -150,6 +145,10 @@ bool ActuatorChain::ShouldUpdate(const math::Vector<double>& angles) const {
   return false;
 }
 
+// True if only the Z component is active.
+// In this case, the chain ruling can be avoided altogether.
+static bool IsOnlyZ(const ActuatorLink& l) { return !l.active[0] && !l.active[1] && l.active[2]; }
+
 // Compute rotation and translation of the effector.
 math::Vector<double, 3> ActuatorChain::ComputeEffectorPosition(
     const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* const J) {
@@ -164,20 +163,18 @@ math::Vector<double, 3> ActuatorChain::ComputeEffectorPosition(
       if (active_count == 0) {
         continue;
       }
-
-      // Need const-references so we can get const-blocks.
-      const ChainComputationBuffer& const_buffer = chain_buffer_;
-      const math::Matrix<double, 3, Dynamic>& const_rotation_D_angles = rotation_D_angles_;
-
       // Chain rule w/ the angle representation.
-      link.FillJacobian(const_buffer.translation_D_tangent.middleCols<3>(i * 3),
-                        const_rotation_D_angles.middleCols(position, active_count),
-                        J->middleCols(position, active_count));
-
+      if (IsOnlyZ(link)) {
+        J->middleCols<1>(position) = chain_buffer_.translation_D_tangent.middleCols<1>(i * 3 + 2);
+      } else {
+        J->middleCols(position, active_count) =
+            chain_buffer_.translation_D_tangent.middleCols<3>(i * 3) *
+            rotation_D_angles_.middleCols(position, active_count);
+      }
       position += link.ActiveCount();
     }
   }
-  return chain_buffer_.start_T_end().translation;
+  return chain_buffer_.i_t_end.leftCols<1>();
 }
 
 int ActuatorChain::TotalActive() const {
