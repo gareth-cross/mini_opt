@@ -90,24 +90,41 @@ TEST(ActuatorLinkTest, TestComputePose) {
       math::SO3FromEulerAngles(link.rotation_xyz, math::CompositionOrder::XYZ).q.matrix(),
       pose.rotation.matrix(), tol::kPico);
 
-  // // compute analytically, place it somewhere in this matrix
-  // math::Matrix<double, 3, Eigen::Dynamic> J_out;
-  // J_out.resize(3, 10);
+  // compute analytically, place it somewhere in this matrix
+  math::Matrix<double, 3, Eigen::Dynamic> J_out;
+  J_out.resize(3, 10);
+  J_out.setZero();
 
-  // const Vector3d input_angles{0.2, 0.1, 0.35};
-  // const Vector3d combined_angles{0.2, link.rotation_xyz[1], 0.35};
-  // const Pose computed_pose = link.Compute(input_angles, 5, &J_out);
-  // ASSERT_EIGEN_NEAR(computed_pose.translation, pose.translation, tol::kPico);
-  // ASSERT_EIGEN_NEAR(
-  //     computed_pose.rotation.matrix(),
-  //     math::SO3FromEulerAngles(combined_angles, math::CompositionOrder::XYZ).q.matrix(),
-  //     tol::kPico);
+  const Array3d mask_float =
+      Eigen::Map<const Eigen::Matrix<uint8_t, 3, 1>>(mask.data()).cast<double>();
 
-  // const auto lambda = [&](const Eigen::Vector3d& angles) {
-  //   return link.Compute(angles, 0, nullptr).rotation;
-  // };
-  // const Matrix3d J_numerical = math::NumericalJacobian(combined_angles, lambda);
-  // ASSERT_EIGEN_NEAR(J_numerical, J_out.middleCols<2>(5), tol::kPico);
+  // some input angles
+  const Vector3d input_angles{0.2, 0.1, 0.35};
+
+  // what the result should amount to
+  const Vector3d combined_angles =
+      mask_float * input_angles.array() + (1 - mask_float) * link.rotation_xyz.array();
+
+  // put the input angles in the right space in the buffer
+  VectorXd input_angles_dynamic(10);
+  input_angles_dynamic.setZero();
+  input_angles_dynamic[5] = input_angles[0];  //  skip disabled angle
+  input_angles_dynamic[6] = input_angles[2];
+
+  const Pose computed_pose = link.Compute(input_angles_dynamic, 5, &J_out);
+  ASSERT_EIGEN_NEAR(computed_pose.translation, pose.translation, tol::kPico);
+  ASSERT_EIGEN_NEAR(
+      computed_pose.rotation.matrix(),
+      math::SO3FromEulerAngles(combined_angles, math::CompositionOrder::XYZ).q.matrix(),
+      tol::kPico);
+
+  // derivative should also respect the active flag
+  const auto lambda = [&](const VectorXd& angles) {
+    return link.Compute(angles, 5, nullptr).rotation;
+  };
+  const Matrix<double, 3, Dynamic> J_numerical =
+      math::NumericalJacobian(input_angles_dynamic, lambda);
+  ASSERT_EIGEN_NEAR(J_numerical, J_out, tol::kPico);
 }
 
 }  // namespace mini_opt

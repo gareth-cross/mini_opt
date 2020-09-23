@@ -73,7 +73,7 @@ int ActuatorLink::ActiveCount() const {
 
 ActuatorLink::ActuatorLink(const Pose& pose, const std::array<uint8_t, 3>& mask)
     // Invert here, since this function assumes the order ZYX
-    : rotation_xyz(math::EulerAnglesFromSO3(pose.rotation.conjugate())),
+    : rotation_xyz(-math::EulerAnglesFromSO3(pose.rotation.conjugate())),
       translation(pose.translation),
       active(mask) {}
 
