@@ -37,3 +37,6 @@ build/*
 # SUBLIME TEXT
 *.sublime-project
 *.sublime-workspace
+
+# VSCODE
+.vscode/
