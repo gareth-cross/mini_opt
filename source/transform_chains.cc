@@ -138,7 +138,7 @@ bool ActuatorChain::ShouldUpdate(const math::Vector<double>& angles) const {
     return true;
   }
   for (int i = 0; i < angles.rows(); ++i) {
-    if (std::abs(angles_cached_[i] - angles[i]) > 1.0e-6) {
+    if (std::abs(angles_cached_[i] - angles[i]) > 1.0e-9) {
       return true;
     }
   }
@@ -167,11 +167,11 @@ math::Vector<double, 3> ActuatorChain::ComputeEffectorPosition(
       if (IsOnlyZ(link)) {
         J->middleCols<1>(position) = chain_buffer_.translation_D_tangent.middleCols<1>(i * 3 + 2);
       } else {
-        J->middleCols(position, active_count) =
+        J->middleCols(position, active_count).noalias() =
             chain_buffer_.translation_D_tangent.middleCols<3>(i * 3) *
             rotation_D_angles_.middleCols(position, active_count);
       }
-      position += link.ActiveCount();
+      position += active_count;
     }
   }
   return chain_buffer_.i_t_end.leftCols<1>();
