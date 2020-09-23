@@ -13,24 +13,30 @@ bool LinearInequalityConstraint::IsFeasible(double x) const {
   return a * x + b >= 0.0;
 }
 
-QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const bool check_feasible)
-    : p_(problem) {
-  ASSERT(p_.G.rows() == p_.G.cols(), "G must be square");
-  ASSERT(p_.G.rows() == p_.c.rows(), "Dims of G and c must match");
-  ASSERT(p_.A_eq.rows() == p_.b_eq.rows(), "Rows of A_e and b_e must match");
+QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem, const bool check_feasible) {
+  Setup(problem, check_feasible);
+}
+
+void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feasible) {
+  ASSERT(problem != nullptr, "Must pass a non-null problem");
+
+  p_ = problem;
+  ASSERT(p_->G.rows() == p_->G.cols(), "G must be square");
+  ASSERT(p_->G.rows() == p_->c.rows(), "Dims of G and c must match");
+  ASSERT(p_->A_eq.rows() == p_->b_eq.rows(), "Rows of A_e and b_e must match");
 
   // If equality constraints were specified, we must be able to multiply A*x
-  if (p_.A_eq.size() > 0) {
-    ASSERT(p_.A_eq.cols() == p_.G.rows());
+  if (p_->A_eq.size() > 0) {
+    ASSERT(p_->A_eq.cols() == p_->G.rows());
   } else {
-    ASSERT(p_.A_eq.rows() == 0);
-    ASSERT(p_.b_eq.rows() == 0);
+    ASSERT(p_->A_eq.rows() == 0);
+    ASSERT(p_->b_eq.rows() == 0);
   }
 
   // Order is [slacks (s), equality multipliers(y), inequality multiplers (lambda)]
-  dims_.N = p_.G.rows();
-  dims_.M = p_.constraints.size();
-  dims_.K = p_.A_eq.rows();
+  dims_.N = p_->G.rows();
+  dims_.M = p_->constraints.size();
+  dims_.K = p_->A_eq.rows();
 
   variables_.resize(dims_.N + dims_.M * 2 + dims_.K);
   prev_variables_.resizeLike(variables_);
@@ -54,13 +60,16 @@ QPInteriorPointSolver::QPInteriorPointSolver(const QP& problem, const bool check
   // Use the total size here
   r_.resizeLike(variables_);
   r_dual_aug_.resize(dims_.N);
+  r_.setZero();
+  r_dual_aug_.setZero();
 
   // Space for the output of all variables
   delta_.resizeLike(variables_);
   delta_affine_.resizeLike(variables_);
+  delta_.setZero();
   delta_affine_.setZero();
 
-  for (const LinearInequalityConstraint& c : p_.constraints) {
+  for (const LinearInequalityConstraint& c : p_->constraints) {
     ASSERT(c.variable < static_cast<int>(dims_.N), "Constraint index is out of bounds");
     const bool is_feasible = c.IsFeasible(variables_[c.variable]);
     if (!is_feasible && check_feasible) {
@@ -84,6 +93,8 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
 
 QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
     const QPInteriorPointSolver::Params& params) {
+  ASSERT(p_, "Must have a valid problem");
+
   CheckParams(params);
 
   // on the first iteration, the residual needs to be filled first
@@ -193,6 +204,11 @@ VectorBlock QPInteriorPointSolver::y_block() { return YBlock(dims_, variables_);
 
 VectorBlock QPInteriorPointSolver::z_block() { return ZBlock(dims_, variables_); }
 
+const QP& QPInteriorPointSolver::problem() const {
+  ASSERT(p_, "Cannot call unless initialized");
+  return *p_;
+}
+
 /*
  * We start with the full symmetric system (Equation 19.12):
  *
@@ -258,12 +274,12 @@ void QPInteriorPointSolver::ComputeLDLT() {
   }
 
   // build the left-hand side (we only need lower triangular)
-  H_.topLeftCorner(N, N).triangularView<Eigen::Lower>() = p_.G.triangularView<Eigen::Lower>();
+  H_.topLeftCorner(N, N).triangularView<Eigen::Lower>() = p_->G.triangularView<Eigen::Lower>();
   if (K > 0) {
-    H_.bottomLeftCorner(K, N) = p_.A_eq;
+    H_.bottomLeftCorner(K, N) = p_->A_eq;
   }
   for (std::size_t i = 0; i < M; ++i) {
-    const LinearInequalityConstraint& c = p_.constraints[i];
+    const LinearInequalityConstraint& c = p_->constraints[i];
     H_(c.variable, c.variable) += c.a * (z[i] / s[i]) * c.a;
   }
 
@@ -307,7 +323,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   // apply the variable elimination, which updates r_d (make a copy to save the original)
   r_dual_aug_.noalias() = r_d;
   for (std::size_t i = 0; i < M; ++i) {
-    const LinearInequalityConstraint& c = p_.constraints[i];
+    const LinearInequalityConstraint& c = p_->constraints[i];
     r_dual_aug_[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
     r_dual_aug_[c.variable] += c.a * (r_comp[i] + (ds_aff[i] * dz_aff[i]) - mu) / s[i];
   }
@@ -328,7 +344,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
 
   // Go back and solve for dz and ds
   for (std::size_t i = 0; i < M; ++i) {
-    const LinearInequalityConstraint& c = p_.constraints[i];
+    const LinearInequalityConstraint& c = p_->constraints[i];
     ds[i] = c.a * dx[c.variable] + r_pi[i];
     dz[i] = -(z[i] / s[i]) * ds[i] - (1 / s[i]) * (r_comp[i] + (ds_aff[i] * dz_aff[i]) - mu);
   }
@@ -350,16 +366,16 @@ void QPInteriorPointSolver::EvaluateKKTConditions() {
   auto r_pi = ZBlock(dims_, r_);
 
   // build the dual objective first
-  r_d.noalias() = p_.G.selfadjointView<Eigen::Lower>() * x + p_.c;
+  r_d.noalias() = p_->G.selfadjointView<Eigen::Lower>() * x + p_->c;
   if (dims_.K > 0) {
-    r_d.noalias() -= p_.A_eq.transpose() * y;
+    r_d.noalias() -= p_->A_eq.transpose() * y;
     // equality constraints
-    r_pe.noalias() = p_.A_eq * x + p_.b_eq;
+    r_pe.noalias() = p_->A_eq * x + p_->b_eq;
   }
 
   // contributions from inequality constraints, there is some redundant work here
   for (std::size_t i = 0; i < dims_.M; ++i) {
-    const LinearInequalityConstraint& c = p_.constraints[i];
+    const LinearInequalityConstraint& c = p_->constraints[i];
     r_d[c.variable] -= c.a * z[i];
     r_pi[i] = c.a * x[c.variable] + c.b - s[i];
     r_comp[i] = s[i] * z[i];
@@ -489,10 +505,10 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
   r->resize(H->rows());
   r->setZero();
 
-  H->topLeftCorner(N, N) = p_.G.selfadjointView<Eigen::Lower>();
+  H->topLeftCorner(N, N) = p_->G.selfadjointView<Eigen::Lower>();
   if (K > 0) {
-    H->block(0, N + M, N, K) = p_.A_eq.transpose();
-    H->block(N + M, 0, K, N) = p_.A_eq;
+    H->block(0, N + M, N, K) = p_->A_eq.transpose();
+    H->block(N + M, 0, K, N) = p_->A_eq;
   }
 
   Eigen::MatrixXd A_i(M, N);
@@ -501,7 +517,7 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
     A_i.setZero();
     // create sparse A_i for simplicity
     for (std::size_t i = 0; i < M; ++i) {
-      const LinearInequalityConstraint& c = p_.constraints[i];
+      const LinearInequalityConstraint& c = p_->constraints[i];
       A_i(i, c.variable) = c.a;
       b_i[i] = c.b;
     }
@@ -520,11 +536,11 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
   auto r_pe = YBlock(dims_, *r);
   auto r_pi = ZBlock(dims_, *r);
 
-  r_d.noalias() = p_.G.selfadjointView<Eigen::Lower>() * x + p_.c;
+  r_d.noalias() = p_->G.selfadjointView<Eigen::Lower>() * x + p_->c;
   if (K > 0) {
-    r_d.noalias() -= p_.A_eq.transpose() * y;
+    r_d.noalias() -= p_->A_eq.transpose() * y;
     // equality constraints
-    r_pe.noalias() = p_.A_eq * x + p_.b_eq;
+    r_pe.noalias() = p_->A_eq * x + p_->b_eq;
   }
   if (M > 0) {
     r_d.noalias() -= A_i.transpose() * z;

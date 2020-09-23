@@ -180,8 +180,14 @@ struct QPInteriorPointSolver {
     MAX_ITERATIONS,
   };
 
+  // Construct empty.
+  QPInteriorPointSolver() = default;
+
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
-  explicit QPInteriorPointSolver(const QP& problem, const bool check_feasible = false);
+  explicit QPInteriorPointSolver(const QP* const problem, const bool check_feasible = false);
+
+  // Setup with a problem. We allow setting a new problem so storage can be re-used.
+  void Setup(const QP* const problem, const bool check_feasible = false);
 
   /*
    * Iterate until one of the following conditions is met:
@@ -215,10 +221,10 @@ struct QPInteriorPointSolver {
                          const KKTError& kkt_2_after, const IPIterationOutputs& iter_outputs)>;
 
   // Access the problem itself.
-  const QP& problem() const { return p_; }
+  const QP& problem() const;
 
  private:
-  const QP& p_;
+  const QP* p_{nullptr};
 
   struct ProblemDims {
     std::size_t N;  //  number of variables `x`

@@ -72,7 +72,7 @@ class QPSolverTest : public ::testing::Test {
   // matches the full 'brute force' solve that uses LU decomposition.
   void CheckAugmentedSolveAgainstPartialPivot(const QP& qp, const VectorXd& x_guess) {
     // construct the solver
-    QPInteriorPointSolver solver(qp);
+    QPInteriorPointSolver solver(&qp);
     QPInteriorPointSolver::XBlock(solver.dims_, solver.variables_) = x_guess;
 
     // Give all the multipliers different positive non-zero values.
@@ -220,7 +220,7 @@ class QPSolverTest : public ::testing::Test {
     res.UpdateHessian(initial_values, &qp.G, &qp.c);
     qp.constraints.emplace_back(Var(0) <= 4);
 
-    QPInteriorPointSolver solver(qp);
+    QPInteriorPointSolver solver(&qp);
     Logger logger{};
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
@@ -261,7 +261,7 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(0) <= 1.0);
     qp.constraints.emplace_back(Var(1) >= -3.0);
 
-    QPInteriorPointSolver solver(qp);
+    QPInteriorPointSolver solver(&qp);
     Logger logger{};
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
@@ -299,7 +299,7 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(1) >= -2.0);
     qp.constraints.emplace_back(Var(0) >= -3.5);  //  irrelevant
 
-    QPInteriorPointSolver solver(qp);
+    QPInteriorPointSolver solver(&qp);
     Logger logger{};
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
@@ -335,7 +335,7 @@ class QPSolverTest : public ::testing::Test {
     qp.b_eq[0] = 3.0;
     qp.b_eq[1] = -2.0;
 
-    QPInteriorPointSolver solver(qp);
+    QPInteriorPointSolver solver(&qp);
     Logger logger{};
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
@@ -362,7 +362,7 @@ class QPSolverTest : public ::testing::Test {
     qp.A_eq = Matrix3d::Identity();
     qp.b_eq = -Vector3d{1., 2., 3.};
 
-    QPInteriorPointSolver solver(qp);
+    QPInteriorPointSolver solver(&qp);
     Logger logger{};
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
@@ -393,7 +393,7 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.push_back(Var(0) <= 0.5);
     qp.constraints.push_back(Var(1) >= -1.0);
 
-    QPInteriorPointSolver solver(qp);
+    QPInteriorPointSolver solver(&qp);
     Logger logger{};
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
@@ -471,13 +471,16 @@ class QPSolverTest : public ::testing::Test {
   void TestGeneratedProblems() {
     const int kNumProblems = 1000;
     const int kProblemDim = 8;  //  size of `x`, for me 8-12 is a typical problem size
+
+    QPInteriorPointSolver solver{};  //  re-use the solver
     for (int p = 0; p < kNumProblems; ++p) {
       VectorXd x_solution;
       std::vector<uint8_t> constraint_mask;
       const QP qp = GenerateRandomQP(p, kProblemDim, 0.5, &x_solution, &constraint_mask);
 
       // solve it, use the MPC strategy for these ones
-      QPInteriorPointSolver solver(qp);
+      solver.Setup(&qp);
+
       QPInteriorPointSolver::Params params{};
       params.termination_kkt2_tol = tol::kPico;
       params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
