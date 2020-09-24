@@ -108,7 +108,9 @@ struct QP {
 // Possible methods of picking the barrier parameter, `mu`.
 enum class BarrierStrategy {
   // Set mu = sigma * (s^T * z) / M, where sigma is a scalar decreased at each iteration.
-  SCALED_COMPLEMENTARITY = 0,
+  COMPLEMENTARITY = 0,
+  // Staring from the initial mu, decrease by fixed sigma.
+  FIXED_DECREASE,
   // Use Predictor corrector algorithm to select `mu`.
   PREDICTOR_CORRECTOR,
 };
@@ -122,10 +124,8 @@ struct AlphaValues {
 
 // Some intermediate values we compute during the iteration of the interior point solver.
 struct IPIterationOutputs {
-  // Mu, the complementarity condition: s^T * z / M (Equation 16.56).
+  // The barrier parameter on this iteration.
   double mu{0.};
-  // The value of sigma used during the iteration.
-  double sigma{1.};
   // Alpha as defined by equation (19.9).
   AlphaValues alpha{};
   // Optional alpha values computing during the MPC probing step.
@@ -157,12 +157,11 @@ struct KKTError {
 struct QPInteriorPointSolver {
   // Parameters of the solver.
   struct Params {
-    // Sigma is multiplied by `mu` at each iteration, to scale down the amount of 'perturbation'
-    // we are applying to the KKT conditions. This is the initial value for sigma.
-    double initial_sigma{1.0};
+    // Initial value of the barrier.
+    double initial_mu{1.0};
 
-    // Amount to reduce sigma on each iteration.
-    double sigma_reduction{0.5};
+    // Amount to reduce mu on each iteration.
+    double sigma{0.5};
 
     // If ||kkt||^2 < termination_kkt2_tol, we terminate optimization.
     double termination_kkt2_tol{1.0e-8};
@@ -171,7 +170,7 @@ struct QPInteriorPointSolver {
     int max_iterations{10};
 
     // Strategy to apply to barrier parameter `mu`.
-    BarrierStrategy barrier_strategy{BarrierStrategy::SCALED_COMPLEMENTARITY};
+    BarrierStrategy barrier_strategy{BarrierStrategy::COMPLEMENTARITY};
   };
 
   // List of possible termination criteria.
@@ -195,7 +194,7 @@ struct QPInteriorPointSolver {
    *   - The norm of the first order KKT conditions is less than the tolerance.
    *   - The fixed max number if iterations is hit.
    */
-  TerminationState Solve(const Params& params);
+  TerminationState Solve(const Params& params, int* const num_iterations = nullptr);
 
   // Set the logger callback to a function pointer, lambda, etc.
   template <typename T>
@@ -258,7 +257,7 @@ struct QPInteriorPointSolver {
   // Take a single step.
   // Computes mu, solves for the update, and takes the longest step we can while satisfying
   // constraints.
-  IPIterationOutputs Iterate(const double sigma, const BarrierStrategy& strategy);
+  IPIterationOutputs Iterate(const double mu_input, const BarrierStrategy& strategy);
 
   // Invert the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
@@ -273,7 +272,7 @@ struct QPInteriorPointSolver {
   void EvaluateKKTConditions();
 
   // Fill out the KKTError struct from `r_.
-  KKTError ComputeSquaredErrors() const;
+  KKTError ComputeSquaredErrors(const double mu) const;
 
   // Compute the largest step size we can execute that satisfies constraints.
   void ComputeAlpha(AlphaValues* const output, const double tau) const;
@@ -282,6 +281,9 @@ struct QPInteriorPointSolver {
   // Returns alpha such that (val[i] + d_val[i]) >= val[i] * (1 - tau)
   static double ComputeAlpha(const ConstVectorBlock& val, const ConstVectorBlock& d_val,
                              const double tau);
+
+  // Compute `mu` as defined in equation 19.19
+  double ComputeMu() const;
 
   // Compute the predictor/corrector `mu_affine`, equation (19.22)
   double ComputePredictorCorrectorMuAffine(const double mu, const AlphaValues& alpha_probe) const;

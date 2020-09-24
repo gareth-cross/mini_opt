@@ -83,76 +83,95 @@ void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feas
 
 // Assert params are in valid range.
 static void CheckParams(const QPInteriorPointSolver::Params& params) {
-  ASSERT(params.initial_sigma > 0);
-  ASSERT(params.initial_sigma <= 1.0);
-  ASSERT(params.sigma_reduction > 0);
-  ASSERT(params.sigma_reduction <= 1.0);
+  ASSERT(params.initial_mu > 0);
+  ASSERT(params.sigma > 0);
+  ASSERT(params.sigma <= 1.0);
   ASSERT(params.termination_kkt2_tol > 0);
   ASSERT(params.max_iterations > 0);
 }
 
+/*
+ * Note - according to the textbook, we should only decrease `mu` after having
+ * achieved some E(...) < mu, where E is some norm of the KKT conditions (what I have
+ * called KKTError below  is the L2 norm).
+ *
+ * I have not done this, instead opting to decrease mu even if that condition is not met, which
+ * seems to produce decent results, but my analysis is not that scientific yet.
+ *
+ * My implementation of 'predictor corrector' seems incorrect somehow - or at least it tends to
+ * produce sigma=0 right away, which causes the optimization to end up with very large slack
+ * variables, and then the optimization spends a while wandering around before convergence.
+ *
+ * Maybe this is the result of not having a merit function? At least on the toy data I have so
+ * far the simpler strategy of just scaling `mu` with complementarity seems better, but there
+ * may be an implementation issue.
+ */
 QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
-    const QPInteriorPointSolver::Params& params) {
+    const QPInteriorPointSolver::Params& params, int* const num_iterations) {
   ASSERT(p_, "Must have a valid problem");
-
   CheckParams(params);
 
   // on the first iteration, the residual needs to be filled first
   EvaluateKKTConditions();
 
-  double sigma{params.initial_sigma};
+  // If using fixed decrease, use the input value - otherwise compute from complementarity.
+  double mu{params.barrier_strategy == BarrierStrategy::FIXED_DECREASE ? params.initial_mu
+                                                                       : ComputeMu()};
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // compute squared norm of the residual, prior to any updates
-    const KKTError kkt2_prev = ComputeSquaredErrors();
+    const KKTError kkt2_prev = ComputeSquaredErrors(mu);
 
     // solve for the update
-    const IPIterationOutputs iteration_outputs = Iterate(sigma, params.barrier_strategy);
+    // TODO(gareth): Implement merit function here? Seems to work ok as is.
+    const IPIterationOutputs iteration_outputs = Iterate(mu, params.barrier_strategy);
 
     // evaluate the residual again, which fills `r_` for the next iteration
     EvaluateKKTConditions();
 
-    const KKTError kkt2_after = ComputeSquaredErrors();
+    const KKTError kkt2_after = ComputeSquaredErrors(mu);
     if (logger_callback_) {
       // pass progress to the logger callback for printing in the test
       logger_callback_(const_cast<const QPInteriorPointSolver&>(*this), kkt2_prev, kkt2_after,
                        iteration_outputs);
     }
 
+    if (num_iterations) {
+      *num_iterations = iter;
+    }
     if (kkt2_after.Total() < params.termination_kkt2_tol) {
       // error is low enough, stop
       return TerminationState::SATISFIED_KKT_TOL;
     }
 
-    // TODO(gareth): Try the strategy described by equation (19.20) here?
-    // This probably decreases too quickly in some cases, and too slowly in others.
-    sigma *= params.sigma_reduction;
+    // adjust the barrier parameter
+    if (params.barrier_strategy == BarrierStrategy::FIXED_DECREASE) {
+      mu *= params.sigma;
+    } else {
+      mu = params.sigma * ComputeMu();
+    }
   }
 
   return TerminationState::MAX_ITERATIONS;
 }
 
-IPIterationOutputs QPInteriorPointSolver::Iterate(const double sigma,
+IPIterationOutputs QPInteriorPointSolver::Iterate(const double mu_input,
                                                   const BarrierStrategy& strategy) {
   // fill out `r_`
   EvaluateKKTConditions();
 
   // evaluate the complementarity condition
   IPIterationOutputs outputs{};
-  if (HasInequalityConstraints()) {
-    outputs.mu = ConstSBlock(dims_, r_).sum() / static_cast<double>(dims_.M);
-  }
+  outputs.mu = mu_input;
 
   // solve the system w/ the LDLT factorization
   ComputeLDLT();
 
   if (!HasInequalityConstraints()) {
-    // No inequality constraints, ignore mu & sigma.
+    // No inequality constraints, ignore mu.
     SolveForUpdate(0.0);
-  } else if (strategy == BarrierStrategy::SCALED_COMPLEMENTARITY) {
-    // Use the complementarity condition, and scale by sigma.
-    SolveForUpdate(sigma * outputs.mu);
-    outputs.sigma = sigma;
-  } else if (strategy == BarrierStrategy::PREDICTOR_CORRECTOR) {
+  } else if (strategy != BarrierStrategy::PREDICTOR_CORRECTOR) {
+    SolveForUpdate(outputs.mu);
+  } else {  //  strategy == BarrierStrategy::PREDICTOR_CORRETOR
     // Use the MPC/predictor-corrector (algorithm 16.4).
     // Solve with mu=0 and compute the largest step size.
     SolveForUpdate(0.0);
@@ -163,11 +182,13 @@ IPIterationOutputs QPInteriorPointSolver::Iterate(const double sigma,
 
     // Compute complementarity had we applied this update we just solved.
     outputs.mu_affine = ComputePredictorCorrectorMuAffine(outputs.mu, outputs.alpha_probe);
-    outputs.sigma = std::pow(outputs.mu_affine / outputs.mu, 3);  // equation (19.22)
+
+    const double sigma = std::pow(outputs.mu_affine / outputs.mu, 3);  // equation (19.22)
+    outputs.mu = sigma * mu_input;
 
     // Solve again (alpha will be computed again below), input sigma is ignored.
     // This time, delta_affine_ will be incorporated to add the diag(dz)*ds term.
-    SolveForUpdate(outputs.mu * outputs.sigma);
+    SolveForUpdate(outputs.mu);
   }
 
   // compute alpha values
@@ -381,14 +402,16 @@ void QPInteriorPointSolver::EvaluateKKTConditions() {
 
 // Compute equation (19.10), but I'm taking the total rather than the max.
 // Using L2 norm (squared).
-KKTError QPInteriorPointSolver::ComputeSquaredErrors() const {
+KKTError QPInteriorPointSolver::ComputeSquaredErrors(const double mu) const {
   KKTError result{};
   result.r_dual = ConstXBlock(dims_, r_).squaredNorm();
   if (dims_.K > 0) {
     result.r_primal_eq = ConstYBlock(dims_, r_).squaredNorm();
   }
   if (HasInequalityConstraints()) {
-    result.r_comp = ConstSBlock(dims_, r_).squaredNorm();
+    // evaluate (ds - mu)^T * (ds - mu)
+    const auto ds = ConstSBlock(dims_, r_);
+    result.r_comp = ds.squaredNorm() - 2 * (ds.sum() * mu) + (mu * mu) * ds.rows();
     result.r_primal_ineq = ConstZBlock(dims_, r_).squaredNorm();
   }
   return result;
@@ -416,6 +439,12 @@ double QPInteriorPointSolver::ComputeAlpha(const ConstVectorBlock& val,
     }
   }
   return alpha;
+}
+
+double QPInteriorPointSolver::ComputeMu() const {
+  const auto s = ConstSBlock(dims_, variables_);
+  const auto z = ConstZBlock(dims_, variables_);
+  return s.dot(z) / static_cast<double>(dims_.M);
 }
 
 // We don't re-evaluate the s^T * z / M term, because it is already stored in mu.

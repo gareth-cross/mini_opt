@@ -232,7 +232,6 @@ class QPSolverTest : public ::testing::Test {
     // check the solution
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
                                                                    << logger.GetString();
-    ASSERT_NEAR(0.0, solver.r_.squaredNorm(), tol::kPico) << "Summary:\n" << logger.GetString();
     ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
     ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
     ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]) << "Summary:\n" << logger.GetString();
@@ -307,11 +306,9 @@ class QPSolverTest : public ::testing::Test {
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
-    // params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
-    params.initial_sigma = 1;
+    params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
+    params.sigma = 0.5;
     const auto term_state = solver.Solve(params);
-
-    std::cout << logger.GetString() << std::endl;
 
     // check the solution
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
@@ -404,8 +401,8 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
-    params.initial_sigma = 1;
-    params.sigma_reduction = 0.5;
+    params.initial_mu = 1;
+    params.sigma = 0.5;
 
     const auto term_state = solver.Solve(params);
 
@@ -487,7 +484,7 @@ class QPSolverTest : public ::testing::Test {
       solver.Setup(&qp);
 
       QPInteriorPointSolver::Params params{};
-      params.termination_kkt2_tol = tol::kPico;
+      params.termination_kkt2_tol = tol::kPico / 10;
       params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
 
       // Some of the randomly generated problems start close to the barrier, which causes
@@ -499,7 +496,8 @@ class QPSolverTest : public ::testing::Test {
       solver.SetLoggerCallback(
           std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
-      const auto term_state = solver.Solve(params);
+      int num_iters = 0;
+      const auto term_state = solver.Solve(params, &num_iters);
       ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 2.0e-5)
           << "Term: " << term_state << "\n"
           << "Problem p = " << p << "\nSummary:\n"

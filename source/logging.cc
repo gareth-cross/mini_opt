@@ -13,8 +13,8 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
   (void)solver;  //  unused
   stream_ << "Iteration summary: ";
   stream_ << "||kkt||^2: " << kkt2_prev.Total() << " --> " << kkt2_after.Total()
-          << ", mu = " << outputs.mu << ", sigma = " << outputs.sigma
-          << ", a_p = " << outputs.alpha.primal << ", a_d = " << outputs.alpha.dual << "\n";
+          << ", mu = " << outputs.mu << ", a_p = " << outputs.alpha.primal
+          << ", a_d = " << outputs.alpha.dual << "\n";
   stream_ << " Probe alphas: a_p = " << outputs.alpha_probe.primal
           << ", a_d = " << outputs.alpha_probe.dual << ", mu_affine = " << outputs.mu_affine
           << "\n";
