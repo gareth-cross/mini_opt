@@ -75,6 +75,10 @@ struct ConstrainedNonlinearLeastSquares {
   // Signature of custom retraction operator.
   using Retraction = std::function<void(Eigen::VectorXd* const x, const ConstVectorBlock& dx)>;
 
+  // Signature of custom logger.
+  using LoggingCallback =
+      std::function<void(const Errors& errors_initial, const Errors& errors_final)>;
+
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* const problem,
                                             const Retraction& retraction = nullptr);
@@ -88,6 +92,12 @@ struct ConstrainedNonlinearLeastSquares {
   template <typename T>
   void SetQPLoggingCallback(T cb) {
     solver_.SetLoggerCallback(cb);
+  }
+
+  // Set the callback that will be used for the nonlinear solver.
+  template <typename T>
+  void SetLoggingCallback(T cb) {
+    logging_callback_ = cb;
   }
 
   // Get the current linearization point.
@@ -114,6 +124,9 @@ struct ConstrainedNonlinearLeastSquares {
   // Parameters (the current linearization point)
   Eigen::VectorXd variables_;
   Eigen::VectorXd candidate_vars_;
+
+  // Logging callback.
+  LoggingCallback logging_callback_{};
 };
 
 }  // namespace mini_opt

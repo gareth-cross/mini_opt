@@ -30,6 +30,9 @@ TEST(LinearInequalityConstraintTest, Test) {
 }
 
 // Tests for the QP interior point solver.
+// TODO(gareth): I suspect some of these test cases are too easy - it doesn't seem to matter _that_
+// much what I do with the barrier parameter, even though considerable time in the literature seems
+// to be devoted to strategies for selecting it.
 class QPSolverTest : public ::testing::Test {
  public:
   using TerminationState = QPInteriorPointSolver::TerminationState;
@@ -227,7 +230,7 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
-    const auto term_state = solver.Solve(params);
+    const auto term_state = solver.Solve(params).first;
 
     // check the solution
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
@@ -268,7 +271,7 @@ class QPSolverTest : public ::testing::Test {
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
-    const auto term_state = solver.Solve(params);
+    const auto term_state = solver.Solve(params).first;
 
     // check the solution
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
@@ -308,7 +311,7 @@ class QPSolverTest : public ::testing::Test {
     params.termination_kkt2_tol = tol::kPico;
     params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
     params.sigma = 0.5;
-    const auto term_state = solver.Solve(params);
+    const auto term_state = solver.Solve(params).first;
 
     // check the solution
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
@@ -345,7 +348,7 @@ class QPSolverTest : public ::testing::Test {
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     params.max_iterations = 1;  //  should only need one
-    const auto term_state = solver.Solve(params);
+    const auto term_state = solver.Solve(params).first;
 
     // shoudl be able to satisfy immediately
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
@@ -372,7 +375,7 @@ class QPSolverTest : public ::testing::Test {
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     params.max_iterations = 1;
-    const auto term_state = solver.Solve(params);
+    const auto term_state = solver.Solve(params).first;
 
     // should be able to satisfy immediately
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
@@ -404,7 +407,7 @@ class QPSolverTest : public ::testing::Test {
     params.initial_mu = 1;
     params.sigma = 0.5;
 
-    const auto term_state = solver.Solve(params);
+    const auto term_state = solver.Solve(params).first;
 
     // both inequalities should be active
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
@@ -496,8 +499,7 @@ class QPSolverTest : public ::testing::Test {
       solver.SetLoggerCallback(
           std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
-      int num_iters = 0;
-      const auto term_state = solver.Solve(params, &num_iters);
+      const auto term_state = solver.Solve(params).first;
       ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 2.0e-5)
           << "Term: " << term_state << "\n"
           << "Problem p = " << p << "\nSummary:\n"

@@ -8,6 +8,7 @@
 
 namespace mini_opt {
 using namespace Eigen;
+using namespace std::placeholders;
 
 template <int ResidualDim, int NumParams>
 static void TestResidualFunctionDerivative(
@@ -68,9 +69,21 @@ class ConstrainedNLSTest : public ::testing::Test {
         1;  //  since this is quadratic w/ no constrains, should only need one of these
 
     // Solve it from a few different initial guesses
-    const AlignedVector<Vector2d> initial_guesses = {{-5, -3}, {10, 8}, {-20, 3}, {0, -5}, {4, 0}};
+    const AlignedVector<Vector2d> initial_guesses = {{-5, -3}, {10, 8},   {-20, 3}, {0, -5},
+                                                     {4, 0},   {100, 50}, {-35, 40}};
     for (const Vector2d& guess : initial_guesses) {
+      Logger logger{};
+      nls.SetQPLoggingCallback(
+          std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+
+      // solve it
       nls.Solve(p, guess);
+
+      std::cout << logger.GetString() << std::endl;
+
+      // check solution
+      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kPico) << "Summary:\n"
+                                                                       << logger.GetString();
     }
   }
 

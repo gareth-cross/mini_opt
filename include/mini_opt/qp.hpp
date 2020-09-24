@@ -193,8 +193,10 @@ struct QPInteriorPointSolver {
    *
    *   - The norm of the first order KKT conditions is less than the tolerance.
    *   - The fixed max number if iterations is hit.
+   *
+   * Returns termination state and number of iterations executed.
    */
-  TerminationState Solve(const Params& params, int* const num_iterations = nullptr);
+  std::pair<TerminationState, int> Solve(const Params& params);
 
   // Set the logger callback to a function pointer, lambda, etc.
   template <typename T>

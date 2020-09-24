@@ -48,7 +48,7 @@ void ConstrainedNonlinearLeastSquares::Solve(const Params& params,
          "Variables must match problem dimension");
   variables_ = variables;
 
-  //
+  // Iterate until max.
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // Fill out the QP and compute current errors.
     const Errors errors_iter_start = LinearizeAndFillQP(/* lambda */ 0.0);
@@ -59,7 +59,8 @@ void ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     qp_params.termination_kkt2_tol = params.termination_kkt2_tolerance;
 
     // Solve the QP.
-    const QPInteriorPointSolver::TerminationState term_state = solver_.Solve(qp_params);
+    const std::pair<QPInteriorPointSolver::TerminationState, int> qp_state =
+        solver_.Solve(qp_params);
 
     // Add the delta to our updated solution.
     candidate_vars_ = variables_;
@@ -73,31 +74,16 @@ void ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     // Evaluate the errors again after taking a step.
     const Errors errors_iter_end = EvaluateNonlinearErrors(candidate_vars_);
 
+    if (logging_callback_) {
+      logging_callback_(errors_iter_start, errors_iter_end);
+    }
+
     // todo: smart logic here
     const bool keep_solution = true;
     if (keep_solution) {
       variables_.swap(candidate_vars_);
     }
   }
-
-  // std::cout << "lambda = " << lambda << std::endl;
-  // std::cout << "error before = " << total_l2 << std::endl;
-  // std::cout << "termination state = " << term_state << std::endl;
-
-  // get the update and retract it onto the state
-  variables_ += solver_.x_block();
-  // for (int i = 0; i < variables_.rows(); ++i) {
-  //  variables_[i] = Mod2Pi(variables_[i]);
-  //}
-
-  // std::cout << "variables: " << variables_.transpose() << "\n";
-
-  // compute the error after
-  /*double total_l2_after = 0;
-  for (const ResidualBase::unique_ptr& cost : p_->costs) {
-    total_l2_after += cost->Error(variables_);
-  }
-  std::cout << "error after = " << total_l2_after << std::endl;*/
 }
 
 Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const double lambda) {

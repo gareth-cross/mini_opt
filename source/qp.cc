@@ -106,8 +106,8 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
  * far the simpler strategy of just scaling `mu` with complementarity seems better, but there
  * may be an implementation issue.
  */
-QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
-    const QPInteriorPointSolver::Params& params, int* const num_iterations) {
+std::pair<QPInteriorPointSolver::TerminationState, int> QPInteriorPointSolver::Solve(
+    const QPInteriorPointSolver::Params& params) {
   ASSERT(p_, "Must have a valid problem");
   CheckParams(params);
 
@@ -135,12 +135,9 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
                        iteration_outputs);
     }
 
-    if (num_iterations) {
-      *num_iterations = iter;
-    }
     if (kkt2_after.Total() < params.termination_kkt2_tol) {
       // error is low enough, stop
-      return TerminationState::SATISFIED_KKT_TOL;
+      return std::make_pair(TerminationState::SATISFIED_KKT_TOL, iter + 1);
     }
 
     // adjust the barrier parameter
@@ -151,7 +148,7 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
     }
   }
 
-  return TerminationState::MAX_ITERATIONS;
+  return std::make_pair(TerminationState::MAX_ITERATIONS, params.max_iterations);
 }
 
 IPIterationOutputs QPInteriorPointSolver::Iterate(const double mu_input,
@@ -442,6 +439,9 @@ double QPInteriorPointSolver::ComputeAlpha(const ConstVectorBlock& val,
 }
 
 double QPInteriorPointSolver::ComputeMu() const {
+  if (!HasInequalityConstraints()) {
+    return 0;
+  }
   const auto s = ConstSBlock(dims_, variables_);
   const auto z = ConstZBlock(dims_, variables_);
   return s.dot(z) / static_cast<double>(dims_.M);
