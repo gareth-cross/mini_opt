@@ -1,6 +1,7 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt/logging.hpp"
 
+#include "mini_opt/nonlinear.hpp"
 #include "mini_opt/qp.hpp"
 
 // TODO(gareth): Would really like to use libfmt for this instead...
@@ -40,7 +41,8 @@ void Logger::QPSolverCallbackVerbose(const QPInteriorPointSolver& solver, const 
   stream_ << "  y = " << solver.y_block().transpose().format(kMatrixFmt) << "\n";
   stream_ << "  z = " << solver.z_block().transpose().format(kMatrixFmt) << "\n";
 
-  // summarize where the inequality constraints are
+// summarize where the inequality constraints are
+#if 0
   stream_ << " Constraints:\n";
   std::size_t i = 0;
   for (const LinearInequalityConstraint& c : solver.problem().constraints) {
@@ -50,6 +52,16 @@ void Logger::QPSolverCallbackVerbose(const QPInteriorPointSolver& solver, const 
             << solver.s_block()[i] << ")\n";
     ++i;
   }
+#endif
+}
+
+void Logger::NonlinearSolverCallback(const int iteration, const Errors& errors_before,
+                                     const Errors& errors_after,
+                                     const QPTerminationState& term_state) {
+  stream_ << "Iteration #" << iteration;
+  stream_ << "  L2: " << errors_before.total_l2 << "  -->  " << errors_after.total_l2
+          << ", L2-Eq: " << errors_before.equality_l2 << "  -->  " << errors_after.equality_l2
+          << ", QP-term: " << term_state << "\n";
 }
 
 std::string Logger::GetString() const { return stream_.str(); }

@@ -35,8 +35,6 @@ TEST(LinearInequalityConstraintTest, Test) {
 // to be devoted to strategies for selecting it.
 class QPSolverTest : public ::testing::Test {
  public:
-  using TerminationState = QPInteriorPointSolver::TerminationState;
-
   // Specify the root of a polynominal: (a * x - b)^2
   struct Root {
     double a;
@@ -230,11 +228,11 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
-    const auto term_state = solver.Solve(params).first;
+    const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                   << logger.GetString();
+    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                     << logger.GetString();
     ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
     ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
     ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]) << "Summary:\n" << logger.GetString();
@@ -271,11 +269,11 @@ class QPSolverTest : public ::testing::Test {
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
-    const auto term_state = solver.Solve(params).first;
+    const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                   << logger.GetString();
+    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                     << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro) << "Summary:\n"
                                                                           << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), tol::kMicro) << "Summary:\n"
@@ -311,11 +309,11 @@ class QPSolverTest : public ::testing::Test {
     params.termination_kkt2_tol = tol::kPico;
     params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
     params.sigma = 0.5;
-    const auto term_state = solver.Solve(params).first;
+    const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                   << logger.GetString();
+    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                     << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro)
         << "\nSummary:\n"
         << logger.GetString();
@@ -348,11 +346,11 @@ class QPSolverTest : public ::testing::Test {
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     params.max_iterations = 1;  //  should only need one
-    const auto term_state = solver.Solve(params).first;
+    const auto term_state = solver.Solve(params).termination_state;
 
     // shoudl be able to satisfy immediately
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                   << logger.GetString();
+    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                     << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), qp.A_eq * solver.x_block() + qp.b_eq, tol::kNano)
         << "Summary:\n"
         << logger.GetString();
@@ -375,11 +373,11 @@ class QPSolverTest : public ::testing::Test {
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
     params.max_iterations = 1;
-    const auto term_state = solver.Solve(params).first;
+    const auto term_state = solver.Solve(params).termination_state;
 
     // should be able to satisfy immediately
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                   << logger.GetString();
+    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                     << logger.GetString();
     ASSERT_EIGEN_NEAR(-qp.b_eq, solver.x_block(), tol::kNano) << "Summary:\n" << logger.GetString();
     ASSERT_TRUE((solver.y_block().array() > tol::kCenti).all()) << "Summary:\n"
                                                                 << logger.GetString();
@@ -407,11 +405,11 @@ class QPSolverTest : public ::testing::Test {
     params.initial_mu = 1;
     params.sigma = 0.5;
 
-    const auto term_state = solver.Solve(params).first;
+    const auto term_state = solver.Solve(params).termination_state;
 
     // both inequalities should be active
-    ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                   << logger.GetString();
+    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
+                                                                     << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro)
         << "\nSummary:\n"
         << logger.GetString();
@@ -499,15 +497,15 @@ class QPSolverTest : public ::testing::Test {
       solver.SetLoggerCallback(
           std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
 
-      const auto term_state = solver.Solve(params).first;
+      const QPSolverOutputs outputs = solver.Solve(params);
       ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 2.0e-5)
-          << "Term: " << term_state << "\n"
+          << "Term: " << outputs.termination_state << "\n"
           << "Problem p = " << p << "\nSummary:\n"
           << logger.GetString();
 
       // check the variables that are constrained
       ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 2.0e-5)
-          << "Term: " << term_state << "\n"
+          << "Term: " << outputs.termination_state << "\n"
           << "Problem p = " << p << "\nSummary:\n"
           << logger.GetString();
     }

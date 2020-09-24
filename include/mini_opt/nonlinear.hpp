@@ -43,14 +43,6 @@ struct Problem {
   std::vector<ResidualBase::unique_ptr> equality_constraints;
 };
 
-// Total squared errors.
-struct Errors {
-  // Sum of squared costs.
-  double total_l2{0};
-  // Squared error in the non-linear equality constraints.
-  double equality_l2{0};
-};
-
 /*
  * Solve constrained non-linear least squares problems using SQP.
  *
@@ -77,7 +69,8 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Signature of custom logger.
   using LoggingCallback =
-      std::function<void(const Errors& errors_initial, const Errors& errors_final)>;
+      std::function<void(const int iteration, const Errors& errors_initial,
+                         const Errors& errors_final, const QPTerminationState& term_state)>;
 
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* const problem,

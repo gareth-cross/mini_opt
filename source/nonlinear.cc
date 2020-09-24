@@ -59,8 +59,7 @@ void ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     qp_params.termination_kkt2_tol = params.termination_kkt2_tolerance;
 
     // Solve the QP.
-    const std::pair<QPInteriorPointSolver::TerminationState, int> qp_state =
-        solver_.Solve(qp_params);
+    const QPSolverOutputs qp_outputs = solver_.Solve(qp_params);
 
     // Add the delta to our updated solution.
     candidate_vars_ = variables_;
@@ -75,7 +74,7 @@ void ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const Errors errors_iter_end = EvaluateNonlinearErrors(candidate_vars_);
 
     if (logging_callback_) {
-      logging_callback_(errors_iter_start, errors_iter_end);
+      logging_callback_(iter, errors_iter_start, errors_iter_end, qp_outputs.termination_state);
     }
 
     // todo: smart logic here

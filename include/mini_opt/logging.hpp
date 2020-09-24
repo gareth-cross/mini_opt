@@ -2,12 +2,9 @@
 #pragma once
 #include <sstream>
 
-namespace mini_opt {
+#include "mini_opt/structs.hpp"
 
-// Fwd declare some things.
-struct QPInteriorPointSolver;
-struct KKTError;
-struct IPIterationOutputs;
+namespace mini_opt {
 
 /**
  * For use primarily in tests. Logger receives callbacks w/ iteration info
@@ -22,6 +19,10 @@ struct Logger {
   // Includes dump of state variables as well.
   void QPSolverCallbackVerbose(const QPInteriorPointSolver& solver, const KKTError& kkt2_prev,
                                const KKTError& kkt2_after, const IPIterationOutputs& outputs);
+
+  // Callback for the nonlinear solver.
+  void NonlinearSolverCallback(const int iteration, const Errors& errors_before,
+                               const Errors& errors_after, const QPTerminationState& term_state);
 
   // Get the resulting string from the stream.
   std::string GetString() const;

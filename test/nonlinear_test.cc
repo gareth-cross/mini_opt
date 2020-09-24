@@ -75,6 +75,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       Logger logger{};
       nls.SetQPLoggingCallback(
           std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2, _3, _4));
 
       // solve it
       nls.Solve(p, guess);

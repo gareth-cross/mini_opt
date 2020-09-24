@@ -106,8 +106,7 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
  * far the simpler strategy of just scaling `mu` with complementarity seems better, but there
  * may be an implementation issue.
  */
-std::pair<QPInteriorPointSolver::TerminationState, int> QPInteriorPointSolver::Solve(
-    const QPInteriorPointSolver::Params& params) {
+QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params& params) {
   ASSERT(p_, "Must have a valid problem");
   CheckParams(params);
 
@@ -137,7 +136,7 @@ std::pair<QPInteriorPointSolver::TerminationState, int> QPInteriorPointSolver::S
 
     if (kkt2_after.Total() < params.termination_kkt2_tol) {
       // error is low enough, stop
-      return std::make_pair(TerminationState::SATISFIED_KKT_TOL, iter + 1);
+      return QPSolverOutputs(QPTerminationState::SATISFIED_KKT_TOL, iter + 1);
     }
 
     // adjust the barrier parameter
@@ -148,7 +147,7 @@ std::pair<QPInteriorPointSolver::TerminationState, int> QPInteriorPointSolver::S
     }
   }
 
-  return std::make_pair(TerminationState::MAX_ITERATIONS, params.max_iterations);
+  return QPSolverOutputs(QPTerminationState::MAX_ITERATIONS, params.max_iterations);
 }
 
 IPIterationOutputs QPInteriorPointSolver::Iterate(const double mu_input,
@@ -577,14 +576,12 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
   }
 }
 
-std::ostream& operator<<(std::ostream& stream,
-                         const QPInteriorPointSolver::TerminationState& state) {
-  using TerminationState = QPInteriorPointSolver::TerminationState;
+std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) {
   switch (state) {
-    case TerminationState::SATISFIED_KKT_TOL:
+    case QPTerminationState::SATISFIED_KKT_TOL:
       stream << "SATISFIED_KKT_TOL";
       break;
-    case TerminationState::MAX_ITERATIONS:
+    case QPTerminationState::MAX_ITERATIONS:
       stream << "MAX_ITERATIONS";
       break;
   }
