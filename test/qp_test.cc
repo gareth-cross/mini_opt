@@ -151,6 +151,7 @@ class QPSolverTest : public ::testing::Test {
 
     // set up inequality constraint
     qp.constraints.emplace_back(Var(1) >= 0);  // x >= 0
+    qp.constraints.emplace_back(Var(0) <= 5);  // x >= 0
 
     const VectorXd x_guess = (Matrix<double, 2, 1>() << 0.0, 2.0).finished();
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
@@ -275,8 +276,8 @@ class QPSolverTest : public ::testing::Test {
                                                                    << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro) << "Summary:\n"
                                                                           << logger.GetString();
-    ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), 1.0e-8) << "Summary:\n"
-                                                                  << logger.GetString();
+    ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), tol::kMicro) << "Summary:\n"
+                                                                       << logger.GetString();
   }
 
   // Quadratic in three variables, with one active and one inactive inequality.
@@ -306,7 +307,11 @@ class QPSolverTest : public ::testing::Test {
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
+    // params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
+    params.initial_sigma = 1;
     const auto term_state = solver.Solve(params);
+
+    std::cout << logger.GetString() << std::endl;
 
     // check the solution
     ASSERT_TRUE(term_state == TerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"

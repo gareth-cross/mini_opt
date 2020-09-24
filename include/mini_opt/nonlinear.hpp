@@ -43,6 +43,14 @@ struct Problem {
   std::vector<ResidualBase::unique_ptr> equality_constraints;
 };
 
+// Total squared errors.
+struct Errors {
+  // Sum of squared costs.
+  double total_l2{0};
+  // Squared error in the non-linear equality constraints.
+  double equality_l2{0};
+};
+
 /*
  * Solve constrained non-linear least squares problems using SQP.
  *
@@ -52,35 +60,60 @@ struct Problem {
  */
 struct ConstrainedNonlinearLeastSquares {
  public:
+  // Parameters.
+  struct Params {
+    // Max number of iterations to execute.
+    int max_iterations{10};
+
+    // Max number of inner iterations in the QP solver.
+    int max_qp_iterations{10};
+
+    // KKT tolerance.
+    double termination_kkt2_tolerance{1.0e-6};
+  };
+
+  // Signature of custom retraction operator.
+  using Retraction = std::function<void(Eigen::VectorXd* const x, const ConstVectorBlock& dx)>;
+
   // Construct w/ const pointer to a problem definition.
-  explicit ConstrainedNonlinearLeastSquares(const Problem* const problem);
+  explicit ConstrainedNonlinearLeastSquares(const Problem* const problem,
+                                            const Retraction& retraction = nullptr);
 
-  // Linearize and take a step.
-  void LinearizeAndSolve(const double lambda = 0);
-
-  // Set the variables.
-  void SetVariables(const Eigen::VectorXd& variables) { variables_ = variables; }
+  /*
+   *
+   */
+  void Solve(const Params& params, const Eigen::VectorXd& variables);
 
   // Set the callback which will be used for the QP solver.
   template <typename T>
   void SetQPLoggingCallback(T cb) {
-    qp_logger_callback_ = cb;
+    solver_.SetLoggerCallback(cb);
   }
 
   // Get the current linearization point.
   const Eigen::VectorXd& variables() const { return variables_; }
 
  private:
+  // Linearize and fill the QP w/ the problem definition.
+  Errors LinearizeAndFillQP(const double lambda);
+
+  // Evaluate the non-linear error.
+  Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars);
+
   const Problem* const p_;
+
+  // Custom retraction operator, optional.
+  Retraction custom_retraction_;
 
   // Storage for the QP representation of the problem.
   QP qp_{};
 
+  // The QP solver itself, which we re-use at each iteration.
+  QPInteriorPointSolver solver_{};
+
   // Parameters (the current linearization point)
   Eigen::VectorXd variables_;
-
-  // Callback we pass to the QP solver
-  QPInteriorPointSolver::LoggingCallback qp_logger_callback_{};
+  Eigen::VectorXd candidate_vars_;
 };
 
 }  // namespace mini_opt

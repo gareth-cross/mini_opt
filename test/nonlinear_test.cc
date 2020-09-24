@@ -2,14 +2,15 @@
 #include "mini_opt/nonlinear.hpp"
 
 #include "geometry_utils/numerical_derivative.hpp"
-#include "test_utils.hpp"
+#include "mini_opt/logging.hpp"
 #include "mini_opt/transform_chains.hpp"
+#include "test_utils.hpp"
 
 namespace mini_opt {
 using namespace Eigen;
 
 template <int ResidualDim, int NumParams>
-void TestResidualFunctionDerivative(
+static void TestResidualFunctionDerivative(
     const std::function<Eigen::Matrix<double, ResidualDim, 1>(
         const Eigen::Matrix<double, NumParams, 1>&,
         Eigen::Matrix<double, ResidualDim, NumParams>* const)>& function,
@@ -31,6 +32,48 @@ void TestResidualFunctionDerivative(
 // Test constrained non-linear least squares.
 class ConstrainedNLSTest : public ::testing::Test {
  public:
+  static Vector2d Rosenbrock(const Vector2d& params, Matrix2d* const J_out = nullptr) {
+    constexpr double a = 1.0;
+    constexpr double b = 100.0;
+    if (J_out) {
+      J_out->setZero();
+      J_out->operator()(0, 0) = -1.0;
+      J_out->operator()(1, 0) = -2 * params.x() * std::sqrt(b);
+      J_out->operator()(1, 1) = std::sqrt(b);
+    }
+    // we select h(x,y) st. h(x,y)^T * h(x,y) = (a - x)^2 + b*(y - x^2)^2 where b=100, a=1
+    return {a - params.x(), std::sqrt(b) * (params.y() - params.x() * params.x())};
+  }
+
+  // Test optimization of rosenbrock function w/ no constraints.
+  void TestRosenbrock() {
+    Residual<2, 2> rosenbrock;
+    rosenbrock.index = {{0, 1}};
+    rosenbrock.function = &ConstrainedNLSTest::Rosenbrock;
+
+    // check that it behaves correctly
+    TestResidualFunctionDerivative<2, 2>(rosenbrock.function, Vector2d{5, -3});
+    TestResidualFunctionDerivative<2, 2>(rosenbrock.function, Vector2d{1, 1});
+    ASSERT_EIGEN_NEAR(Vector2d::Zero(), Rosenbrock({1, 1}), tol::kPico);
+
+    // simple problem with only one cost
+    Problem problem{};
+    problem.costs.emplace_back(new Residual<2, 2>(rosenbrock));
+    problem.dimension = 2;
+
+    ConstrainedNonlinearLeastSquares nls(&problem);
+    ConstrainedNonlinearLeastSquares::Params p{};
+    p.max_iterations = 5;
+    p.max_qp_iterations =
+        1;  //  since this is quadratic w/ no constrains, should only need one of these
+
+    // Solve it from a few different initial guesses
+    const AlignedVector<Vector2d> initial_guesses = {{-5, -3}, {10, 8}, {-20, 3}, {0, -5}, {4, 0}};
+    for (const Vector2d& guess : initial_guesses) {
+      nls.Solve(p, guess);
+    }
+  }
+
   // Test a simple non-linear least squares problem.
   void TestActuatorChain() {
     // We have a chain of three rotational actuators, at the end of which we have an effector.
@@ -175,14 +218,14 @@ class ConstrainedNLSTest : public ::testing::Test {
     // nls.SetQPLoggingCallback(&QPSolverTest::ProgressPrinter);
 
     const Vector2d initial_values{M_PI / 4, -M_PI / 6};
-    nls.SetVariables(initial_values);
-    // try {
-    nls.LinearizeAndSolve(10.0);
-    nls.LinearizeAndSolve(0.001);
-    nls.LinearizeAndSolve(0.001);
-    nls.LinearizeAndSolve(0.001);
-    nls.LinearizeAndSolve(0.001);
-    nls.LinearizeAndSolve(0.001);
+    // nls.SetVariables(initial_values);
+    //// try {
+    // nls.LinearizeAndSolve(10.0);
+    // nls.LinearizeAndSolve(0.001);
+    // nls.LinearizeAndSolve(0.001);
+    // nls.LinearizeAndSolve(0.001);
+    // nls.LinearizeAndSolve(0.001);
+    // nls.LinearizeAndSolve(0.001);
     //} catch (const FailedFactorization&) {
     //}
 
@@ -236,6 +279,7 @@ class ConstrainedNLSTest : public ::testing::Test {
   }
 };
 
-TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
+TEST_FIXTURE(ConstrainedNLSTest, TestRosenbrock)
+// TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
 }  // namespace mini_opt

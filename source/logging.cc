@@ -1,5 +1,6 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt/logging.hpp"
+
 #include "mini_opt/qp.hpp"
 
 // TODO(gareth): Would really like to use libfmt for this instead...
@@ -14,6 +15,9 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
   stream_ << "||kkt||^2: " << kkt2_prev.Total() << " --> " << kkt2_after.Total()
           << ", mu = " << outputs.mu << ", sigma = " << outputs.sigma
           << ", a_p = " << outputs.alpha.primal << ", a_d = " << outputs.alpha.dual << "\n";
+  stream_ << " Probe alphas: a_p = " << outputs.alpha_probe.primal
+          << ", a_d = " << outputs.alpha_probe.dual << ", mu_affine = " << outputs.mu_affine
+          << "\n";
 
   // dump progress of individual KKT conditions
   stream_ << " KKT errors (squared):\n";

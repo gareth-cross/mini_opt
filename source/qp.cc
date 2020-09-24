@@ -38,16 +38,16 @@ void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feas
   dims_.M = p_->constraints.size();
   dims_.K = p_->A_eq.rows();
 
+  // allocate space for primal, slacks, and dual variables
   variables_.resize(dims_.N + dims_.M * 2 + dims_.K);
-  prev_variables_.resizeLike(variables_);
 
   // Since this is solving a problem in the tangent space of a larger nonlinear problem,
   // we can guess zero for `x`.
   XBlock(dims_, variables_).setZero();
 
-  // TODO(gareth): A better initialization strategy for these?
-  // Could assume constraints are active, in which case we compute lambda from the KKT conditions.
-  SBlock(dims_, variables_).setConstant(1);
+  // TODO(gareth): A better initialization strategy for these? Probably problem specific.
+  // Start w/ inequlities all active, such that: s~=0, z > 0
+  SBlock(dims_, variables_).setConstant(1.0e-6);
   ZBlock(dims_, variables_).setConstant(1);
   YBlock(dims_, variables_).setConstant(0);
 
@@ -102,9 +102,6 @@ QPInteriorPointSolver::TerminationState QPInteriorPointSolver::Solve(
 
   double sigma{params.initial_sigma};
   for (int iter = 0; iter < params.max_iterations; ++iter) {
-    // copy current state
-    prev_variables_ = variables_;
-
     // compute squared norm of the residual, prior to any updates
     const KKTError kkt2_prev = ComputeSquaredErrors();
 
@@ -159,7 +156,7 @@ IPIterationOutputs QPInteriorPointSolver::Iterate(const double sigma,
     // Use the MPC/predictor-corrector (algorithm 16.4).
     // Solve with mu=0 and compute the largest step size.
     SolveForUpdate(0.0);
-    ComputeAlpha(&outputs.alpha_probe, /* tau = */ 1.);
+    ComputeAlpha(&outputs.alpha_probe, /* tau = */ 1.0);
 
     // save the value of the affine step
     delta_affine_ = delta_;
@@ -382,6 +379,8 @@ void QPInteriorPointSolver::EvaluateKKTConditions() {
   }
 }
 
+// Compute equation (19.10), but I'm taking the total rather than the max.
+// Using L2 norm (squared).
 KKTError QPInteriorPointSolver::ComputeSquaredErrors() const {
   KKTError result{};
   result.r_dual = ConstXBlock(dims_, r_).squaredNorm();

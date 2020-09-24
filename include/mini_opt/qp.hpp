@@ -159,7 +159,7 @@ struct QPInteriorPointSolver {
   struct Params {
     // Sigma is multiplied by `mu` at each iteration, to scale down the amount of 'perturbation'
     // we are applying to the KKT conditions. This is the initial value for sigma.
-    double initial_sigma{0.1};
+    double initial_sigma{1.0};
 
     // Amount to reduce sigma on each iteration.
     double sigma_reduction{0.5};
@@ -171,7 +171,7 @@ struct QPInteriorPointSolver {
     int max_iterations{10};
 
     // Strategy to apply to barrier parameter `mu`.
-    BarrierStrategy barrier_strategy{BarrierStrategy::PREDICTOR_CORRECTOR};
+    BarrierStrategy barrier_strategy{BarrierStrategy::SCALED_COMPLEMENTARITY};
   };
 
   // List of possible termination criteria.
@@ -224,6 +224,7 @@ struct QPInteriorPointSolver {
   const QP& problem() const;
 
  private:
+  // Current problem, initialized by `Setup`.
   const QP* p_{nullptr};
 
   struct ProblemDims {
@@ -237,7 +238,6 @@ struct QPInteriorPointSolver {
 
   // Storage for the variables: (x, s, y, z)
   Eigen::VectorXd variables_;
-  Eigen::VectorXd prev_variables_;
 
   // Re-usable storage for the linear system and residuals
   Eigen::MatrixXd H_;

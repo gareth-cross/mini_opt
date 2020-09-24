@@ -30,8 +30,9 @@ struct ResidualBase {
 
   // Output the jacobian for the linear system: J * dx + b
   // `J_out` and `b_out` are set to the correct rows of a larger matrix.
-  virtual void UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
-                              Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
+  // Returns the value of `Error` as well.
+  virtual double UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
+                                Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
 };
 
 // Helper for declaring either vector or array, depending on whether size is known at compile time.
@@ -76,8 +77,8 @@ struct Residual : public ResidualBase {
                        Eigen::VectorXd* const b) const override;
 
   // Implementation of abstract method UpdateJacobian.
-  void UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
-                      Eigen::VectorBlock<Eigen::VectorXd> b_out) const override;
+  double UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
+                        Eigen::VectorBlock<Eigen::VectorXd> b_out) const override;
 
  private:
   // Copy out the params that matter for this function.
@@ -168,7 +169,7 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
 
 // This version takes blocks so we can write directly into A_eq.
 template <int ResidualDim, int NumParams>
-void Residual<ResidualDim, NumParams>::UpdateJacobian(
+double Residual<ResidualDim, NumParams>::UpdateJacobian(
     const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
     Eigen::VectorBlock<Eigen::VectorXd> b_out) const {
   ASSERT(ResidualDim == b_out.rows());
@@ -189,6 +190,7 @@ void Residual<ResidualDim, NumParams>::UpdateJacobian(
            col_global);
     J_out.col(col_global).noalias() = J.col(col_local);
   }
+  return 0.5 * b_out.squaredNorm();
 }
 
 #ifdef _MSC_VER
