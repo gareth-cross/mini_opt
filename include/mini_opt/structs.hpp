@@ -71,6 +71,46 @@ struct Errors {
   double total_l2{0};
   // Squared error in the non-linear equality constraints.
   double equality_l2{0};
+
+  // Total squared error in soft costs and equality constraints.
+  double Total() const { return total_l2 + equality_l2; }
+};
+
+// Pair together a step size and the error achieved.
+struct LineSearchStep {
+  // Value of alpha this was computed at [0, 1]
+  double alpha;
+  // Cost function value at that step.
+  Errors errors;
+
+  LineSearchStep(double a, Errors e) : alpha(a), errors(e) {}
+};
+
+// Exit condition of the non-linear optimization.
+enum class NLSTerminationState {
+  MAX_ITERATIONS = 0,
+  SATISFIED_ABSOLUTE_TOL = 1,
+  SATISFIED_RELATIVE_TOL = 2,
+  MAX_LAMBDA = 3,
+};
+
+// Details for the log, the current state of the non-linear optimizer.
+struct NLSLogInfo {
+  NLSLogInfo(int iteration, double lambda, const Errors& errors_initial, const QPSolverOutputs& qp,
+             const std::vector<LineSearchStep>& steps, bool success)
+      : iteration(iteration),
+        lambda(lambda),
+        errors_initial(errors_initial),
+        qp_term_state(qp),
+        steps(steps),
+        success(success) {}
+
+  int iteration;
+  double lambda;
+  Errors errors_initial;
+  QPSolverOutputs qp_term_state;
+  const std::vector<LineSearchStep>& steps;
+  bool success;
 };
 
 }  // namespace mini_opt

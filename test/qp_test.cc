@@ -231,8 +231,8 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
-    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                     << logger.GetString();
+    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                 << logger.GetString();
     ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
     ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
     ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]) << "Summary:\n" << logger.GetString();
@@ -272,8 +272,8 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
-    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                     << logger.GetString();
+    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                 << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro) << "Summary:\n"
                                                                           << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), tol::kMicro) << "Summary:\n"
@@ -312,8 +312,8 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
-    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                     << logger.GetString();
+    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                 << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro)
         << "\nSummary:\n"
         << logger.GetString();
@@ -349,8 +349,8 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params).termination_state;
 
     // shoudl be able to satisfy immediately
-    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                     << logger.GetString();
+    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                 << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), qp.A_eq * solver.x_block() + qp.b_eq, tol::kNano)
         << "Summary:\n"
         << logger.GetString();
@@ -376,8 +376,8 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params).termination_state;
 
     // should be able to satisfy immediately
-    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                     << logger.GetString();
+    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                 << logger.GetString();
     ASSERT_EIGEN_NEAR(-qp.b_eq, solver.x_block(), tol::kNano) << "Summary:\n" << logger.GetString();
     ASSERT_TRUE((solver.y_block().array() > tol::kCenti).all()) << "Summary:\n"
                                                                 << logger.GetString();
@@ -408,8 +408,8 @@ class QPSolverTest : public ::testing::Test {
     const auto term_state = solver.Solve(params).termination_state;
 
     // both inequalities should be active
-    ASSERT_TRUE(term_state == QPTerminationState::SATISFIED_KKT_TOL) << term_state << "\nSummary:\n"
-                                                                     << logger.GetString();
+    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                 << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro)
         << "\nSummary:\n"
         << logger.GetString();

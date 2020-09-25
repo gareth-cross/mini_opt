@@ -33,6 +33,121 @@ static void TestResidualFunctionDerivative(
 // Test constrained non-linear least squares.
 class ConstrainedNLSTest : public ::testing::Test {
  public:
+  // Test function that computes the gradient of the cost function against
+  // a numerical version.
+  void TestComputeQPCostDerivative() {
+    using Vector5 = Matrix<double, 5, 1>;
+    Residual<3, 5> cost;
+    cost.index = {{0, 2, 1, 4, 3}};
+    cost.function = [](const Vector5& params, Matrix<double, 3, 5>* J_out) -> Matrix<double, 3, 1> {
+      // some nonsense
+      const Vector3d result{params[0] * params[1] - params[3],
+                            std::sin(params[1]) * std::cos(params[2]),
+                            params[3] * params[0] - params[2]};
+      if (J_out) {
+        J_out->setZero();
+        J_out->operator()(0, 0) = params[1];
+        J_out->operator()(0, 1) = params[0];
+        J_out->operator()(0, 3) = -1;
+        J_out->operator()(1, 1) = std::cos(params[1]) * std::cos(params[2]);
+        J_out->operator()(1, 2) = -std::sin(params[2]) * std::sin(params[1]);
+        J_out->operator()(2, 0) = params[3];
+        J_out->operator()(2, 2) = -1;
+        J_out->operator()(2, 3) = params[0];
+      }
+      return result;
+    };
+
+    // Make up an equality constraint
+    Residual<2, 3> eq;
+    eq.index = {{3, 4, 0}};
+    eq.function = [](const Vector3d& params, Matrix<double, 2, 3>* J_out) -> Vector2d {
+      const Vector2d result{params[0] - params[1], params[2] * params[2]};
+      if (J_out) {
+        J_out->setZero();
+        J_out->operator()(0, 0) = 1;
+        J_out->operator()(0, 1) = -1;
+        J_out->operator()(1, 2) = 2 * params[2];
+      }
+      return result;
+    };
+
+    // check that the derivatives are correct
+    const Vector5 params = (Vector5() << -0.5, 0.2, 0.3, -0.8, 1.2).finished();
+    TestResidualFunctionDerivative<3, 5>(cost.function, params);
+    TestResidualFunctionDerivative<2, 3>(eq.function, params.head<3>());
+
+    // pick a direction for the directional derivative
+    const Vector5 dx = (Vector5() << 0.1, 0.25, -0.87, 1.1, -0.02).finished();
+
+    // compute the derivative of the sum cost function
+    const Matrix<double, 1, 1> J_numerical = math::NumericalJacobian(0.0, [&](const double alpha) {
+      return cost.Error(params + dx * alpha) + eq.Error(params + dx * alpha);
+    });
+
+    // set up a problem
+    Problem problem{};
+    problem.dimension = 5;
+    problem.costs.emplace_back(new Residual<3, 5>(cost));
+    problem.equality_constraints.emplace_back(new Residual<2, 3>(eq));
+
+    // compute analytically as well
+    QP qp{static_cast<Index>(problem.dimension)};
+    qp.A_eq.resize(2, 5);
+    qp.b_eq.resize(2);
+    ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(params, 0.0, problem, &qp);
+
+    const double J_analytical = ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(qp, dx);
+    ASSERT_NEAR(J_numerical[0], J_analytical, tol::kPico);
+  }
+
+  void TestQuadraticApproxMinimum() {
+    // make up some values
+    const double alpha_0 = 0.8;
+    const double phi_0 = 2.0;
+    const double phi_prime_0 = -1.2;
+    const double phi_alpha_0 = 2.2;
+
+    // compute via form 1
+    const double solution = ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(
+        phi_0, phi_prime_0, alpha_0, phi_alpha_0);
+
+    const double a = (phi_alpha_0 - phi_0 - alpha_0 * phi_prime_0) / std::pow(alpha_0, 2);
+    const double b = phi_prime_0;
+    ASSERT_NEAR(-b / (2 * a), solution, tol::kPico);
+  }
+
+  // Check that close form cubic approximation is correct.
+  void TestCubicApproxCoeffs() {
+    const double alpha_0 = 0.8;
+    const double alpha_1 = 0.4;
+    const double phi_0 = 1.44;
+    const double phi_prime_0 = -1.23;
+
+    const double phi_alpha_0 = 2.2;  //  cost did not decrease
+    const double phi_alpha_1 = 1.6;  //  still did not decrease
+
+    // fit the cubic
+    const Vector2d ab = ConstrainedNonlinearLeastSquares::CubicApproxCoeffs(
+        phi_0, phi_prime_0, alpha_0, phi_alpha_0, alpha_1, phi_alpha_1);
+
+    // check that the polynomial is correct
+    ASSERT_NEAR(
+        ab[0] * std::pow(alpha_0, 3) + ab[1] * std::pow(alpha_0, 2) + alpha_0 * phi_prime_0 + phi_0,
+        phi_alpha_0, tol::kPico);
+    ASSERT_NEAR(
+        ab[0] * std::pow(alpha_1, 3) + ab[1] * std::pow(alpha_1, 2) + alpha_1 * phi_prime_0 + phi_0,
+        phi_alpha_1, tol::kPico);
+
+    // find the minimum
+    const double min_alpha = ConstrainedNonlinearLeastSquares::CubicApproxMinimum(phi_prime_0, ab);
+
+    // check it actually is the minimum
+    ASSERT_NEAR(0.0, 3 * ab[0] * std::pow(min_alpha, 2) + 2 * ab[1] * min_alpha + phi_prime_0,
+                tol::kPico);
+    ASSERT_GT(6 * ab[0] * min_alpha + 2 * ab[1], 0);
+  }
+
   static Vector2d Rosenbrock(const Vector2d& params, Matrix2d* const J_out = nullptr) {
     constexpr double a = 1.0;
     constexpr double b = 100.0;
@@ -73,17 +188,20 @@ class ConstrainedNLSTest : public ::testing::Test {
                                                      {4, 0},   {100, 50}, {-35, 40}};
     for (const Vector2d& guess : initial_guesses) {
       Logger logger{};
+#if 0
       nls.SetQPLoggingCallback(
           std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
-      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2, _3, _4));
+#endif
+      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1));
 
       // solve it
-      nls.Solve(p, guess);
+      const NLSTerminationState term_state = nls.Solve(p, guess);
+      ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
 
       std::cout << logger.GetString() << std::endl;
 
       // check solution
-      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kPico) << "Summary:\n"
+      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kNano) << "Summary:\n"
                                                                        << logger.GetString();
     }
   }
@@ -293,6 +411,9 @@ class ConstrainedNLSTest : public ::testing::Test {
   }
 };
 
+TEST_FIXTURE(ConstrainedNLSTest, TestComputeQPCostDerivative)
+TEST_FIXTURE(ConstrainedNLSTest, TestQuadraticApproxMinimum)
+TEST_FIXTURE(ConstrainedNLSTest, TestCubicApproxCoeffs)
 TEST_FIXTURE(ConstrainedNLSTest, TestRosenbrock)
 // TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 

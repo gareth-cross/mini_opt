@@ -21,8 +21,7 @@ struct Logger {
                                const KKTError& kkt2_after, const IPIterationOutputs& outputs);
 
   // Callback for the nonlinear solver.
-  void NonlinearSolverCallback(const int iteration, const Errors& errors_before,
-                               const Errors& errors_after, const QPTerminationState& term_state);
+  void NonlinearSolverCallback(const NLSLogInfo& info);
 
   // Get the resulting string from the stream.
   std::string GetString() const;

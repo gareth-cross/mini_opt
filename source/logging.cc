@@ -55,13 +55,19 @@ void Logger::QPSolverCallbackVerbose(const QPInteriorPointSolver& solver, const 
 #endif
 }
 
-void Logger::NonlinearSolverCallback(const int iteration, const Errors& errors_before,
-                                     const Errors& errors_after,
-                                     const QPTerminationState& term_state) {
-  stream_ << "Iteration #" << iteration;
-  stream_ << "  L2: " << errors_before.total_l2 << "  -->  " << errors_after.total_l2
-          << ", L2-Eq: " << errors_before.equality_l2 << "  -->  " << errors_after.equality_l2
-          << ", QP-term: " << term_state << "\n";
+void Logger::NonlinearSolverCallback(const NLSLogInfo& info) {
+  stream_ << "Iteration #" << info.iteration << ", lambda = " << info.lambda;
+  stream_ << ", L2(0): " << info.errors_initial.total_l2
+          << ", L2-eq(0): " << info.errors_initial.equality_l2 << "\n";
+  stream_ << "  QP: " << info.qp_term_state.termination_state << ", "
+          << info.qp_term_state.num_iterations << "\n";
+
+  int i = 0;
+  for (const LineSearchStep& step : info.steps) {
+    stream_ << "  L2(" << i << "): " << step.errors.total_l2 << ", L2-eq(" << i
+            << "): " << step.errors.equality_l2 << ", alpha = " << step.alpha << "\n";
+    ++i;
+  }
 }
 
 std::string Logger::GetString() const { return stream_.str(); }

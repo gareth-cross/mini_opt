@@ -52,7 +52,7 @@ struct Problem {
  */
 struct ConstrainedNonlinearLeastSquares {
  public:
-  // Parameters.
+  // Parameters, these defaults are largely made up.
   struct Params {
     // Max number of iterations to execute.
     int max_iterations{10};
@@ -60,17 +60,37 @@ struct ConstrainedNonlinearLeastSquares {
     // Max number of inner iterations in the QP solver.
     int max_qp_iterations{10};
 
-    // KKT tolerance.
+    // KKT tolerance for the QP inner solver.
     double termination_kkt2_tolerance{1.0e-6};
+
+    // Absolute tolerance on squared error to exit.
+    double absolute_exit_tol{1.0e-12};
+
+    // Relative exit tolerance. If error[k+1] > error[k] * tol, stop.
+    double relative_exit_tol{1 - 1.0e-4};
+
+    // Max # of line-search iterations.
+    int max_line_search_iterations{2};
+
+    // Initial lambda value.
+    double lambda_initial{0.0};
+
+    // Initial lambda value on failure to decrease cost.
+    double lambda_failure_init{1.0e-2};
+
+    // Maximum lambda value.
+    double max_lambda{1.};
+
+    // Minimum lambda value.
+    double min_lambda{0.};
   };
 
   // Signature of custom retraction operator.
-  using Retraction = std::function<void(Eigen::VectorXd* const x, const ConstVectorBlock& dx)>;
+  using Retraction =
+      std::function<void(Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha)>;
 
   // Signature of custom logger.
-  using LoggingCallback =
-      std::function<void(const int iteration, const Errors& errors_initial,
-                         const Errors& errors_final, const QPTerminationState& term_state)>;
+  using LoggingCallback = std::function<void(const NLSLogInfo& info)>;
 
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* const problem,
@@ -79,7 +99,7 @@ struct ConstrainedNonlinearLeastSquares {
   /*
    *
    */
-  void Solve(const Params& params, const Eigen::VectorXd& variables);
+  NLSTerminationState Solve(const Params& params, const Eigen::VectorXd& variables);
 
   // Set the callback which will be used for the QP solver.
   template <typename T>
@@ -97,11 +117,38 @@ struct ConstrainedNonlinearLeastSquares {
   const Eigen::VectorXd& variables() const { return variables_; }
 
  private:
+  // Update candidate_vars w/ a step size of alpha.
+  void RetractCandidateVars(const double alpha);
+
   // Linearize and fill the QP w/ the problem definition.
-  Errors LinearizeAndFillQP(const double lambda);
+  static Errors LinearizeAndFillQP(const Eigen::VectorXd& variables, const double lambda,
+                                   const Problem& problem, QP* const qp);
 
   // Evaluate the non-linear error.
   Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars);
+
+  // Execute a back-tracking search until the cost decreases, or we hit
+  // a max number of iterations. This will repeatedly approximate the cost
+  // function as a polynomial, and find the minimum. Returns true if we
+  // find a step that decreases, false otherwise.
+  bool SelectStepSize(const int max_iterations, const Errors& errors_pre);
+
+  // Compute first derivative of the QP cost function.
+  static double ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx);
+
+  // Solve the quadratic approximation of the cost function for best alpha.
+  // Implements equation (3.57/3.58)
+  static double QuadraticApproxMinimum(const double phi_0, const double phi_prime_0,
+                                       const double alpha_0, const double phi_alpha_0);
+
+  // Get the polyonomial coefficents c0, c1 from the cubic approximation of the cost.
+  // Implements equation after 3.58, returns [a, b]
+  static Eigen::Vector2d CubicApproxCoeffs(const double phi_0, const double phi_prime_0,
+                                           const double alpha_0, const double phi_alpha_0,
+                                           const double alpha_1, const double phi_alpha_1);
+
+  // Get the solution of the cubic approximation.
+  static double CubicApproxMinimum(const double phi_prime_0, const Eigen::Vector2d& ab);
 
   const Problem* const p_;
 
@@ -118,8 +165,16 @@ struct ConstrainedNonlinearLeastSquares {
   Eigen::VectorXd variables_;
   Eigen::VectorXd candidate_vars_;
 
+  // Buffer for line search steps
+  std::vector<LineSearchStep> steps_;
+
   // Logging callback.
   LoggingCallback logging_callback_{};
+
+  friend class ConstrainedNLSTest;
 };
+
+// ostream for termination states
+std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state);
 
 }  // namespace mini_opt
