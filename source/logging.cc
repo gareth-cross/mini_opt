@@ -58,7 +58,8 @@ void Logger::QPSolverCallbackVerbose(const QPInteriorPointSolver& solver, const 
 void Logger::NonlinearSolverCallback(const NLSLogInfo& info) {
   stream_ << "Iteration #" << info.iteration << ", lambda = " << info.lambda;
   stream_ << ", L2(0): " << info.errors_initial.total_l2
-          << ", L2-eq(0): " << info.errors_initial.equality_l2 << "\n";
+          << ", L2-eq(0): " << info.errors_initial.equality_l2 << ", success = " << info.success
+          << "\n";
   stream_ << "  QP: " << info.qp_term_state.termination_state << ", "
           << info.qp_term_state.num_iterations << "\n";
 
