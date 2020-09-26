@@ -33,6 +33,7 @@ build/*
 
 # JETBRAINS
 *.idea
+cmake-build-debug/
 
 # SUBLIME TEXT
 *.sublime-project
@@ -40,3 +41,4 @@ build/*
 
 # VSCODE
 .vscode/
+
