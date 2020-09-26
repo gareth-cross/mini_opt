@@ -3,8 +3,6 @@
 
 #include <Eigen/Dense>  //  for inverse()
 
-#include <iostream>
-
 namespace mini_opt {
 
 ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem* const problem,
@@ -49,6 +47,9 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   ASSERT(params.termination_kkt2_tolerance > 0);
   ASSERT(params.absolute_exit_tol > 0);
   ASSERT(params.max_line_search_iterations >= 0);
+  ASSERT(params.relative_exit_tol >= 0);
+  ASSERT(params.relative_exit_tol <= 1);
+  ASSERT(params.absolute_first_derivative_tol >= 0);
 }
 
 NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params,
@@ -67,44 +68,32 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params
     QPInteriorPointSolver::Params qp_params{};
     qp_params.max_iterations = params.max_qp_iterations;
     qp_params.termination_kkt2_tol = params.termination_kkt2_tolerance;
+    qp_params.initial_mu = 1.0;
+    qp_params.sigma = 0.1;
 
     // Solve the QP.
     solver_.Setup(&qp_);
     const QPSolverOutputs qp_outputs = solver_.Solve(qp_params);
 
+    // Compute the directional derivative of the cost function about the current linearization
+    // point, in the direction of the QP step.
+    const double phi_prime_0 = ComputeQPCostDerivative(qp_, solver_.x_block());
+
     // Select the step size.
-    const bool found_valid_step = SelectStepSize(params.max_line_search_iterations, errors_pre);
+    const StepSizeSelectionResult step_result =
+        SelectStepSize(params.max_line_search_iterations, params.absolute_first_derivative_tol,
+                       errors_pre, phi_prime_0);
     ASSERT(!steps_.empty(), "Must have logged an attempted step");
 
+    const NLSTerminationState maybe_exit =
+        UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, &lambda);
     if (logging_callback_) {
-      const NLSLogInfo info{iter, lambda, errors_pre, qp_outputs, steps_, found_valid_step};
+      const NLSLogInfo info{iter, lambda, errors_pre, qp_outputs, steps_, maybe_exit};
       logging_callback_(info);
     }
 
-    if (!found_valid_step) {
-      // We did not find an acceptable step, increase lambda.
-      if (lambda == 0) {
-        lambda = params.lambda_failure_init;
-      } else {
-        lambda *= 10;
-      }
-      if (lambda > params.max_lambda) {
-        // failed
-        return NLSTerminationState::MAX_LAMBDA;
-      }
-    } else {
-      // Update the state, and decrease lambda.
-      variables_.swap(candidate_vars_);
-      lambda = std::max(lambda * 0.1, params.min_lambda);
-
-      // Check termination criteria.
-      const LineSearchStep& final_step = steps_.back();
-      if (final_step.errors.Total() < params.absolute_exit_tol) {
-        // Satisfied absolute tolerance, exit.
-        return NLSTerminationState::SATISFIED_ABSOLUTE_TOL;
-      } else if (final_step.errors.Total() > errors_pre.Total() * params.relative_exit_tol) {
-        return NLSTerminationState::SATISFIED_RELATIVE_TOL;
-      }
+    if (maybe_exit != NLSTerminationState::NONE) {
+      return maybe_exit;
     }
   }
   return NLSTerminationState::MAX_ITERATIONS;
@@ -171,27 +160,65 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
   return output_errors;
 }
 
-// TODO(gareth): Do we need to catch the case where `alpha<=0` as a solution?
-// I think this is impossible.
-bool ConstrainedNonlinearLeastSquares::SelectStepSize(const int max_iterations,
-                                                      const Errors& errors_pre) {
-  steps_.clear();
+NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitConditions(
+    const Params& params, const StepSizeSelectionResult& step_result, const Errors& initial_errors,
+    double* const lambda) {
+  ASSERT(lambda != nullptr);
 
-  double alpha;
-  double phi_prime_0;
+  if (step_result == StepSizeSelectionResult::SUCCESS) {
+    // Update the state, and decrease lambda.
+    variables_.swap(candidate_vars_);
+    *lambda = std::max(*lambda * 0.1, params.min_lambda);
+
+    // Check termination criteria.
+    const LineSearchStep& final_step = steps_.back();
+    if (final_step.errors.Total() < params.absolute_exit_tol) {
+      // Satisfied absolute tolerance, exit.
+      return NLSTerminationState::SATISFIED_ABSOLUTE_TOL;
+    } else if (final_step.errors.Total() >
+               initial_errors.Total() * (1 - params.relative_exit_tol)) {
+      return NLSTerminationState::SATISFIED_RELATIVE_TOL;
+    }
+  } else if (step_result == StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED) {
+    // The QP computed a direction where derivative of cost is zero.
+    return NLSTerminationState::SATISFIED_FIRST_ORDER_TOL;
+  } else if (step_result == StepSizeSelectionResult::FAILURE_MAX_ITERATIONS) {
+    // We did not find an acceptable step, increase lambda.
+    if (*lambda == 0) {
+      *lambda = params.lambda_failure_init;
+    } else {
+      *lambda *= 10;
+    }
+    if (*lambda > params.max_lambda) {
+      // failed
+      return NLSTerminationState::MAX_LAMBDA;
+    }
+  }
+  // continue
+  return NLSTerminationState::NONE;
+}
+
+/*
+ * TODO(gareth): Implement Algorithm 3.5/3.6 and check the wolfe conditions properly?
+ *
+ * For now this just checks the first step it can find that produces a decrease, up
+ * to some maximum number of iterations.
+ */
+StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
+    const int max_iterations, const double abs_first_derivative_tol, const Errors& errors_pre,
+    const double phi_prime_0) {
+  steps_.clear();
+  double alpha{1};
   for (int iter = 0; iter <= max_iterations; ++iter) {
-    if (iter == 0) {
-      alpha = 1;  // Try the full step first.
-    } else if (iter == 1) {
-      // Do a quadratic approximation, first compute cost derivative at the solution.
-      phi_prime_0 = ComputeQPCostDerivative(qp_, solver_.x_block());
+    if (iter == 1) {
       // Pick a new alpha by approximating cost as a quadratic.
       // steps_.back() here is the "full step" error.
       const LineSearchStep& prev_step = steps_.back();
       alpha = QuadraticApproxMinimum(errors_pre.Total(), phi_prime_0, prev_step.alpha,
                                      prev_step.errors.Total());
-      ASSERT(alpha < prev_step.alpha, "Alpha must decrease");
-    } else {
+      ASSERT(alpha < prev_step.alpha, "Alpha must decrease, alpha = %f, prev_alpha = %f", alpha,
+             prev_step.alpha);
+    } else if (iter > 1) {
       // Try the cubic approximation.
       const LineSearchStep& second_last_step = steps_[steps_.size() - 2];
       const LineSearchStep& last_step = steps_.back();
@@ -203,7 +230,9 @@ bool ConstrainedNonlinearLeastSquares::SelectStepSize(const int max_iterations,
 
       // Solve.
       alpha = CubicApproxMinimum(phi_prime_0, ab);
-      ASSERT(alpha < last_step.alpha, "Alpha must decrease in the line search");
+      ASSERT(alpha < last_step.alpha,
+             "Alpha must decrease in the line search, alpha = %f, prev_alpha = %f", alpha,
+             last_step.alpha);
     }
 
     // Update our candidate state.
@@ -213,12 +242,19 @@ bool ConstrainedNonlinearLeastSquares::SelectStepSize(const int max_iterations,
     const Errors errors_step = EvaluateNonlinearErrors(candidate_vars_);
     steps_.emplace_back(alpha, errors_step);
 
+    if (phi_prime_0 > -abs_first_derivative_tol) {
+      // Either derivative is negative - but below the tolerance, or the the derivative
+      // is actually positive and we cannot decrease anymore.
+      // TODO(gareth): Log a large positive value separately? Shouldn't happen, I think.
+      return StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED;
+    }
+
     if (errors_step.Total() < errors_pre.Total()) {
-      return true;  //  Done, TODO(gareth): Require a min decrease amount.
+      return StepSizeSelectionResult::SUCCESS;
     }
   }
   // hit max iterations
-  return false;
+  return StepSizeSelectionResult::FAILURE_MAX_ITERATIONS;
 }
 
 double ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(const QP& qp,
@@ -249,14 +285,15 @@ double ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(const QP& qp,
 //  phi_alpha_0 - phi_0 - alpha_0 * phi_prime_0 > 0
 //  phi_alpha_0 - phi_0 > alpha_0 * phi_prime_0
 //
-// We already enforce phi_alpha_0 - phi_0 >= 0, and since phi_prime_0 has to be
-// a descent direction (as a result of the QP solver), it will be negative.
+// We already enforce phi_alpha_0 - phi_0 > 0, and since phi_prime_0 has to be
+// a descent direction (as a result of the QP solver), it will be <= 0
 double ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(const double phi_0,
                                                                 const double phi_prime_0,
                                                                 const double alpha_0,
                                                                 const double phi_alpha_0) {
-  ASSERT(phi_alpha_0 >= phi_0);
+  ASSERT(phi_alpha_0 > phi_0);
   ASSERT(alpha_0 > 0);
+  ASSERT(phi_prime_0 < 0);
   const double numerator = 2 * (phi_alpha_0 - phi_0 - phi_prime_0 * alpha_0);
   return -phi_prime_0 * alpha_0 * alpha_0 / numerator;
 }
@@ -290,24 +327,6 @@ double ConstrainedNonlinearLeastSquares::CubicApproxMinimum(const double phi_pri
   ASSERT(arg_sqrt >= kNegativeTol, "This term must be positive: a=%f, b=%f, phi_prime_0=%f", ab[0],
          ab[1], phi_prime_0);
   return (std::sqrt(std::max(arg_sqrt, 0.)) - ab[1]) / (3 * ab[0]);
-}
-
-std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state) {
-  switch (state) {
-    case NLSTerminationState::MAX_ITERATIONS:
-      stream << "MAX_ITERATIONS";
-      break;
-    case NLSTerminationState::SATISFIED_ABSOLUTE_TOL:
-      stream << "SATISFIED_ABSOLUTE_TOL";
-      break;
-    case NLSTerminationState::SATISFIED_RELATIVE_TOL:
-      stream << "SATISFIED_ABSOLUTE_TOL";
-      break;
-    case NLSTerminationState::MAX_LAMBDA:
-      stream << "MAX_LAMBDA";
-      break;
-  }
-  return stream;
 }
 
 }  // namespace mini_opt

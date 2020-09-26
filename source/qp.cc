@@ -33,7 +33,7 @@ void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feas
     ASSERT(p_->b_eq.rows() == 0);
   }
 
-  // Order is [slacks (s), equality multipliers(y), inequality multiplers (lambda)]
+  // Order is [slacks (s), equality multipliers(y), inequality multipliers (lambda)]
   dims_.N = p_->G.rows();
   dims_.M = p_->constraints.size();
   dims_.K = p_->A_eq.rows();
@@ -46,7 +46,7 @@ void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feas
   XBlock(dims_, variables_).setZero();
 
   // TODO(gareth): A better initialization strategy for these? Probably problem specific.
-  // Start w/ inequlities all active, such that: s~=0, z > 0
+  // Start w/ inequalities all active, such that: s~=0, z > 0
   SBlock(dims_, variables_).setConstant(1.0e-6);
   ZBlock(dims_, variables_).setConstant(1);
   YBlock(dims_, variables_).setConstant(0);
@@ -93,7 +93,7 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
 /*
  * Note - according to the textbook, we should only decrease `mu` after having
  * achieved some E(...) < mu, where E is some norm of the KKT conditions (what I have
- * called KKTError below  is the L2 norm).
+ * called KKTError below is the L2 norm).
  *
  * I have not done this, instead opting to decrease mu even if that condition is not met, which
  * seems to produce decent results, but my analysis is not that scientific yet.
@@ -114,8 +114,9 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
   EvaluateKKTConditions();
 
   // If using fixed decrease, use the input value - otherwise compute from complementarity.
-  double mu{params.barrier_strategy == BarrierStrategy::FIXED_DECREASE ? params.initial_mu
-                                                                       : ComputeMu()};
+  // double mu{params.barrier_strategy == BarrierStrategy::FIXED_DECREASE ? params.initial_mu
+  //                                                                      : ComputeMu()};
+  double mu{params.initial_mu};
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // compute squared norm of the residual, prior to any updates
     const KKTError kkt2_prev = ComputeSquaredErrors(mu);
@@ -167,7 +168,7 @@ IPIterationOutputs QPInteriorPointSolver::Iterate(const double mu_input,
     SolveForUpdate(0.0);
   } else if (strategy != BarrierStrategy::PREDICTOR_CORRECTOR) {
     SolveForUpdate(outputs.mu);
-  } else {  //  strategy == BarrierStrategy::PREDICTOR_CORRETOR
+  } else {  //  strategy == BarrierStrategy::PREDICTOR_CORRECTOR
     // Use the MPC/predictor-corrector (algorithm 16.4).
     // Solve with mu=0 and compute the largest step size.
     SolveForUpdate(0.0);
@@ -574,18 +575,6 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
     s_inv_r_comp = z;  //  mu = 0
     r_pi = A_i * x + b_i - s;
   }
-}
-
-std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) {
-  switch (state) {
-    case QPTerminationState::SATISFIED_KKT_TOL:
-      stream << "SATISFIED_KKT_TOL";
-      break;
-    case QPTerminationState::MAX_ITERATIONS:
-      stream << "MAX_ITERATIONS";
-      break;
-  }
-  return stream;
 }
 
 }  // namespace mini_opt

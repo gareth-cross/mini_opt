@@ -162,6 +162,7 @@ class ConstrainedNLSTest : public ::testing::Test {
   }
 
   // Test optimization of rosenbrock function w/ no constraints.
+  // A very simple function that is easy to minimize.
   void TestRosenbrock() {
     Residual<2, 2> rosenbrock;
     rosenbrock.index = {{0, 1}};
@@ -183,16 +184,13 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.max_qp_iterations =
         1;  //  since this is quadratic w/ no constrains, should only need one of these
 
-    // Solve it from a few different initial guesses
+    // Solve it from a few different initial guesses.
+    // These guesses aren't that principaled, I kind of picked at random.
     const AlignedVector<Vector2d> initial_guesses = {{-5, -3},  {10, 8},     {-20, 3},
                                                      {0, -5},   {4, 0},      {100, 50},
                                                      {-35, 40}, {1000, -50}, {0.8, -0.3}};
     for (const Vector2d& guess : initial_guesses) {
       Logger logger{};
-#if 0
-      nls.SetQPLoggingCallback(
-          std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
-#endif
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1));
 
       // solve it
@@ -207,6 +205,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
   }
 
+  // Solve un-constrained rosenbrock, but don't use line search. Instead depend on LM.
   void TestRosenbrockLM() {
     Residual<2, 2> rosenbrock;
     rosenbrock.index = {{0, 1}};
@@ -236,6 +235,49 @@ class ConstrainedNLSTest : public ::testing::Test {
       // solve it
       const NLSTerminationState term_state = nls.Solve(p, guess);
       ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
+
+      // check solution
+      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro)
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+    }
+  }
+
+  // Test rosenbrock w/ inequality constraints about the optimum.
+  void TestInequalityConstrainedRosenbrock() {
+    Residual<2, 2> rosenbrock;
+    rosenbrock.index = {{0, 1}};
+    rosenbrock.function = &ConstrainedNLSTest::Rosenbrock;
+
+    // simple problem with only one cost
+    Problem problem{};
+    problem.costs.emplace_back(new Residual<2, 2>(rosenbrock));
+    problem.dimension = 2;
+    problem.inequality_constraints.push_back(Var(0) >= 1.2);
+    problem.inequality_constraints.push_back(Var(1) <= 0.5);
+
+    ConstrainedNonlinearLeastSquares nls(&problem);
+    ConstrainedNonlinearLeastSquares::Params p{};
+    p.max_iterations = 10;
+    p.max_qp_iterations = 10;
+
+    // Solve it from a few different initial guesses
+    const AlignedVector<Vector2d> initial_guesses = {{12, -5}};
+    for (const Vector2d& guess : initial_guesses) {
+      Logger logger{};
+      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1));
+#if 1
+      nls.SetQPLoggingCallback(
+          std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+#endif
+
+      // solve it
+      const NLSTerminationState term_state = nls.Solve(p, guess);
+      ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL)
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
 
       // check solution
       ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro)
@@ -455,6 +497,8 @@ TEST_FIXTURE(ConstrainedNLSTest, TestQuadraticApproxMinimum)
 TEST_FIXTURE(ConstrainedNLSTest, TestCubicApproxCoeffs)
 TEST_FIXTURE(ConstrainedNLSTest, TestRosenbrock)
 TEST_FIXTURE(ConstrainedNLSTest, TestRosenbrockLM)
+TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock)
+
 // TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
 }  // namespace mini_opt

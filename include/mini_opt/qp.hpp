@@ -40,9 +40,7 @@ struct LinearInequalityConstraint {
 
   // Shift to a new linearization point.
   // a*(x + dx) + b >= 0  -->  a*dx + (ax + b) >= 0
-  LinearInequalityConstraint ShiftTo(double x) const {
-    return LinearInequalityConstraint(variable, a, a * x + b);
-  }
+  LinearInequalityConstraint ShiftTo(double x) const { return {variable, a, a * x + b}; }
 
   // Version of shift that takes vector.
   LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
@@ -258,8 +256,6 @@ struct QPInteriorPointSolver {
   friend class QPSolverTest;
 };
 
-// ostream for termination states
-std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state);
 /*
  * Some exceptions we can throw.
  */

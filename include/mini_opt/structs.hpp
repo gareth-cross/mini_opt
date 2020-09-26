@@ -56,6 +56,9 @@ enum class QPTerminationState {
   MAX_ITERATIONS,
 };
 
+// ostream for termination states
+std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state);
+
 // Results of QPInteriorPointSolver::Solve.
 struct QPSolverOutputs {
   QPTerminationState termination_state;
@@ -86,31 +89,51 @@ struct LineSearchStep {
   LineSearchStep(double a, Errors e) : alpha(a), errors(e) {}
 };
 
+// Result of SelectStepSize
+enum class StepSizeSelectionResult {
+  // Success, found a valid alpha that decreases cost.
+  SUCCESS = 0,
+  // Failure, hit max # of iterations.
+  FAILURE_MAX_ITERATIONS = 1,
+  // Failure, directional derivative of cost is >= 0 at the current point.
+  FAILURE_FIRST_ORDER_SATISFIED = 2,
+};
+
 // Exit condition of the non-linear optimization.
 enum class NLSTerminationState {
-  MAX_ITERATIONS = 0,
-  SATISFIED_ABSOLUTE_TOL = 1,
-  SATISFIED_RELATIVE_TOL = 2,
-  MAX_LAMBDA = 3,
+  NONE = -1,
+  // Hit max number of iterations.
+  MAX_ITERATIONS,
+  // Satisfied absolute tolerance on the cost function.
+  SATISFIED_ABSOLUTE_TOL,
+  // Satisfied relative tolerance on decrease of the cost function.
+  SATISFIED_RELATIVE_TOL,
+  // Satisfied tolerance on magnitude of the first derivative.
+  SATISFIED_FIRST_ORDER_TOL,
+  // Hit max lambda value while failing to decrease cost.
+  MAX_LAMBDA,
 };
+
+// ostream for termination states
+std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state);
 
 // Details for the log, the current state of the non-linear optimizer.
 struct NLSLogInfo {
   NLSLogInfo(int iteration, double lambda, const Errors& errors_initial, const QPSolverOutputs& qp,
-             const std::vector<LineSearchStep>& steps, bool success)
+             const std::vector<LineSearchStep>& steps, const NLSTerminationState& termination_state)
       : iteration(iteration),
         lambda(lambda),
         errors_initial(errors_initial),
         qp_term_state(qp),
         steps(steps),
-        success(success) {}
+        termination_state(termination_state) {}
 
   int iteration;
   double lambda;
   Errors errors_initial;
   QPSolverOutputs qp_term_state;
   const std::vector<LineSearchStep>& steps;
-  bool success;
+  NLSTerminationState termination_state;
 };
 
 }  // namespace mini_opt

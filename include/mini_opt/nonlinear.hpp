@@ -47,7 +47,7 @@ struct Problem {
  * Solve constrained non-linear least squares problems using SQP.
  *
  * At each step we approximate the problem as a quadratic with linear equality constraints
- * and inequality constraints about the current lineariation point. We do this iteratively
+ * and inequality constraints about the current linearization point. We do this iteratively
  * until satisfied with the result on the original nonlinear cost.
  */
 struct ConstrainedNonlinearLeastSquares {
@@ -66,8 +66,12 @@ struct ConstrainedNonlinearLeastSquares {
     // Absolute tolerance on squared error to exit.
     double absolute_exit_tol{1.0e-12};
 
-    // Relative exit tolerance. If error[k+1] > error[k] * tol, stop.
-    double relative_exit_tol{1 - 1.0e-4};
+    // Relative exit tolerance. If error[k+1] > error[k] * (1 - tol), stop.
+    double relative_exit_tol{1.0e-4};
+
+    // Absolute tolerance on directional derivative of the cost function.
+    // If |df(x)| < tol, we have satisfied first order optimality and stop.
+    double absolute_first_derivative_tol{1.0e-6};
 
     // Max # of line-search iterations.
     int max_line_search_iterations{2};
@@ -93,7 +97,7 @@ struct ConstrainedNonlinearLeastSquares {
   using LoggingCallback = std::function<void(const NLSLogInfo& info)>;
 
   // Construct w/ const pointer to a problem definition.
-  explicit ConstrainedNonlinearLeastSquares(const Problem* const problem,
+  explicit ConstrainedNonlinearLeastSquares(const Problem* problem,
                                             const Retraction& retraction = nullptr);
 
   /*
@@ -118,37 +122,44 @@ struct ConstrainedNonlinearLeastSquares {
 
  private:
   // Update candidate_vars w/ a step size of alpha.
-  void RetractCandidateVars(const double alpha);
+  void RetractCandidateVars(double alpha);
 
   // Linearize and fill the QP w/ the problem definition.
-  static Errors LinearizeAndFillQP(const Eigen::VectorXd& variables, const double lambda,
-                                   const Problem& problem, QP* const qp);
+  static Errors LinearizeAndFillQP(const Eigen::VectorXd& variables, double lambda,
+                                   const Problem& problem, QP* qp);
 
   // Evaluate the non-linear error.
   Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars);
+
+  // Based on the outcome of the step selection, update lambda and check if
+  // we should exit. Returns NONE if no exit is required.
+  NLSTerminationState UpdateLambdaAndCheckExitConditions(const Params& params,
+                                                         const StepSizeSelectionResult& step_result,
+                                                         const Errors& initial_errors,
+                                                         double* lambda);
 
   // Execute a back-tracking search until the cost decreases, or we hit
   // a max number of iterations. This will repeatedly approximate the cost
   // function as a polynomial, and find the minimum. Returns true if we
   // find a step that decreases, false otherwise.
-  bool SelectStepSize(const int max_iterations, const Errors& errors_pre);
+  StepSizeSelectionResult SelectStepSize(int max_iterations, double abs_first_derivative_tol,
+                                         const Errors& errors_pre, double phi_prime_0);
 
   // Compute first derivative of the QP cost function.
   static double ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx);
 
   // Solve the quadratic approximation of the cost function for best alpha.
   // Implements equation (3.57/3.58)
-  static double QuadraticApproxMinimum(const double phi_0, const double phi_prime_0,
-                                       const double alpha_0, const double phi_alpha_0);
+  static double QuadraticApproxMinimum(double phi_0, double phi_prime_0, double alpha_0,
+                                       double phi_alpha_0);
 
-  // Get the polyonomial coefficents c0, c1 from the cubic approximation of the cost.
+  // Get the polynomial coefficients c0, c1 from the cubic approximation of the cost.
   // Implements equation after 3.58, returns [a, b]
-  static Eigen::Vector2d CubicApproxCoeffs(const double phi_0, const double phi_prime_0,
-                                           const double alpha_0, const double phi_alpha_0,
-                                           const double alpha_1, const double phi_alpha_1);
+  static Eigen::Vector2d CubicApproxCoeffs(double phi_0, double phi_prime_0, double alpha_0,
+                                           double phi_alpha_0, double alpha_1, double phi_alpha_1);
 
   // Get the solution of the cubic approximation.
-  static double CubicApproxMinimum(const double phi_prime_0, const Eigen::Vector2d& ab);
+  static double CubicApproxMinimum(double phi_prime_0, const Eigen::Vector2d& ab);
 
   const Problem* const p_;
 
@@ -173,8 +184,5 @@ struct ConstrainedNonlinearLeastSquares {
 
   friend class ConstrainedNLSTest;
 };
-
-// ostream for termination states
-std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state);
 
 }  // namespace mini_opt
