@@ -1,13 +1,31 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt/logging.hpp"
 
-#include "mini_opt/nonlinear.hpp"
 #include "mini_opt/qp.hpp"
 
 // TODO(gareth): Would really like to use libfmt for this instead...
 namespace mini_opt {
 
 static const Eigen::IOFormat kMatrixFmt(Eigen::FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
+
+#define GREEN (112)
+#define RED (160)
+#define NO_COLOR (-1)
+
+struct Color {
+  Color(int code) : code(code) {}
+
+  const int code;
+};
+
+std::ostream& operator<<(std::ostream& stream, const Color& c) {
+  if (c.code >= 0) {
+    stream << "\u001b[38;5;" << c.code << "m";
+  } else {
+    stream << "\u001b[0m";
+  }
+  return stream;
+}
 
 void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt2_prev,
                               const KKTError& kkt2_after, const IPIterationOutputs& outputs) {
@@ -56,12 +74,18 @@ void Logger::QPSolverCallbackVerbose(const QPInteriorPointSolver& solver, const 
 }
 
 void Logger::NonlinearSolverCallback(const NLSLogInfo& info) {
+  if (info.success) {
+    stream_ << Color(GREEN);
+  } else {
+    stream_ << Color(RED);
+  }
   stream_ << "Iteration #" << info.iteration << ", lambda = " << info.lambda;
   stream_ << ", L2(0): " << info.errors_initial.total_l2
           << ", L2-eq(0): " << info.errors_initial.equality_l2 << ", success = " << info.success
           << "\n";
   stream_ << "  QP: " << info.qp_term_state.termination_state << ", "
           << info.qp_term_state.num_iterations << "\n";
+  stream_ << Color(NO_COLOR);
 
   int i = 0;
   for (const LineSearchStep& step : info.steps) {
