@@ -187,6 +187,7 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
     if (*lambda == 0) {
       *lambda = params.lambda_failure_init;
     } else {
+      // TODO(gareth): Investigate an approach like algorithm 11.5
       *lambda *= 10;
     }
     if (*lambda > params.max_lambda) {
@@ -200,6 +201,8 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
 
 /*
  * TODO(gareth): Implement Algorithm 3.5/3.6 and check the wolfe conditions properly?
+ *
+ * See equations 3.6a/3.6b
  *
  * For now this just checks the first step it can find that produces a decrease, up
  * to some maximum number of iterations.
@@ -243,9 +246,9 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     steps_.emplace_back(alpha, errors_step);
 
     if (phi_prime_0 > -abs_first_derivative_tol) {
-      // Either derivative is negative - but below the tolerance, or the the derivative
+      // Either derivative is negative - but below the tolerance, or the derivative
       // is actually positive and we cannot decrease anymore.
-      // TODO(gareth): Log a large positive value separately? Shouldn't happen, I think.
+      // TODO(gareth): Log a large positive value separately?
       return StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED;
     }
 

@@ -91,6 +91,7 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
             << "): " << step.errors.equality_l2 << ", alpha = " << step.alpha << "\n";
     ++i;
   }
+  // print extra details
   if (print_nonlinear_variables_) {
     stream_ << "  Variables post update:\n";
     stream_ << "  x = " << solver.variables().transpose().format(kMatrixFmt) << "\n";

@@ -38,6 +38,9 @@ struct LinearInequalityConstraint {
   // True if x is feasible.
   bool IsFeasible(double x) const;
 
+  // Clamp a variable x to satisfy the inequality constraint.
+  double ClampX(double x) const;
+
   // Shift to a new linearization point.
   // a*(x + dx) + b >= 0  -->  a*dx + (ax + b) >= 0
   LinearInequalityConstraint ShiftTo(double x) const { return {variable, a, a * x + b}; }
@@ -213,32 +216,36 @@ struct QPInteriorPointSolver {
 
   // Invert the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
-  void ComputeLDLT();
+  void ComputeLDLT(bool include_inequalities = true);
 
   // Apply the result of ComputeLDLT (the inverse H_inv) to compute the update vector
   // [dx, ds, dy, dz] for a given value of mu.
-  void SolveForUpdate(const double mu);
+  void SolveForUpdate(double mu);
+
+  // Apply the result of ComputeLDLT (the inverse H_inv) to compute the update vector
+  // [dx, 0, dy, 0], ignoring contributions from inequality constraints.
+  void SolveForUpdateNoInequalities();
 
   // Fill out the matrix `r_` with the KKT conditions (equations 19.2a-d).
   // Does not apply the `mu` term, which is added later. (ie. mu = 0)
-  void EvaluateKKTConditions();
+  void EvaluateKKTConditions(bool include_inequalities = true);
 
   // Fill out the KKTError struct from `r_.
-  KKTError ComputeSquaredErrors(const double mu) const;
+  KKTError ComputeSquaredErrors(double mu) const;
 
   // Compute the largest step size we can execute that satisfies constraints.
-  void ComputeAlpha(AlphaValues* const output, const double tau) const;
+  void ComputeAlpha(AlphaValues* const output, double tau) const;
 
   // Compute the `alpha` step size.
   // Returns alpha such that (val[i] + d_val[i]) >= val[i] * (1 - tau)
   static double ComputeAlpha(const ConstVectorBlock& val, const ConstVectorBlock& d_val,
-                             const double tau);
+                             double tau);
 
   // Compute `mu` as defined in equation 19.19
   double ComputeMu() const;
 
   // Compute the predictor/corrector `mu_affine`, equation (19.22)
-  double ComputePredictorCorrectorMuAffine(const double mu, const AlphaValues& alpha_probe) const;
+  double ComputePredictorCorrectorMuAffine(double mu, const AlphaValues& alpha_probe) const;
 
   // Helpers for accessing segments of vectors.
   static ConstVectorBlock ConstXBlock(const ProblemDims& dims, const Eigen::VectorXd& vec);

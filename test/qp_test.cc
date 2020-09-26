@@ -27,15 +27,19 @@ TEST(LinearInequalityConstraintTest, Test) {
 
   ASSERT_TRUE((Var(0) >= 0.3).IsFeasible(0.5));
   ASSERT_FALSE((Var(0) <= -0.9).IsFeasible(1.2));
+
+  ASSERT_NEAR(0.0, (Var(0) >= 0.0).ClampX(-1.3), tol::kPico);
+  ASSERT_NEAR(0.5, (Var(0) >= 0.5).ClampX(-0.9), tol::kPico);
+  ASSERT_NEAR(1.5, (Var(0) >= 1.3).ClampX(1.5), tol::kPico);
+  ASSERT_NEAR(0.0, (Var(0) <= 0.0).ClampX(5.0), tol::kPico);
+  ASSERT_NEAR(-1.3, (Var(0) <= -1.3).ClampX(1.0), tol::kPico);
+  ASSERT_NEAR(6.0, (Var(0) <= 10.0).ClampX(6.0), tol::kPico);
 }
 
 // Tests for the QP interior point solver.
-// TODO(gareth): I suspect some of these test cases are too easy - it doesn't seem to matter _that_
-// much what I do with the barrier parameter, even though considerable time in the literature seems
-// to be devoted to strategies for selecting it.
 class QPSolverTest : public ::testing::Test {
  public:
-  // Specify the root of a polynominal: (a * x - b)^2
+  // Specify the root of a polynomial: (a * x - b)^2
   struct Root {
     double a;
     double b;
@@ -69,25 +73,28 @@ class QPSolverTest : public ::testing::Test {
     return BuildQuadratic(roots_structs, output);
   }
 
+  void PutDummyValuesInSlacksAndMultipliers(QPInteriorPointSolver* const solver) {
+    // Give all the multipliers different positive non-zero values.
+    // The exact values aren't actually important, we just want to validate indexing.
+    auto s = QPInteriorPointSolver::SBlock(solver->dims_, solver->variables_);
+    auto y = QPInteriorPointSolver::YBlock(solver->dims_, solver->variables_);
+    auto z = QPInteriorPointSolver::ZBlock(solver->dims_, solver->variables_);
+    for (Index i = 0; i < s.rows(); ++i) {
+      s[i] = 2.0 / static_cast<double>(i + 1);
+      z[i] = 0.5 * static_cast<double>(i + 1);
+    }
+    for (Index k = 0; k < y.rows(); ++k) {
+      y[k] = static_cast<double>((k + 1) * (k + 1));
+    }
+  }
+
   // Check that the solution of the 'augmented system' (which leverages sparsity)
   // matches the full 'brute force' solve that uses LU decomposition.
   void CheckAugmentedSolveAgainstPartialPivot(const QP& qp, const VectorXd& x_guess) {
     // construct the solver
     QPInteriorPointSolver solver(&qp);
     QPInteriorPointSolver::XBlock(solver.dims_, solver.variables_) = x_guess;
-
-    // Give all the multipliers different positive non-zero values.
-    // The exact values aren't actually important, we just want to validate indexing.
-    auto s = QPInteriorPointSolver::SBlock(solver.dims_, solver.variables_);
-    auto y = QPInteriorPointSolver::YBlock(solver.dims_, solver.variables_);
-    auto z = QPInteriorPointSolver::ZBlock(solver.dims_, solver.variables_);
-    for (Index i = 0; i < s.rows(); ++i) {
-      s[i] = 2.0 / (i + 1);
-      z[i] = 0.5 * (i + 1);
-    }
-    for (Index k = 0; k < y.rows(); ++k) {
-      y[k] = static_cast<double>((k + 1) * (k + 1));
-    }
+    PutDummyValuesInSlacksAndMultipliers(&solver);
 
     // check the dimensions
     const Index total_dims = solver.dims_.N + solver.dims_.M * 2 + solver.dims_.K;
@@ -122,12 +129,41 @@ class QPSolverTest : public ::testing::Test {
     ASSERT_EIGEN_NEAR(update, solver.delta_, tol::kPico);
   }
 
+  // Check the solver that ignores inequalities against a problem w/ no inequalities.
+  void CheckSolveNoInequalitiesAgainstPartialPivot(const QP& qp, const VectorXd& x_guess) {
+    // construct the full solver
+    QPInteriorPointSolver solver(&qp);
+    QPInteriorPointSolver::XBlock(solver.dims_, solver.variables_) = x_guess;
+    PutDummyValuesInSlacksAndMultipliers(&solver);
+
+    // construct the solver with no inequalities and solve
+    QP qp_reduced = qp;
+    qp_reduced.constraints.clear();
+    QPInteriorPointSolver solver_no_ineq(&qp_reduced);
+    QPInteriorPointSolver::XBlock(solver.dims_, solver_no_ineq.variables_) = x_guess;
+    PutDummyValuesInSlacksAndMultipliers(&solver_no_ineq);
+
+    solver_no_ineq.EvaluateKKTConditions();
+    solver_no_ineq.ComputeLDLT();
+    solver_no_ineq.SolveForUpdate(0.0 /* mu = 0 */);
+
+    // take the full solver, and call variations of methods that ignore inequalities
+    solver.EvaluateKKTConditions(false);
+    solver.ComputeLDLT(false);
+    solver.SolveForUpdateNoInequalities();
+
+    // these should match
+    ASSERT_EIGEN_NEAR(solver.x_block(), solver_no_ineq.x_block(), tol::kPico);
+    ASSERT_EIGEN_NEAR(solver.y_block(), solver_no_ineq.y_block(), tol::kPico);
+  }
+
   void TestEliminationNoConstraints() {
     QP qp{};
     BuildQuadratic({Root(0.5, 2.0), Root(5.0, 25.0), Root(3.0, 9.0)}, &qp);
 
     const VectorXd x_guess = (Matrix<double, 3, 1>() << 0.0, -0.1, -0.3).finished();
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
+    CheckSolveNoInequalitiesAgainstPartialPivot(qp, x_guess);
   }
 
   void TestEliminationEqualityConstraints() {
@@ -144,6 +180,7 @@ class QPSolverTest : public ::testing::Test {
 
     const VectorXd x_guess = (Matrix<double, 3, 1>() << 0.3, -0.1, -0.3).finished();
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
+    CheckSolveNoInequalitiesAgainstPartialPivot(qp, x_guess);
   }
 
   void TestEliminationInequalityConstraints() {
@@ -151,11 +188,13 @@ class QPSolverTest : public ::testing::Test {
     BuildQuadratic({Root(1.5, 3.0), Root(-1.0, 4.0)}, &qp);
 
     // set up inequality constraint
-    qp.constraints.emplace_back(Var(1) >= 0);  // x >= 0
-    qp.constraints.emplace_back(Var(0) <= 5);  // x >= 0
+    qp.constraints.emplace_back(Var(1) >= 0);   // x >= 0
+    qp.constraints.emplace_back(Var(0) <= 5);   // x <= 5
+    qp.constraints.emplace_back(Var(0) >= -5);  // x >= -5
 
     const VectorXd x_guess = (Matrix<double, 2, 1>() << 0.0, 2.0).finished();
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
+    CheckSolveNoInequalitiesAgainstPartialPivot(qp, x_guess);
   }
 
   void TestEliminationAllConstraints() {
@@ -190,6 +229,7 @@ class QPSolverTest : public ::testing::Test {
     const VectorXd x_guess =
         (Matrix<double, 7, 1>() << 0.0, 0.1, 0.2, 0.55, 0.3, 0.7, 1.0).finished();
     CheckAugmentedSolveAgainstPartialPivot(qp, x_guess);
+    CheckSolveNoInequalitiesAgainstPartialPivot(qp, x_guess);
   }
 
   // Check alpha computation function.
@@ -227,7 +267,9 @@ class QPSolverTest : public ::testing::Test {
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = tol::kPico;
+    params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+    params.sigma = 0.1;
+    params.initial_mu = 0.1;
     const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
@@ -268,7 +310,9 @@ class QPSolverTest : public ::testing::Test {
 
     // solve it
     QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = tol::kPico;
+    params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+    params.initial_mu = 0.1;
+    params.sigma = 0.1;
     const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
@@ -306,9 +350,10 @@ class QPSolverTest : public ::testing::Test {
 
     // solve it
     QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = tol::kPico;
+    params.termination_kkt2_tol = std::pow(tol::kPico, 2);
     params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
-    params.sigma = 0.5;
+    params.sigma = 0.1;
+    params.initial_mu = 0.1;
     const auto term_state = solver.Solve(params).termination_state;
 
     // check the solution
@@ -401,9 +446,9 @@ class QPSolverTest : public ::testing::Test {
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = tol::kPico;
-    params.initial_mu = 1;
-    params.sigma = 0.5;
+    params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+    params.initial_mu = 0.1;
+    params.sigma = 0.1;
 
     const auto term_state = solver.Solve(params).termination_state;
 

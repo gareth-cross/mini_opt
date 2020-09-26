@@ -2,6 +2,7 @@
 #include "mini_opt/qp.hpp"
 
 #include <Eigen/Dense>
+#include <iostream>
 
 using namespace Eigen;
 namespace mini_opt {
@@ -11,6 +12,19 @@ static const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "
 bool LinearInequalityConstraint::IsFeasible(double x) const {
   // There might be an argument to be made we should tolerate some epsilon > 0 here?
   return a * x + b >= 0.0;
+}
+
+double LinearInequalityConstraint::ClampX(double x) const {
+  ASSERT(a != 0, "a cannot be zero");
+  // a * x + b >= 0
+  // a * x >= -b
+  if (a < 0) {
+    // x <= b/a
+    return std::min(x, b / -a);
+  } else {
+    // x >= -b/a
+    return std::max(x, -b / a);
+  }
 }
 
 QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem, const bool check_feasible) {
@@ -41,15 +55,37 @@ void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feas
   // allocate space for primal, slacks, and dual variables
   variables_.resize(dims_.N + dims_.M * 2 + dims_.K);
 
+  // simple hack
+  //  VectorXd dx = p_->G.selfadjointView<Eigen::Lower>().llt().solve(-p_->c);
+  //
+  //  for (int i = 0; i < dims_.M; ++i) {
+  //    const LinearInequalityConstraint& c = p_->constraints[i];
+  //    dx[c.variable] = c.ClampX(dx[c.variable]);
+  //  }
+
   // Since this is solving a problem in the tangent space of a larger nonlinear problem,
   // we can guess zero for `x`.
   XBlock(dims_, variables_).setZero();
+  //  XBlock(dims_, variables_) = dx;
 
   // TODO(gareth): A better initialization strategy for these? Probably problem specific.
   // Start w/ inequalities all active, such that: s~=0, z > 0
   SBlock(dims_, variables_).setConstant(1.0e-6);
   ZBlock(dims_, variables_).setConstant(1);
   YBlock(dims_, variables_).setConstant(0);
+
+  // Initialize so that the inequality condition is satisfied.
+  //  const auto x = ConstXBlock(dims_, variables_);
+  //  auto s = SBlock(dims_, variables_);
+  //  auto z = ZBlock(dims_, variables_);
+  //  for (int i = 0; i < dims_.M; ++i) {
+  //    const LinearInequalityConstraint& c = p_->constraints[i];
+  //    const double s_val = c.a * x[c.variable] + c.b;
+  //    s[i] = std::max(1.0e-9, s_val);
+  //    z[i] = 1 / s[i];
+  //    //    std::cout << "initialize s to " << s[i] << std::endl;
+  //    //    std::cout << "initialize z to " << z[i] << std::endl;
+  //  }
 
   // Allocate space for solving
   const std::size_t reduced_system_size = dims_.N + dims_.K;
@@ -113,9 +149,6 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
   // on the first iteration, the residual needs to be filled first
   EvaluateKKTConditions();
 
-  // If using fixed decrease, use the input value - otherwise compute from complementarity.
-  // double mu{params.barrier_strategy == BarrierStrategy::FIXED_DECREASE ? params.initial_mu
-  //                                                                      : ComputeMu()};
   double mu{params.initial_mu};
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // compute squared norm of the residual, prior to any updates
@@ -271,7 +304,7 @@ const QP& QPInteriorPointSolver::problem() const {
  *
  * It is assumed that `EvaluateKKTConditions` was called first.
  */
-void QPInteriorPointSolver::ComputeLDLT() {
+void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   const std::size_t N = dims_.N;
   const std::size_t M = dims_.M;
   const std::size_t K = dims_.K;
@@ -282,7 +315,7 @@ void QPInteriorPointSolver::ComputeLDLT() {
 
   // shouldn't happen due to selection of alpha, but double check
   const bool any_non_positive_s = (s.array() <= 0.0).any();
-  if (any_non_positive_s) {
+  if (include_inequalities && any_non_positive_s) {
     std::stringstream ss;
     ss << "Some slack variables s <= 0: " << s.transpose().format(kMatrixFmt);
     throw std::runtime_error(ss.str());
@@ -293,16 +326,18 @@ void QPInteriorPointSolver::ComputeLDLT() {
   if (K > 0) {
     H_.bottomLeftCorner(K, N) = p_->A_eq;
   }
-  for (std::size_t i = 0; i < M; ++i) {
-    const LinearInequalityConstraint& c = p_->constraints[i];
-    H_(c.variable, c.variable) += c.a * (z[i] / s[i]) * c.a;
+  if (include_inequalities) {
+    for (std::size_t i = 0; i < M; ++i) {
+      const LinearInequalityConstraint& c = p_->constraints[i];
+      H_(c.variable, c.variable) += c.a * (z[i] / s[i]) * c.a;
+    }
   }
 
   // factorize, TODO(gareth): preallocate ldlt...
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
     std::stringstream ss;
-    ss << "Failed to solve self-adjoint system:\n"
+    ss << "Failed to solve self-adjoint (lower) system:\n"
        << H_.format(kMatrixFmt) << "\n"
        << "The hessian may not be positive semi-definite.";
     throw FailedFactorization(ss.str());
@@ -349,7 +384,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   auto dy = YBlock(dims_, delta_);
   auto dz = ZBlock(dims_, delta_);
 
-  dx.noalias() = H_inv_.block(0, 0, N, N) * -r_dual_aug_;
+  dx.noalias() = H_inv_.topLeftCorner(N, N) * -r_dual_aug_;
   if (K > 0) {
     dx.noalias() += H_inv_.block(0, N, N, K) * -r_pe;
     // Negate here since py is negative in the solution vector.
@@ -365,10 +400,32 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   }
 }
 
+void QPInteriorPointSolver::SolveForUpdateNoInequalities() {
+  const std::size_t N = dims_.N;
+  const std::size_t K = dims_.K;
+
+  // dual and equality residuals
+  const auto r_d = ConstXBlock(dims_, r_);
+  const auto r_pe = ConstYBlock(dims_, r_);
+
+  // compute [px, -py]
+  auto dx = XBlock(dims_, delta_);
+  auto dy = YBlock(dims_, delta_);
+
+  // do the solution ignoring ds, dz
+  dx.noalias() = H_inv_.topLeftCorner(N, N) * -r_d;
+  if (K > 0) {
+    dx.noalias() += H_inv_.block(0, N, N, K) * -r_pe;
+    // Negate here since py is negative in the solution vector.
+    dy.noalias() = H_inv_.block(N, 0, K, N) * r_d;
+    dy.noalias() += H_inv_.block(N, N, K, K) * r_pe;
+  }
+}
+
 /*
  * Build the right hand side of the system illustrated in the comment on SolveForUpdate.
  */
-void QPInteriorPointSolver::EvaluateKKTConditions() {
+void QPInteriorPointSolver::EvaluateKKTConditions(const bool include_inequalities) {
   const auto x = ConstXBlock(dims_, variables_);
   const auto s = ConstSBlock(dims_, variables_);
   const auto y = ConstYBlock(dims_, variables_);
@@ -388,12 +445,14 @@ void QPInteriorPointSolver::EvaluateKKTConditions() {
     r_pe.noalias() = p_->A_eq * x + p_->b_eq;
   }
 
-  // contributions from inequality constraints, there is some redundant work here
-  for (std::size_t i = 0; i < dims_.M; ++i) {
-    const LinearInequalityConstraint& c = p_->constraints[i];
-    r_d[c.variable] -= c.a * z[i];
-    r_pi[i] = c.a * x[c.variable] + c.b - s[i];
-    r_comp[i] = s[i] * z[i];
+  // contributions from inequality constraints
+  if (include_inequalities) {
+    for (std::size_t i = 0; i < dims_.M; ++i) {
+      const LinearInequalityConstraint& c = p_->constraints[i];
+      r_d[c.variable] -= c.a * z[i];
+      r_pi[i] = c.a * x[c.variable] + c.b - s[i];
+      r_comp[i] = s[i] * z[i];
+    }
   }
 }
 

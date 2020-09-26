@@ -232,16 +232,12 @@ class ConstrainedNLSTest : public ::testing::Test {
                                                      {0, -5},   {4, 0},      {100, 50},
                                                      {-35, 40}, {1000, -50}, {0.8, -0.3}};
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{};
+      Logger logger{false, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
 
       // solve it
       const NLSTerminationState term_state = nls.Solve(p, guess);
-      if (term_state != NLSTerminationState::SATISFIED_FIRST_ORDER_TOL) {
-        ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
-      } else {
-        ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_FIRST_ORDER_TOL);
-      }
+      ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
 
       // check solution
       ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro)
@@ -272,7 +268,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     // Solve it from a few different initial guesses
     const AlignedVector<Vector2d> initial_guesses = {{12, -5}};
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{};
+      Logger logger{true, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
 #if 1
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));

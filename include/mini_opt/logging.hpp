@@ -11,7 +11,7 @@ namespace mini_opt {
  * and records it in a string stream. We print it later if the test fails.
  */
 struct Logger {
-  explicit Logger(bool print_qp_variables = false, bool print_nonlinear_variables = false)
+  Logger(bool print_qp_variables = false, bool print_nonlinear_variables = false)
       : print_qp_variables_(print_qp_variables),
         print_nonlinear_variables_(print_nonlinear_variables) {}
 
