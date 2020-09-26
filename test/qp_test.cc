@@ -224,7 +224,7 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver solver(&qp);
     Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
@@ -264,7 +264,7 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver solver(&qp);
     Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     // solve it
     QPInteriorPointSolver::Params params{};
@@ -302,7 +302,7 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver solver(&qp);
     Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     // solve it
     QPInteriorPointSolver::Params params{};
@@ -340,7 +340,7 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver solver(&qp);
     Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     // solve it
     QPInteriorPointSolver::Params params{};
@@ -367,7 +367,7 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver solver(&qp);
     Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     // solve it in a single step
     QPInteriorPointSolver::Params params{};
@@ -398,7 +398,7 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver solver(&qp);
     Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     QPInteriorPointSolver::Params params{};
     params.termination_kkt2_tol = tol::kPico;
@@ -494,8 +494,7 @@ class QPSolverTest : public ::testing::Test {
       params.max_iterations = 30;
 
       Logger logger{};
-      solver.SetLoggerCallback(
-          std::bind(&Logger::QPSolverCallbackVerbose, &logger, _1, _2, _3, _4));
+      solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
       const QPSolverOutputs outputs = solver.Solve(params);
       ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 2.0e-5)

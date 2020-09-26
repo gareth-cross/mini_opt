@@ -94,7 +94,8 @@ struct ConstrainedNonlinearLeastSquares {
       std::function<void(Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha)>;
 
   // Signature of custom logger.
-  using LoggingCallback = std::function<void(const NLSLogInfo& info)>;
+  using LoggingCallback =
+      std::function<void(const ConstrainedNonlinearLeastSquares& self, const NLSLogInfo& info)>;
 
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* problem,

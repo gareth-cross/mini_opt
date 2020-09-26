@@ -83,13 +83,12 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params
     const StepSizeSelectionResult step_result =
         SelectStepSize(params.max_line_search_iterations, params.absolute_first_derivative_tol,
                        errors_pre, phi_prime_0);
-    ASSERT(!steps_.empty(), "Must have logged an attempted step");
 
     const NLSTerminationState maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, &lambda);
     if (logging_callback_) {
-      const NLSLogInfo info{iter, lambda, errors_pre, qp_outputs, steps_, maybe_exit};
-      logging_callback_(info);
+      const NLSLogInfo info{iter, lambda, errors_pre, qp_outputs, phi_prime_0, steps_, maybe_exit};
+      logging_callback_(*this, info);
     }
 
     if (maybe_exit != NLSTerminationState::NONE) {
@@ -163,6 +162,7 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
 NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitConditions(
     const Params& params, const StepSizeSelectionResult& step_result, const Errors& initial_errors,
     double* const lambda) {
+  ASSERT(!steps_.empty(), "Must have logged an attempted step");
   ASSERT(lambda != nullptr);
 
   if (step_result == StepSizeSelectionResult::SUCCESS) {

@@ -5,6 +5,7 @@
 namespace mini_opt {
 
 // Fwd declare.
+struct ConstrainedNonlinearLeastSquares;
 struct QPInteriorPointSolver;
 
 // Possible methods of picking the barrier parameter, `mu`.
@@ -120,11 +121,13 @@ std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state)
 // Details for the log, the current state of the non-linear optimizer.
 struct NLSLogInfo {
   NLSLogInfo(int iteration, double lambda, const Errors& errors_initial, const QPSolverOutputs& qp,
-             const std::vector<LineSearchStep>& steps, const NLSTerminationState& termination_state)
+             double cost_directional_derivative, const std::vector<LineSearchStep>& steps,
+             const NLSTerminationState& termination_state)
       : iteration(iteration),
         lambda(lambda),
         errors_initial(errors_initial),
         qp_term_state(qp),
+        cost_directional_derivative(cost_directional_derivative),
         steps(steps),
         termination_state(termination_state) {}
 
@@ -132,6 +135,7 @@ struct NLSLogInfo {
   double lambda;
   Errors errors_initial;
   QPSolverOutputs qp_term_state;
+  double cost_directional_derivative;
   const std::vector<LineSearchStep>& steps;
   NLSTerminationState termination_state;
 };
