@@ -2,6 +2,7 @@
 #include "mini_opt/nonlinear.hpp"
 
 #include <Eigen/Dense>  //  for inverse()
+#include <iostream>
 
 namespace mini_opt {
 
@@ -70,6 +71,9 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params
     qp_params.termination_kkt2_tol = params.termination_kkt2_tolerance;
     qp_params.initial_mu = 1.0;
     qp_params.sigma = 0.1;
+    if (iter == 0) {
+      qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
+    }
 
     // Solve the QP.
     solver_.Setup(&qp_);

@@ -71,6 +71,17 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
   delta_.setZero();
   delta_affine_.setZero();
 
+#if 0
+  // To help catch access of un-initialized arrays, set to NaN.
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  variables_.setConstant(nan);
+  r_.setConstant(nan);
+  r_dual_aug_.setConstant(nan);
+  delta_.setConstant(nan);
+  H_.setConstant(nan);
+  H_inv_.setConstant(nan);
+#endif
+
   // check indices up front
   for (const LinearInequalityConstraint& c : p_->constraints) {
     ASSERT(c.variable < static_cast<int>(dims_.N), "Constraint index is out of bounds");
@@ -137,13 +148,14 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
     }
 
     // adjust the barrier parameter
-    if (params.barrier_strategy == BarrierStrategy::FIXED_DECREASE) {
-      mu *= params.sigma;
-    } else {
-      mu = params.sigma * ComputeMu();
+    if (kkt2_after.Total() <= mu || true) {
+      if (params.barrier_strategy == BarrierStrategy::FIXED_DECREASE) {
+        mu *= params.sigma;
+      } else {
+        mu = params.sigma * ComputeMu();
+      }
     }
   }
-
   return QPSolverOutputs(QPTerminationState::MAX_ITERATIONS, params.max_iterations);
 }
 
@@ -440,6 +452,8 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
   // Initialize to zero.
   XBlock(dims_, variables_).setZero();
   YBlock(dims_, variables_).setConstant(0);
+  SBlock(dims_, variables_).setConstant(1.0e-6);
+  ZBlock(dims_, variables_).setConstant(1);
 
   if (params.initial_guess_method == InitialGuessMethod::NAIVE) {
     // Since this is solving a problem in the tangent space of a larger nonlinear problem,

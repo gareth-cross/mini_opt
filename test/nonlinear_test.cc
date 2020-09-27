@@ -266,7 +266,9 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.max_qp_iterations = 10;
 
     // Solve it from a few different initial guesses
-    const AlignedVector<Vector2d> initial_guesses = {{12, -5}};
+    // The last three are actually infeasible to begin with.
+    const AlignedVector<Vector2d> initial_guesses = {
+        {12, -5}, {100.0, -20.0}, {1423.0, -400.0}, {-20.0, 10.0}, {-120.0, 35.0}, {-50.0, 0.5}};
     for (const Vector2d& guess : initial_guesses) {
       Logger logger{true, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
@@ -277,13 +279,94 @@ class ConstrainedNLSTest : public ::testing::Test {
       // solve it
       const NLSTerminationState term_state = nls.Solve(p, guess);
 
-      ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL)
+      // we can terminate due to absolute tol, derivative tol, etc
+      ASSERT_TRUE((term_state != NLSTerminationState::MAX_ITERATIONS) &&
+                  (term_state != NLSTerminationState::MAX_LAMBDA))
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
 
-      // check solution
-      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro)
+      // check solution, it should be at the constraint
+      ASSERT_EIGEN_NEAR(Vector2d(1.2, 0.5), nls.variables(), tol::kMicro)
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+    }
+  }
+
+  static Matrix<double, 10, 1> Rosenbrock6D(const Matrix<double, 6, 1>& params,
+                                            Matrix<double, 10, 6>* const J_out = nullptr) {
+    constexpr double a = 1.0;
+    constexpr double b = 100.0;
+    if (J_out) {
+      J_out->setZero();
+    }
+    Matrix<double, 10, 1> output;
+    output.setConstant(std::numeric_limits<double>::quiet_NaN());  //  make sure we fill
+    for (int i = 0; i < params.rows() - 1; i++) {
+      output[i * 2] = a - params[i];
+      output[i * 2 + 1] = std::sqrt(b) * (params[i + 1] - params[i] * params[i]);
+      if (J_out) {
+        J_out->operator()(i * 2, i) = -1.0;
+        J_out->operator()(i * 2 + 1, i) = -2 * params[i] * std::sqrt(b);
+        J_out->operator()(i * 2 + 1, i + 1) = std::sqrt(b);
+      }
+    }
+    return output;
+  }
+
+  // Test rosenbrock w/ inequality constraints about the optimum, in 6 dimensions.
+  void TestInequalityConstrainedRosenbrock6D() {
+    Residual<10, 6> rosenbrock;
+    std::iota(rosenbrock.index.begin(), rosenbrock.index.end(), 0);
+    rosenbrock.function = &ConstrainedNLSTest::Rosenbrock6D;
+
+    using Vector6 = Matrix<double, 6, 1>;
+    TestResidualFunctionDerivative<10, 6>(rosenbrock.function, Vector6::Zero());
+    TestResidualFunctionDerivative<10, 6>(rosenbrock.function, Vector6::Ones());
+
+    // simple problem with only one cost
+    Problem problem{};
+    problem.costs.emplace_back(new Residual<10, 6>(rosenbrock));
+    problem.dimension = 6;
+    problem.inequality_constraints.push_back(Var(0) >= 2.3);
+    problem.inequality_constraints.push_back(Var(1) <= -1.2);
+    problem.inequality_constraints.push_back(Var(2) >= 3.0);
+    problem.inequality_constraints.push_back(Var(3) <= -2.5);
+    problem.inequality_constraints.push_back(Var(4) >= 3.0);  //  will be inactive
+    problem.inequality_constraints.push_back(Var(5) <= 30.0);
+
+    ConstrainedNonlinearLeastSquares nls(&problem);
+    ConstrainedNonlinearLeastSquares::Params p{};
+    p.max_iterations = 10;
+    p.max_qp_iterations = 30;
+    p.relative_exit_tol = tol::kPico;
+    p.absolute_first_derivative_tol = tol::kPico;
+
+    // Solve it from a few different initial guesses
+
+    const Vector6 guess0 = (Vector6() << 10.5, -8.0, 50., -14.0, 4.0, -0.6).finished();
+    //    const Vector6 guess1 = (Vector6() <<).finished();
+    //    const Vector6 guess2 = (Vector6() <<).finished();
+
+    for (const Vector6& guess : {guess0, /*guess1, guess2*/}) {
+      Logger logger{true, true};
+      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
+      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
+
+      // solve it
+      const NLSTerminationState term_state = nls.Solve(p, guess);
+
+      // we can terminate due to absolute tol, derivative tol, etc
+      ASSERT_TRUE((term_state != NLSTerminationState::MAX_ITERATIONS) &&
+                  (term_state != NLSTerminationState::MAX_LAMBDA))
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+
+      // check solution, it should be at the constraint
+      const Vector6 solution = (Vector6() << 2.3, -1.2, 3.0, -2.5, 1.0, 1.0).finished();
+      ASSERT_EIGEN_NEAR(Vector2d(1.2, 0.5), nls.variables(), tol::kMicro)
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
@@ -293,7 +376,8 @@ class ConstrainedNLSTest : public ::testing::Test {
   // Test a simple non-linear least squares problem.
   void TestActuatorChain() {
     // We have a chain of three rotational actuators, at the end of which we have an effector.
-    // Two actuators can effectuate translation, whereas the last one can only rotate the effector.
+    // Two actuators can effectuate translation, whereas the last one can only rotate the
+    // effector.
     std::unique_ptr<ActuatorChain> chain = std::make_unique<ActuatorChain>();
     const std::array<uint8_t, 3> mask = {{0, 0, 1}};
     chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.0, 0.0, 0.0}), mask);
@@ -467,8 +551,8 @@ class ConstrainedNLSTest : public ::testing::Test {
     PRINT_MATRIX(chain->ComputeEffectorPosition(angles_out).transpose());
 
     /*   const Eigen::Matrix2d hessian =
-           math::NumericalJacobian(Vector2d(angles_out), [&](const Vector2d& angles_pt) -> Vector2d
-       { return math::NumericalJacobian( angles_pt,
+           math::NumericalJacobian(Vector2d(angles_out), [&](const Vector2d& angles_pt) ->
+       Vector2d { return math::NumericalJacobian( angles_pt,
                         [&](const Vector2d& angles_pt) -> double {
                           return combined_soft.function(angles_pt, nullptr).squaredNorm();
                         })
@@ -501,6 +585,7 @@ TEST_FIXTURE(ConstrainedNLSTest, TestCubicApproxCoeffs)
 TEST_FIXTURE(ConstrainedNLSTest, TestRosenbrock)
 TEST_FIXTURE(ConstrainedNLSTest, TestRosenbrockLM)
 TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock)
+TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock6D)
 
 // TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 

@@ -25,8 +25,8 @@ struct ResidualBase {
 
   // Update a system of equations Hx=b by writing to `H` and `b`.
   // Returns the value of `Error` as well (the constant part of the quadratic).
-  virtual double UpdateHessian(const Eigen::VectorXd& params, Eigen::MatrixXd* const H,
-                               Eigen::VectorXd* const b) const = 0;
+  virtual double UpdateHessian(const Eigen::VectorXd& params, Eigen::MatrixXd* H,
+                               Eigen::VectorXd* b) const = 0;
 
   // Output the jacobian for the linear system: J * dx + b
   // `J_out` and `b_out` are set to the correct rows of a larger matrix.
@@ -73,8 +73,8 @@ struct Residual : public ResidualBase {
   // Map params from the global state vector to those required for this function, and
   // then evaluate the function and its derivative. Update the linear system [H|b] w/
   // the result.
-  double UpdateHessian(const Eigen::VectorXd& params, Eigen::MatrixXd* const H,
-                       Eigen::VectorXd* const b) const override;
+  double UpdateHessian(const Eigen::VectorXd& params, Eigen::MatrixXd* H,
+                       Eigen::VectorXd* b) const override;
 
   // Implementation of abstract method UpdateJacobian.
   double UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,

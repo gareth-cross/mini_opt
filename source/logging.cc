@@ -1,6 +1,8 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt/logging.hpp"
 
+#include <iomanip>
+
 #include "mini_opt/nonlinear.hpp"
 #include "mini_opt/qp.hpp"
 
@@ -77,8 +79,8 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
     stream_ << Color(RED);
   }
   stream_ << "Iteration #" << info.iteration << ", lambda = " << info.lambda;
-  stream_ << ", L2(0): " << info.errors_initial.total_l2
-          << ", L2-eq(0): " << info.errors_initial.equality_l2
+  stream_ << ", L2(0): " << std::setprecision(std::numeric_limits<double>::max_digits10)
+          << info.errors_initial.total_l2 << ", L2-eq(0): " << info.errors_initial.equality_l2
           << ", termination = " << info.termination_state << "\n";
   stream_ << "  QP: " << info.qp_term_state.termination_state << ", "
           << info.qp_term_state.num_iterations << "\n";
@@ -94,7 +96,7 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
   // print extra details
   if (print_nonlinear_variables_) {
     stream_ << "  Variables post update:\n";
-    stream_ << "  x = " << solver.variables().transpose().format(kMatrixFmt) << "\n";
+    stream_ << "    x = " << solver.variables().transpose().format(kMatrixFmt) << "\n";
   }
 }
 
