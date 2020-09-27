@@ -18,6 +18,14 @@ enum class BarrierStrategy {
   PREDICTOR_CORRECTOR,
 };
 
+// Possible mechanisms of generating the QP initial guess.
+enum class InitialGuessMethod {
+  // Guesses zero for x, and initialize inequalities to match initial mu.
+  NAIVE = 0,
+  // Solve the equality constrained problem, then clamp to the feasible region.
+  SOLVE_EQUALITY_CONSTRAINED,
+};
+
 struct AlphaValues {
   // Alpha in the primal variables (x an s), set to 1 if we have no s
   double primal{1.};

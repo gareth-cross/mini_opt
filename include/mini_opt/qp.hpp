@@ -130,16 +130,20 @@ struct QPInteriorPointSolver {
 
     // Strategy to apply to barrier parameter `mu`.
     BarrierStrategy barrier_strategy{BarrierStrategy::COMPLEMENTARITY};
+
+    // Method of generating an initial guess.
+    InitialGuessMethod initial_guess_method{InitialGuessMethod::NAIVE};
   };
 
   // Construct empty.
   QPInteriorPointSolver() = default;
 
   // Note we don't copy the problem, it must remain in scope for the duration of the solver.
-  explicit QPInteriorPointSolver(const QP* const problem, const bool check_feasible = false);
+  // Calls `Setup`.
+  explicit QPInteriorPointSolver(const QP* problem);
 
   // Setup with a problem. We allow setting a new problem so storage can be re-used.
-  void Setup(const QP* const problem, const bool check_feasible = false);
+  void Setup(const QP* problem);
 
   /*
    * Iterate until one of the following conditions is met:
@@ -212,7 +216,7 @@ struct QPInteriorPointSolver {
   // Take a single step.
   // Computes mu, solves for the update, and takes the longest step we can while satisfying
   // constraints.
-  IPIterationOutputs Iterate(const double mu_input, const BarrierStrategy& strategy);
+  IPIterationOutputs Iterate(double mu_input, const BarrierStrategy& strategy);
 
   // Invert the augmented linear system, which is done by eliminating p_s, and p_z and then
   // solving for p_x and p_y.
@@ -233,8 +237,11 @@ struct QPInteriorPointSolver {
   // Fill out the KKTError struct from `r_.
   KKTError ComputeSquaredErrors(double mu) const;
 
+  // Compute the initial guess.
+  void ComputeInitialGuess(const Params& params);
+
   // Compute the largest step size we can execute that satisfies constraints.
-  void ComputeAlpha(AlphaValues* const output, double tau) const;
+  void ComputeAlpha(AlphaValues* output, double tau) const;
 
   // Compute the `alpha` step size.
   // Returns alpha such that (val[i] + d_val[i]) >= val[i] * (1 - tau)
@@ -258,7 +265,7 @@ struct QPInteriorPointSolver {
   static VectorBlock ZBlock(const ProblemDims& dims, Eigen::VectorXd& vec);
 
   // For unit test, allow construction of the full linear system required for Newton step.
-  void BuildFullSystem(Eigen::MatrixXd* const H, Eigen::VectorXd* const r) const;
+  void BuildFullSystem(Eigen::MatrixXd* H, Eigen::VectorXd* r) const;
 
   friend class QPSolverTest;
 };

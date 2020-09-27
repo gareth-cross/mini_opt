@@ -73,7 +73,7 @@ class QPSolverTest : public ::testing::Test {
     return BuildQuadratic(roots_structs, output);
   }
 
-  void PutDummyValuesInSlacksAndMultipliers(QPInteriorPointSolver* const solver) {
+  static void PutDummyValuesInSlacksAndMultipliers(QPInteriorPointSolver* const solver) {
     // Give all the multipliers different positive non-zero values.
     // The exact values aren't actually important, we just want to validate indexing.
     auto s = QPInteriorPointSolver::SBlock(solver->dims_, solver->variables_);
@@ -305,23 +305,28 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(1) >= -3.0);
 
     QPInteriorPointSolver solver(&qp);
-    Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
-    // solve it
-    QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = std::pow(tol::kPico, 2);
-    params.initial_mu = 0.1;
-    params.sigma = 0.1;
-    const auto term_state = solver.Solve(params).termination_state;
+    for (InitialGuessMethod method :
+         {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
+      Logger logger{true};
+      solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
-    // check the solution
-    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                 << logger.GetString();
-    ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro) << "Summary:\n"
-                                                                          << logger.GetString();
-    ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), tol::kMicro) << "Summary:\n"
-                                                                       << logger.GetString();
+      // solve it
+      QPInteriorPointSolver::Params params{};
+      params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+      params.initial_mu = 0.1;
+      params.sigma = 0.1;
+      params.initial_guess_method = method;
+      const auto term_state = solver.Solve(params).termination_state;
+
+      // check the solution
+      ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                   << logger.GetString();
+      ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro) << "Summary:\n"
+                                                                            << logger.GetString();
+      ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), tol::kMicro) << "Summary:\n"
+                                                                         << logger.GetString();
+    }
   }
 
   // Quadratic in three variables, with one active and one inactive inequality.
@@ -345,25 +350,30 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(0) >= -3.5);  //  irrelevant
 
     QPInteriorPointSolver solver(&qp);
-    Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
-    // solve it
-    QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = std::pow(tol::kPico, 2);
-    params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
-    params.sigma = 0.1;
-    params.initial_mu = 0.1;
-    const auto term_state = solver.Solve(params).termination_state;
+    for (InitialGuessMethod method :
+         {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
+      Logger logger{true};
+      solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
-    // check the solution
-    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                 << logger.GetString();
-    ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro)
-        << "\nSummary:\n"
-        << logger.GetString();
-    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
-    ASSERT_NEAR(0.0, solver.z_block()[1], tol::kMicro) << "Summary:\n" << logger.GetString();
+      // solve it
+      QPInteriorPointSolver::Params params{};
+      params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+      params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
+      params.sigma = 0.1;
+      params.initial_mu = 0.1;
+      params.initial_guess_method = method;
+      const auto term_state = solver.Solve(params).termination_state;
+
+      // check the solution
+      ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                   << logger.GetString();
+      ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro)
+          << "\nSummary:\n"
+          << logger.GetString();
+      ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
+      ASSERT_NEAR(0.0, solver.z_block()[1], tol::kMicro) << "Summary:\n" << logger.GetString();
+    }
   }
 
   // Test simple problem with equality constraints.
@@ -384,6 +394,7 @@ class QPSolverTest : public ::testing::Test {
     qp.b_eq[1] = -2.0;
 
     QPInteriorPointSolver solver(&qp);
+
     Logger logger{};
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
@@ -393,7 +404,7 @@ class QPSolverTest : public ::testing::Test {
     params.max_iterations = 1;  //  should only need one
     const auto term_state = solver.Solve(params).termination_state;
 
-    // shoudl be able to satisfy immediately
+    // should be able to satisfy immediately
     ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
                                                                  << logger.GetString();
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), qp.A_eq * solver.x_block() + qp.b_eq, tol::kNano)
@@ -442,24 +453,28 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.push_back(Var(1) >= -1.0);
 
     QPInteriorPointSolver solver(&qp);
-    Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
+    for (InitialGuessMethod method :
+         {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
+      Logger logger{};
+      solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
-    QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = std::pow(tol::kPico, 2);
-    params.initial_mu = 0.1;
-    params.sigma = 0.1;
+      QPInteriorPointSolver::Params params{};
+      params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+      params.initial_mu = 0.1;
+      params.sigma = 0.1;
+      params.initial_guess_method = method;
 
-    const auto term_state = solver.Solve(params).termination_state;
+      const auto term_state = solver.Solve(params).termination_state;
 
-    // both inequalities should be active
-    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                 << logger.GetString();
-    ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro)
-        << "\nSummary:\n"
-        << logger.GetString();
-    ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), tol::kMicro) << "Summary:\n"
-                                                                         << logger.GetString();
+      // both inequalities should be active
+      ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
+                                                                   << logger.GetString();
+      ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro)
+          << "\nSummary:\n"
+          << logger.GetString();
+      ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), tol::kMicro) << "Summary:\n"
+                                                                           << logger.GetString();
+    }
   }
 
   /*
@@ -521,6 +536,7 @@ class QPSolverTest : public ::testing::Test {
     const int kProblemDim = 8;  //  size of `x`, for me 8-12 is a typical problem size
 
     QPInteriorPointSolver solver{};  //  re-use the solver
+    std::map<InitialGuessMethod, int> iter_counts;
     for (int p = 0; p < kNumProblems; ++p) {
       VectorXd x_solution;
       std::vector<uint8_t> constraint_mask;
@@ -538,21 +554,31 @@ class QPSolverTest : public ::testing::Test {
       // a strategy for this, but for now I'm gonna crank this up.
       params.max_iterations = 30;
 
-      Logger logger{};
-      solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
+      for (InitialGuessMethod method :
+           {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
+        Logger logger{};
+        solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
-      const QPSolverOutputs outputs = solver.Solve(params);
-      ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 2.0e-5)
-          << "Term: " << outputs.termination_state << "\n"
-          << "Problem p = " << p << "\nSummary:\n"
-          << logger.GetString();
+        params.initial_guess_method = method;
+        const QPSolverOutputs outputs = solver.Solve(params);
+        iter_counts[method] += outputs.num_iterations;  //  total up # number of iterations
 
-      // check the variables that are constrained
-      ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 2.0e-5)
-          << "Term: " << outputs.termination_state << "\n"
-          << "Problem p = " << p << "\nSummary:\n"
-          << logger.GetString();
+        ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 2.0e-5)
+            << "Term: " << outputs.termination_state << "\n"
+            << "Problem p = " << p << "\nSummary:\n"
+            << logger.GetString();
+
+        // check the variables that are constrained
+        ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 2.0e-5)
+            << "Term: " << outputs.termination_state << "\n"
+            << "Problem p = " << p << "\nSummary:\n"
+            << logger.GetString();
+      }
     }
+    // this is approximate and might fluctuate a bit, but generally the
+    // naive method is ~4x worse.
+    ASSERT_LT(iter_counts[InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED] * 4,
+              iter_counts[InitialGuessMethod::NAIVE]);
   }
 };
 

@@ -27,11 +27,9 @@ double LinearInequalityConstraint::ClampX(double x) const {
   }
 }
 
-QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem, const bool check_feasible) {
-  Setup(problem, check_feasible);
-}
+QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem) { Setup(problem); }
 
-void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feasible) {
+void QPInteriorPointSolver::Setup(const QP* const problem) {
   ASSERT(problem != nullptr, "Must pass a non-null problem");
 
   p_ = problem;
@@ -55,38 +53,6 @@ void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feas
   // allocate space for primal, slacks, and dual variables
   variables_.resize(dims_.N + dims_.M * 2 + dims_.K);
 
-  // simple hack
-  //  VectorXd dx = p_->G.selfadjointView<Eigen::Lower>().llt().solve(-p_->c);
-  //
-  //  for (int i = 0; i < dims_.M; ++i) {
-  //    const LinearInequalityConstraint& c = p_->constraints[i];
-  //    dx[c.variable] = c.ClampX(dx[c.variable]);
-  //  }
-
-  // Since this is solving a problem in the tangent space of a larger nonlinear problem,
-  // we can guess zero for `x`.
-  XBlock(dims_, variables_).setZero();
-  //  XBlock(dims_, variables_) = dx;
-
-  // TODO(gareth): A better initialization strategy for these? Probably problem specific.
-  // Start w/ inequalities all active, such that: s~=0, z > 0
-  SBlock(dims_, variables_).setConstant(1.0e-6);
-  ZBlock(dims_, variables_).setConstant(1);
-  YBlock(dims_, variables_).setConstant(0);
-
-  // Initialize so that the inequality condition is satisfied.
-  //  const auto x = ConstXBlock(dims_, variables_);
-  //  auto s = SBlock(dims_, variables_);
-  //  auto z = ZBlock(dims_, variables_);
-  //  for (int i = 0; i < dims_.M; ++i) {
-  //    const LinearInequalityConstraint& c = p_->constraints[i];
-  //    const double s_val = c.a * x[c.variable] + c.b;
-  //    s[i] = std::max(1.0e-9, s_val);
-  //    z[i] = 1 / s[i];
-  //    //    std::cout << "initialize s to " << s[i] << std::endl;
-  //    //    std::cout << "initialize z to " << z[i] << std::endl;
-  //  }
-
   // Allocate space for solving
   const std::size_t reduced_system_size = dims_.N + dims_.K;
   H_.resize(reduced_system_size, reduced_system_size);
@@ -105,15 +71,9 @@ void QPInteriorPointSolver::Setup(const QP* const problem, const bool check_feas
   delta_.setZero();
   delta_affine_.setZero();
 
+  // check indices up front
   for (const LinearInequalityConstraint& c : p_->constraints) {
     ASSERT(c.variable < static_cast<int>(dims_.N), "Constraint index is out of bounds");
-    const bool is_feasible = c.IsFeasible(variables_[c.variable]);
-    if (!is_feasible && check_feasible) {
-      std::stringstream ss;
-      ss << "Constraint is not feasible: " << c.a << " * x[" << c.variable << "] + " << c.b
-         << " >= 0, x = " << variables_[c.variable];
-      throw InfeasibleGuess(ss.str());
-    }
   }
 }
 
@@ -145,6 +105,9 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
 QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params& params) {
   ASSERT(p_, "Must have a valid problem");
   CheckParams(params);
+
+  // compute initial guess
+  ComputeInitialGuess(params);
 
   // on the first iteration, the residual needs to be filled first
   EvaluateKKTConditions();
@@ -471,6 +434,44 @@ KKTError QPInteriorPointSolver::ComputeSquaredErrors(const double mu) const {
     result.r_primal_ineq = ConstZBlock(dims_, r_).squaredNorm();
   }
   return result;
+}
+
+void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
+  // Initialize to zero.
+  XBlock(dims_, variables_).setZero();
+  YBlock(dims_, variables_).setConstant(0);
+
+  if (params.initial_guess_method == InitialGuessMethod::NAIVE) {
+    // Since this is solving a problem in the tangent space of a larger nonlinear problem,
+    // we can sometimes guess zero for `x`. This is fairly simple, but I keep it around
+    // to compare to.
+  } else {
+    ASSERT(params.initial_guess_method == InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
+    // Formulate the problem without inequalities.
+    ComputeLDLT(false);
+    EvaluateKKTConditions(false);
+    SolveForUpdateNoInequalities();
+    // Update our states.
+    XBlock(dims_, variables_) = ConstXBlock(dims_, delta_);
+    YBlock(dims_, variables_) = ConstYBlock(dims_, delta_);
+  }
+
+  // Clamp x-values into feasible region.
+  // TODO(gareth): Update `y` to reflect this shift?
+  auto x = XBlock(dims_, variables_);
+  for (const LinearInequalityConstraint& c : p_->constraints) {
+    x[c.variable] = c.ClampX(x[c.variable]);
+  }
+
+  // Initialize so that the inequality condition is satisfied.
+  auto s = SBlock(dims_, variables_);
+  auto z = ZBlock(dims_, variables_);
+  for (int i = 0; i < dims_.M; ++i) {
+    const LinearInequalityConstraint& c = p_->constraints[i];
+    const double s_val = c.a * x[c.variable] + c.b;
+    s[i] = std::max(1.0e-9, s_val);
+    z[i] = params.initial_mu / s[i];
+  }
 }
 
 // Formula 19.9
