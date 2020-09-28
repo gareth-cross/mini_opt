@@ -122,8 +122,8 @@ struct QPInteriorPointSolver {
     // Amount to reduce mu on each iteration.
     double sigma{0.5};
 
-    // If ||kkt||^2 < termination_kkt2_tol, we terminate optimization.
-    double termination_kkt2_tol{1.0e-8};
+    // If max(||kkt||) < termination_kkt_tol, we terminate optimization (L2 norm).
+    double termination_kkt_tol{1.0e-9};
 
     // Max # of iterations.
     int max_iterations{10};
@@ -131,8 +131,16 @@ struct QPInteriorPointSolver {
     // Strategy to apply to barrier parameter `mu`.
     BarrierStrategy barrier_strategy{BarrierStrategy::COMPLEMENTARITY};
 
+    // If true, decrease mu only when E(x,y,z,s) < mu.
+    // Ie. when the max of th KKT L2 errors is less than mu.
+    // This matches the text, but leads to very slow convergence in practice.
+    bool decrease_mu_only_on_small_error{false};
+
     // Method of generating an initial guess.
     InitialGuessMethod initial_guess_method{InitialGuessMethod::NAIVE};
+
+    // Initialize `mu = (s^T * z) / M` instead of initial_mu.
+    bool initialize_mu_with_complementarity{false};
   };
 
   // Construct empty.
@@ -175,8 +183,8 @@ struct QPInteriorPointSolver {
 
   // Type for a callback that we call after each iteration, used for logging stats, tests.
   using LoggingCallback =
-      std::function<void(const QPInteriorPointSolver& solver, const KKTError& kkt_2_prev,
-                         const KKTError& kkt_2_after, const IPIterationOutputs& iter_outputs)>;
+      std::function<void(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
+                         const KKTError& kkt_after, const IPIterationOutputs& iter_outputs)>;
 
   // Access the problem itself. Asserts that `p_` is not null.
   const QP& problem() const;
@@ -235,7 +243,7 @@ struct QPInteriorPointSolver {
   void EvaluateKKTConditions(bool include_inequalities = true);
 
   // Fill out the KKTError struct from `r_.
-  KKTError ComputeSquaredErrors(double mu) const;
+  KKTError ComputeErrors(double mu) const;
 
   // Compute the initial guess.
   void ComputeInitialGuess(const Params& params);

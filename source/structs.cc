@@ -1,8 +1,13 @@
 #include "mini_opt/structs.hpp"
 
+#include <algorithm>
 #include <ostream>
 
 namespace mini_opt {
+
+double KKTError::Max() const {
+  return std::max(r_dual, std::max(r_comp, std::max(r_primal_eq, r_primal_ineq)));
+}
 
 std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) {
   switch (state) {

@@ -68,9 +68,10 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params
     // Set up params.
     QPInteriorPointSolver::Params qp_params{};
     qp_params.max_iterations = params.max_qp_iterations;
-    qp_params.termination_kkt2_tol = params.termination_kkt2_tolerance;
+    qp_params.termination_kkt_tol = params.termination_kkt2_tolerance;
     qp_params.initial_mu = 1.0;
     qp_params.sigma = 0.1;
+    qp_params.initialize_mu_with_complementarity = true;
     if (iter == 0) {
       qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
     }
@@ -81,17 +82,19 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params
 
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
-    const double phi_prime_0 = ComputeQPCostDerivative(qp_, solver_.x_block());
+    const double directional_deriv = ComputeQPCostDerivative(qp_, solver_.x_block());
 
     // Select the step size.
     const StepSizeSelectionResult step_result =
         SelectStepSize(params.max_line_search_iterations, params.absolute_first_derivative_tol,
-                       errors_pre, phi_prime_0);
+                       errors_pre, directional_deriv);
 
+    // Check if we should terminate.
     const NLSTerminationState maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, &lambda);
     if (logging_callback_) {
-      const NLSLogInfo info{iter, lambda, errors_pre, qp_outputs, phi_prime_0, steps_, maybe_exit};
+      const NLSLogInfo info{iter,   lambda,    errors_pre, qp_outputs, directional_deriv,
+                            steps_, maybe_exit};
       logging_callback_(*this, info);
     }
 

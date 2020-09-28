@@ -16,8 +16,8 @@ struct Logger {
         print_nonlinear_variables_(print_nonlinear_variables) {}
 
   // Callback for the QP solver.
-  void QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt2_prev,
-                        const KKTError& kkt2_after, const IPIterationOutputs& outputs);
+  void QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
+                        const KKTError& kkt_after, const IPIterationOutputs& outputs);
 
   // Callback for the nonlinear solver.
   void NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,

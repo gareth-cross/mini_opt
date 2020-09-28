@@ -267,7 +267,7 @@ class QPSolverTest : public ::testing::Test {
     solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+    params.termination_kkt_tol = tol::kNano;
     params.sigma = 0.1;
     params.initial_mu = 0.1;
     const auto term_state = solver.Solve(params).termination_state;
@@ -313,7 +313,7 @@ class QPSolverTest : public ::testing::Test {
 
       // solve it
       QPInteriorPointSolver::Params params{};
-      params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+      params.termination_kkt_tol = tol::kNano;
       params.initial_mu = 0.1;
       params.sigma = 0.1;
       params.initial_guess_method = method;
@@ -358,7 +358,7 @@ class QPSolverTest : public ::testing::Test {
 
       // solve it
       QPInteriorPointSolver::Params params{};
-      params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+      params.termination_kkt_tol = tol::kPico;
       params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
       params.sigma = 0.1;
       params.initial_mu = 0.1;
@@ -400,7 +400,7 @@ class QPSolverTest : public ::testing::Test {
 
     // solve it
     QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = tol::kPico;
+    params.termination_kkt_tol = tol::kMicro;
     params.max_iterations = 1;  //  should only need one
     const auto term_state = solver.Solve(params).termination_state;
 
@@ -427,7 +427,7 @@ class QPSolverTest : public ::testing::Test {
 
     // solve it in a single step
     QPInteriorPointSolver::Params params{};
-    params.termination_kkt2_tol = tol::kPico;
+    params.termination_kkt_tol = tol::kMicro;
     params.max_iterations = 1;
     const auto term_state = solver.Solve(params).termination_state;
 
@@ -459,7 +459,7 @@ class QPSolverTest : public ::testing::Test {
       solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
       QPInteriorPointSolver::Params params{};
-      params.termination_kkt2_tol = std::pow(tol::kPico, 2);
+      params.termination_kkt_tol = tol::kNano;
       params.initial_mu = 0.1;
       params.sigma = 0.1;
       params.initial_guess_method = method;
@@ -546,8 +546,8 @@ class QPSolverTest : public ::testing::Test {
       solver.Setup(&qp);
 
       QPInteriorPointSolver::Params params{};
-      params.termination_kkt2_tol = tol::kPico / 10;
-      params.barrier_strategy = BarrierStrategy::PREDICTOR_CORRECTOR;
+      params.termination_kkt_tol = tol::kPico;
+      params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
 
       // Some of the randomly generated problems start close to the barrier, which causes
       // them to bounce around a bunch before getting close to the solution. Should implement
@@ -575,6 +575,8 @@ class QPSolverTest : public ::testing::Test {
             << logger.GetString();
       }
     }
+    PRINT(iter_counts[InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED]);
+    PRINT(iter_counts[InitialGuessMethod::NAIVE]);
     // this is approximate and might fluctuate a bit, but generally the
     // naive method is ~4x worse.
     ASSERT_LT(iter_counts[InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED] * 4,

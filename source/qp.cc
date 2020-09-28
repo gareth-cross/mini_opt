@@ -93,7 +93,7 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
   ASSERT(params.initial_mu > 0);
   ASSERT(params.sigma > 0);
   ASSERT(params.sigma <= 1.0);
-  ASSERT(params.termination_kkt2_tol > 0);
+  ASSERT(params.termination_kkt_tol > 0);
   ASSERT(params.max_iterations > 0);
 }
 
@@ -123,10 +123,10 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
   // on the first iteration, the residual needs to be filled first
   EvaluateKKTConditions();
 
-  double mu{params.initial_mu};
+  double mu{params.initialize_mu_with_complementarity ? ComputeMu() : params.initial_mu};
   for (int iter = 0; iter < params.max_iterations; ++iter) {
-    // compute squared norm of the residual, prior to any updates
-    const KKTError kkt2_prev = ComputeSquaredErrors(mu);
+    // compute norm of the residual, prior to any updates
+    const KKTError kkt_prev = ComputeErrors(mu);
 
     // solve for the update
     // TODO(gareth): Implement merit function here? Seems to work ok as is.
@@ -135,20 +135,20 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
     // evaluate the residual again, which fills `r_` for the next iteration
     EvaluateKKTConditions();
 
-    const KKTError kkt2_after = ComputeSquaredErrors(mu);
+    const KKTError kkt_after = ComputeErrors(mu);
     if (logger_callback_) {
       // pass progress to the logger callback for printing in the test
-      logger_callback_(const_cast<const QPInteriorPointSolver&>(*this), kkt2_prev, kkt2_after,
+      logger_callback_(const_cast<const QPInteriorPointSolver&>(*this), kkt_prev, kkt_after,
                        iteration_outputs);
     }
 
-    if (kkt2_after.Total() < params.termination_kkt2_tol) {
+    if (kkt_after.Max() < params.termination_kkt_tol) {
       // error is low enough, stop
       return QPSolverOutputs(QPTerminationState::SATISFIED_KKT_TOL, iter + 1);
     }
 
     // adjust the barrier parameter
-    if (kkt2_after.Total() <= mu || true) {
+    if (kkt_after.Max() <= mu || !params.decrease_mu_only_on_small_error) {
       if (params.barrier_strategy == BarrierStrategy::FIXED_DECREASE) {
         mu *= params.sigma;
       } else {
@@ -431,19 +431,19 @@ void QPInteriorPointSolver::EvaluateKKTConditions(const bool include_inequalitie
   }
 }
 
-// Compute equation (19.10), but I'm taking the total rather than the max.
-// Using L2 norm (squared).
-KKTError QPInteriorPointSolver::ComputeSquaredErrors(const double mu) const {
+// Compute equation (19.10), using L2 norm.
+KKTError QPInteriorPointSolver::ComputeErrors(const double mu) const {
   KKTError result{};
-  result.r_dual = ConstXBlock(dims_, r_).squaredNorm();
+  result.r_dual = ConstXBlock(dims_, r_).norm();
   if (dims_.K > 0) {
-    result.r_primal_eq = ConstYBlock(dims_, r_).squaredNorm();
+    result.r_primal_eq = ConstYBlock(dims_, r_).norm();
   }
   if (HasInequalityConstraints()) {
     // evaluate (ds - mu)^T * (ds - mu)
     const auto ds = ConstSBlock(dims_, r_);
-    result.r_comp = ds.squaredNorm() - 2 * (ds.sum() * mu) + (mu * mu) * ds.rows();
-    result.r_primal_ineq = ConstZBlock(dims_, r_).squaredNorm();
+    const double rs_l2_corrected = ds.squaredNorm() - 2 * (ds.sum() * mu) + (mu * mu) * ds.rows();
+    result.r_comp = std::sqrt(std::max(rs_l2_corrected, 0.));
+    result.r_primal_ineq = ConstZBlock(dims_, r_).norm();
   }
   return result;
 }
@@ -451,9 +451,7 @@ KKTError QPInteriorPointSolver::ComputeSquaredErrors(const double mu) const {
 void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
   // Initialize to zero.
   XBlock(dims_, variables_).setZero();
-  YBlock(dims_, variables_).setConstant(0);
-  SBlock(dims_, variables_).setConstant(1.0e-6);
-  ZBlock(dims_, variables_).setConstant(1);
+  YBlock(dims_, variables_).setZero();
 
   if (params.initial_guess_method == InitialGuessMethod::NAIVE) {
     // Since this is solving a problem in the tangent space of a larger nonlinear problem,
@@ -471,7 +469,6 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
   }
 
   // Clamp x-values into feasible region.
-  // TODO(gareth): Update `y` to reflect this shift?
   auto x = XBlock(dims_, variables_);
   for (const LinearInequalityConstraint& c : p_->constraints) {
     x[c.variable] = c.ClampX(x[c.variable]);
@@ -484,7 +481,11 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
     const LinearInequalityConstraint& c = p_->constraints[i];
     const double s_val = c.a * x[c.variable] + c.b;
     s[i] = std::max(1.0e-9, s_val);
-    z[i] = params.initial_mu / s[i];
+    // TODO(gareth): This value for z is a totally made up heuristic. I set it this way so
+    // the norm of |r_comp| = 0 initially for mu=1. This produces implausibly huge values for
+    // the lagrange multipliers, in turn making |r_dual| huge. It does non-trivially accelerate
+    // convergence on my toy problem. Maybe it has to do w/ Z being identity on iteration 0?
+    z[i] = 1.0 / s[i];
   }
 }
 

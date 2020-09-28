@@ -47,7 +47,7 @@ struct IPIterationOutputs {
   double mu_affine{std::numeric_limits<double>::quiet_NaN()};
 };
 
-// Squared errors in the first order KKT conditions.
+// L2 norm of errors in the first order KKT conditions.
 // At a point that satisfies the conditions, these should all be zero.
 struct KKTError {
   double r_dual{0};         // The dual objective: Gx + c - A_e^T * y - A_i * z
@@ -55,8 +55,8 @@ struct KKTError {
   double r_primal_eq{0};    // Primal equality constraint: A_e*x + b_e
   double r_primal_ineq{0};  // Primal inequality constraint: A_i*x + b_i - s
 
-  // Total squared error.
-  double Total() const { return r_dual + r_comp + r_primal_eq + r_primal_ineq; }
+  // Max of all elements.
+  double Max() const;
 };
 
 // List of possible termination criteria.

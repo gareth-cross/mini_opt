@@ -30,22 +30,26 @@ std::ostream& operator<<(std::ostream& stream, const Color& c) {
   return stream;
 }
 
-void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt2_prev,
-                              const KKTError& kkt2_after, const IPIterationOutputs& outputs) {
+void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
+                              const KKTError& kkt_after, const IPIterationOutputs& outputs) {
   stream_ << "Iteration summary: ";
-  stream_ << "||kkt||^2: " << kkt2_prev.Total() << " --> " << kkt2_after.Total()
+  stream_ << "||kkt|| max: " << kkt_prev.Max() << " --> " << kkt_after.Max()
           << ", mu = " << outputs.mu << ", a_p = " << outputs.alpha.primal
           << ", a_d = " << outputs.alpha.dual << "\n";
-  stream_ << " Probe alphas: a_p = " << outputs.alpha_probe.primal
-          << ", a_d = " << outputs.alpha_probe.dual << ", mu_affine = " << outputs.mu_affine
-          << "\n";
+
+  if (!std::isnan(outputs.mu_affine)) {
+    // print only if filled...
+    stream_ << " Probe alphas: a_p = " << outputs.alpha_probe.primal
+            << ", a_d = " << outputs.alpha_probe.dual << ", mu_affine = " << outputs.mu_affine
+            << "\n";
+  }
 
   // dump progress of individual KKT conditions
-  stream_ << " KKT errors (squared):\n";
-  stream_ << "  r_dual = " << kkt2_prev.r_dual << " --> " << kkt2_after.r_dual << "\n";
-  stream_ << "  r_comp = " << kkt2_prev.r_comp << " --> " << kkt2_after.r_comp << "\n";
-  stream_ << "  r_p_eq = " << kkt2_prev.r_primal_eq << " --> " << kkt2_after.r_primal_eq << "\n";
-  stream_ << "  r_p_ineq = " << kkt2_prev.r_primal_ineq << " --> " << kkt2_after.r_primal_ineq
+  stream_ << " KKT errors, L2:\n";
+  stream_ << "  r_dual = " << kkt_prev.r_dual << " --> " << kkt_after.r_dual << "\n";
+  stream_ << "  r_comp = " << kkt_prev.r_comp << " --> " << kkt_after.r_comp << "\n";
+  stream_ << "  r_p_eq = " << kkt_prev.r_primal_eq << " --> " << kkt_after.r_primal_eq << "\n";
+  stream_ << "  r_p_ineq = " << kkt_prev.r_primal_ineq << " --> " << kkt_after.r_primal_ineq
           << "\n";
 
   if (print_qp_variables_) {
