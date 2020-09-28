@@ -194,8 +194,9 @@ class ConstrainedNLSTest : public ::testing::Test {
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
 
       // solve it
-      const NLSTerminationState term_state = nls.Solve(p, guess);
-      ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
+      const NLSSolverOutputs outputs = nls.Solve(p, guess);
+      ASSERT_EQ(outputs.termination_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
+      ASSERT_EQ(outputs.num_qp_iterations, outputs.num_iterations);
 
       // check solution
       ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro)
@@ -236,8 +237,9 @@ class ConstrainedNLSTest : public ::testing::Test {
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
 
       // solve it
-      const NLSTerminationState term_state = nls.Solve(p, guess);
-      ASSERT_EQ(term_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
+      const NLSSolverOutputs outputs = nls.Solve(p, guess);
+      ASSERT_EQ(outputs.termination_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
+      ASSERT_EQ(outputs.num_qp_iterations, outputs.num_iterations);
 
       // check solution
       ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro)
@@ -277,11 +279,11 @@ class ConstrainedNLSTest : public ::testing::Test {
 #endif
 
       // solve it
-      const NLSTerminationState term_state = nls.Solve(p, guess);
+      const NLSSolverOutputs outputs = nls.Solve(p, guess);
 
       // we can terminate due to absolute tol, derivative tol, etc
-      ASSERT_TRUE((term_state != NLSTerminationState::MAX_ITERATIONS) &&
-                  (term_state != NLSTerminationState::MAX_LAMBDA))
+      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
+                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA))
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
@@ -333,40 +335,45 @@ class ConstrainedNLSTest : public ::testing::Test {
     problem.inequality_constraints.push_back(Var(1) <= -1.2);
     problem.inequality_constraints.push_back(Var(2) >= 3.0);
     problem.inequality_constraints.push_back(Var(3) <= -2.5);
-    problem.inequality_constraints.push_back(Var(4) >= 3.0);  //  will be inactive
-    problem.inequality_constraints.push_back(Var(5) <= 30.0);
 
     ConstrainedNonlinearLeastSquares nls(&problem);
     ConstrainedNonlinearLeastSquares::Params p{};
-    p.max_iterations = 10;
+    //  my second guess here takes a lot of iterations - worth studying more perhaps
+    p.max_iterations = 30;
     p.max_qp_iterations = 30;
     p.relative_exit_tol = tol::kPico;
     p.absolute_first_derivative_tol = tol::kPico;
+    p.termination_kkt_tolerance = tol::kMicro;
 
-    // Solve it from a few different initial guesses
-
+    // Solve it from a couple of different initial guesses
     const Vector6 guess0 = (Vector6() << 10.5, -8.0, 50., -14.0, 4.0, -0.6).finished();
-    //    const Vector6 guess1 = (Vector6() <<).finished();
-    //    const Vector6 guess2 = (Vector6() <<).finished();
+    const Vector6 guess1 = (Vector6() << 100.0, -50.0, 30.0, -100.0, 150.0, -400.0).finished();
 
-    for (const Vector6& guess : {guess0, /*guess1, guess2*/}) {
-      Logger logger{true, true};
+    // TODO(gareth): Check this value more thoroughly. :S
+    const Vector6 solution =
+        (Vector6() << 2.3, -1.2, 3.0, -2.5, 6.19802, std::pow(6.19802, 2)).finished();
+
+    for (const Vector6& guess : {guess0, guess1}) {
+      Logger logger{false, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
       // solve it
-      const NLSTerminationState term_state = nls.Solve(p, guess);
+      const NLSSolverOutputs outputs = nls.Solve(p, guess);
+
+      PRINT(outputs.num_iterations);
+      PRINT(outputs.num_qp_iterations);
 
       // we can terminate due to absolute tol, derivative tol, etc
-      ASSERT_TRUE((term_state != NLSTerminationState::MAX_ITERATIONS) &&
-                  (term_state != NLSTerminationState::MAX_LAMBDA))
+      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
+                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
+                  (outputs.termination_state != NLSTerminationState::NONE))
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
 
       // check solution, it should be at the constraint
-      const Vector6 solution = (Vector6() << 2.3, -1.2, 3.0, -2.5, 1.0, 1.0).finished();
-      ASSERT_EIGEN_NEAR(Vector2d(1.2, 0.5), nls.variables(), tol::kMicro)
+      ASSERT_EIGEN_NEAR(solution, nls.variables(), 1.0e-4)
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();

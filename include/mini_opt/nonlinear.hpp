@@ -61,7 +61,7 @@ struct ConstrainedNonlinearLeastSquares {
     int max_qp_iterations{10};
 
     // KKT tolerance for the QP inner solver.
-    double termination_kkt2_tolerance{1.0e-6};
+    double termination_kkt_tolerance{1.0e-6};
 
     // Absolute tolerance on squared error to exit.
     double absolute_exit_tol{1.0e-12};
@@ -104,7 +104,7 @@ struct ConstrainedNonlinearLeastSquares {
   /*
    *
    */
-  NLSTerminationState Solve(const Params& params, const Eigen::VectorXd& variables);
+  NLSSolverOutputs Solve(const Params& params, const Eigen::VectorXd& variables);
 
   // Set the callback which will be used for the QP solver.
   template <typename T>

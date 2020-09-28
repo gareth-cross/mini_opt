@@ -123,6 +123,17 @@ enum class NLSTerminationState {
   MAX_LAMBDA,
 };
 
+// Outputs from NLS Solve() method.
+struct NLSSolverOutputs {
+  NLSTerminationState termination_state;
+  int num_iterations;
+  int num_qp_iterations;
+
+  // Construct.
+  NLSSolverOutputs(const NLSTerminationState& term_state, int num_iters, int num_qp_iters)
+      : termination_state(term_state), num_iterations(num_iters), num_qp_iterations(num_qp_iters) {}
+};
+
 // ostream for termination states
 std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state);
 

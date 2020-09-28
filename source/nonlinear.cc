@@ -45,7 +45,7 @@ static T Mod2Pi(T value) {
 static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) {
   ASSERT(params.max_iterations >= 0);
   ASSERT(params.max_qp_iterations >= 1);
-  ASSERT(params.termination_kkt2_tolerance > 0);
+  ASSERT(params.termination_kkt_tolerance > 0);
   ASSERT(params.absolute_exit_tol > 0);
   ASSERT(params.max_line_search_iterations >= 0);
   ASSERT(params.relative_exit_tol >= 0);
@@ -53,14 +53,15 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   ASSERT(params.absolute_first_derivative_tol >= 0);
 }
 
-NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params,
-                                                            const Eigen::VectorXd& variables) {
+NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
+                                                         const Eigen::VectorXd& variables) {
   ASSERT(p_ != nullptr, "Must have a valid problem");
   CheckParams(params);
   variables_ = variables;
 
   // Iterate until max.
   double lambda{params.lambda_initial};
+  int num_qp_iters = 0;
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // Fill out the QP and compute current errors.
     const Errors errors_pre = LinearizeAndFillQP(variables_, lambda, *p_, &qp_);
@@ -68,10 +69,10 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params
     // Set up params.
     QPInteriorPointSolver::Params qp_params{};
     qp_params.max_iterations = params.max_qp_iterations;
-    qp_params.termination_kkt_tol = params.termination_kkt2_tolerance;
+    qp_params.termination_kkt_tol = params.termination_kkt_tolerance;
     qp_params.initial_mu = 1.0;
     qp_params.sigma = 0.1;
-    qp_params.initialize_mu_with_complementarity = true;
+    qp_params.initialize_mu_with_complementarity = false;
     if (iter == 0) {
       qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
     }
@@ -79,6 +80,7 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params
     // Solve the QP.
     solver_.Setup(&qp_);
     const QPSolverOutputs qp_outputs = solver_.Solve(qp_params);
+    num_qp_iters += qp_outputs.num_iterations;
 
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
@@ -99,10 +101,10 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::Solve(const Params& params
     }
 
     if (maybe_exit != NLSTerminationState::NONE) {
-      return maybe_exit;
+      return {maybe_exit, iter + 1, num_qp_iters};
     }
   }
-  return NLSTerminationState::MAX_ITERATIONS;
+  return {NLSTerminationState::MAX_ITERATIONS, params.max_iterations, num_qp_iters};
 }
 
 void ConstrainedNonlinearLeastSquares::RetractCandidateVars(const double alpha) {
