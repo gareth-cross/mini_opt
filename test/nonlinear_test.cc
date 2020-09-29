@@ -380,6 +380,152 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
   }
 
+  // For testing, break the Himmelblau function up into two parts.
+  static Matrix<double, 1, 1> Himmelblau1(const Vector2d& xy, Matrix<double, 1, 2>* J_out) {
+    if (J_out) {
+      J_out->operator()(0, 0) = 2 * xy[0];
+      J_out->operator()(0, 1) = 1.0;
+    }
+    return Matrix<double, 1, 1>{std::pow(xy[0], 2) + xy[1] - 11};
+  }
+
+  static Matrix<double, 1, 1> Himmelblau2(const Vector2d& xy, Matrix<double, 1, 2>* J_out) {
+    if (J_out) {
+      J_out->operator()(0, 0) = 1.0;
+      J_out->operator()(0, 1) = 2 * xy[1];
+    }
+    return Matrix<double, 1, 1>{xy[0] + std::pow(xy[1], 2) - 7};
+  }
+
+  void TestHimmelblau() {
+    TestResidualFunctionDerivative<1, 2>(&ConstrainedNLSTest::Himmelblau1, Vector2d{0, 0});
+    TestResidualFunctionDerivative<1, 2>(&ConstrainedNLSTest::Himmelblau1, Vector2d{4, -3});
+    TestResidualFunctionDerivative<1, 2>(&ConstrainedNLSTest::Himmelblau2, Vector2d{-1, 3});
+    TestResidualFunctionDerivative<1, 2>(&ConstrainedNLSTest::Himmelblau2, Vector2d{0.5, -1.5});
+
+    // break problem into 2 costs
+    Problem problem{};
+    problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau1));
+    problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau2));
+    problem.dimension = 2;
+
+    // first test version bounded to [-5, 5]...
+    problem.inequality_constraints.push_back(Var(0) >= -5.0);
+    problem.inequality_constraints.push_back(Var(0) <= 5.0);
+    problem.inequality_constraints.push_back(Var(1) >= -5.0);
+    problem.inequality_constraints.push_back(Var(1) <= 5.0);
+
+    ConstrainedNonlinearLeastSquares nls(&problem);
+
+    // From wikipedia, should get more accurate values for these
+    AlignedVector<Vector2d> valid_solutions;
+    valid_solutions.emplace_back(3.0, 2.0);
+    valid_solutions.emplace_back(-2.805118, 3.131312);
+    valid_solutions.emplace_back(-3.779310, -3.283186);
+    valid_solutions.emplace_back(3.584428, -1.848126);
+    for (const Vector2d& sol : valid_solutions) {
+      ASSERT_NEAR(0.0, nls.EvaluateNonlinearErrors(sol).Total(), tol::kMicro);
+    }
+
+    ConstrainedNonlinearLeastSquares::Params p{};
+    p.max_iterations = 20;
+    p.max_qp_iterations = 10;
+    p.relative_exit_tol = tol::kPico;
+    p.absolute_first_derivative_tol = tol::kPico;
+    p.termination_kkt_tolerance = tol::kMicro;
+
+    // generate a bunch of initial guesses
+    AlignedVector<Vector2d> initial_guesses;
+    for (double x = -4.5; x <= 4.5; x += 0.3) {
+      for (double y = -4.5; y <= 4.5; y += 0.3) {
+        initial_guesses.emplace_back(x, y);
+      }
+    }
+
+    for (const Vector2d& guess : initial_guesses) {
+      Logger logger{false, true};
+      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
+      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
+
+      // solve it
+      const NLSSolverOutputs outputs = nls.Solve(p, guess);
+
+      // we can terminate due to absolute tol, derivative tol, etc
+      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
+                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
+                  (outputs.termination_state != NLSTerminationState::NONE))
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+
+      // one of the solutions should match
+      const Vector2d best_sol = *std::min_element(
+          valid_solutions.begin(), valid_solutions.end(), [&](const auto& v1, const auto& v2) {
+            return (v1 - nls.variables()).norm() < (v2 - nls.variables()).norm();
+          });
+
+      ASSERT_EIGEN_NEAR(best_sol, nls.variables(), 5.0e-5)
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+    }
+  }
+
+  void TestHimmelblauQuadrantConstrained() {
+    // break problem into 2 costs
+    Problem problem{};
+    problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau1));
+    problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau2));
+    problem.dimension = 2;
+
+    // Constrain to the top right quadrant.
+    // We are cheating a bit here, we set the barrier >= 0.1 so that we don't
+    // get trapped at local maxima that lies along x = 0, ~y=2.9
+    problem.inequality_constraints.push_back(Var(0) >= 0.1);
+    problem.inequality_constraints.push_back(Var(0) <= 5.0);
+    problem.inequality_constraints.push_back(Var(1) >= 0.1);
+    problem.inequality_constraints.push_back(Var(1) <= 5.0);
+
+    ConstrainedNonlinearLeastSquares nls(&problem);
+    ConstrainedNonlinearLeastSquares::Params p{};
+    p.max_iterations = 20;
+    p.max_qp_iterations = 10;
+    p.relative_exit_tol = tol::kPico;
+    p.absolute_first_derivative_tol = tol::kPico;
+    p.termination_kkt_tolerance = tol::kMicro;
+
+    // generate a bunch of initial guesses
+    AlignedVector<Vector2d> initial_guesses;
+    for (double x = 0.2; x <= 4.8; x += 0.2) {
+      for (double y = 0.2; y <= 4.8; y += 0.2) {
+        initial_guesses.emplace_back(x, y);
+      }
+    }
+
+    for (const Vector2d& guess : initial_guesses) {
+      Logger logger{false, true};
+      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
+      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
+
+      // solve it
+      const NLSSolverOutputs outputs = nls.Solve(p, guess);
+
+      // we can terminate due to absolute tol, derivative tol, etc
+      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
+                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
+                  (outputs.termination_state != NLSTerminationState::NONE))
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+
+      // should match this solution well
+      ASSERT_EIGEN_NEAR(Vector2d(3.0, 2.0), nls.variables(), 5.0e-5)
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+    }
+  }
+
   // Test a simple non-linear least squares problem.
   void TestActuatorChain() {
     // We have a chain of three rotational actuators, at the end of which we have an effector.
@@ -593,6 +739,8 @@ TEST_FIXTURE(ConstrainedNLSTest, TestRosenbrock)
 TEST_FIXTURE(ConstrainedNLSTest, TestRosenbrockLM)
 TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock)
 TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock6D)
+TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblau)
+TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblauQuadrantConstrained)
 
 // TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 

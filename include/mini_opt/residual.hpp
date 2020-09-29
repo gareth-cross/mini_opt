@@ -55,13 +55,21 @@ struct Residual : public ResidualBase {
   using ParamType = Eigen::Matrix<double, NumParams, 1>;
   using ResidualType = Eigen::Matrix<double, ResidualDim, 1>;
   using JacobianType = Eigen::Matrix<double, ResidualDim, NumParams>;
+  using IndexType = typename internal::IndexType<NumParams>::type;
+  using FunctionType =
+      std::function<ResidualType(const ParamType& params, JacobianType* const J_out)>;
 
   // Variables we are touching, one per column in the jacobian.
-  typename internal::IndexType<NumParams>::type index;
+  IndexType index;
 
   // Function that evaluates the residual given the params, and returns an error vector and
   // optionally the jacobian via the output argument.
-  std::function<ResidualType(const ParamType& params, JacobianType* const J_out)> function;
+  FunctionType function;
+
+  Residual() = default;
+
+  // Construct from members by copy.
+  Residual(const IndexType& index, const FunctionType& func) : index(index), function(func) {}
 
   // Return constant dimension.
   int Dimension() const override { return ResidualDim; }

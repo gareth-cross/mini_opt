@@ -67,7 +67,7 @@ struct ConstrainedNonlinearLeastSquares {
     double absolute_exit_tol{1.0e-12};
 
     // Relative exit tolerance. If error[k+1] > error[k] * (1 - tol), stop.
-    double relative_exit_tol{1.0e-4};
+    double relative_exit_tol{1.0e-5};
 
     // Absolute tolerance on directional derivative of the cost function.
     // If |df(x)| < tol, we have satisfied first order optimality and stop.

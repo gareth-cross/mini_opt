@@ -66,14 +66,16 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     // Fill out the QP and compute current errors.
     const Errors errors_pre = LinearizeAndFillQP(variables_, lambda, *p_, &qp_);
 
-    // Set up params.
+    // Set up params, TODO(gareth): Tune this better.
     QPInteriorPointSolver::Params qp_params{};
     qp_params.max_iterations = params.max_qp_iterations;
     qp_params.termination_kkt_tol = params.termination_kkt_tolerance;
     qp_params.initial_mu = 1.0;
     qp_params.sigma = 0.1;
     qp_params.initialize_mu_with_complementarity = false;
-    if (iter == 0) {
+    if (iter == 0 && !qp_.constraints.empty()) {
+      // If there are inequality constraints, try initializing by just solving the
+      // equality constrained quadratic problem.
       qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
     }
 
