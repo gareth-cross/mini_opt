@@ -487,8 +487,6 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
     // convergence on my toy problem. Maybe it has to do w/ Z being identity on iteration 0?
     z[i] = 1.0 / s[i];
   }
-
-  //  s.setConstant(0)
 }
 
 // Formula 19.9

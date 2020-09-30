@@ -272,11 +272,9 @@ class ConstrainedNLSTest : public ::testing::Test {
     const AlignedVector<Vector2d> initial_guesses = {
         {12, -5}, {100.0, -20.0}, {1423.0, -400.0}, {-20.0, 10.0}, {-120.0, 35.0}, {-50.0, 0.5}};
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{true, true};
+      Logger logger{false, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-#if 1
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-#endif
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
@@ -397,13 +395,14 @@ class ConstrainedNLSTest : public ::testing::Test {
     return Matrix<double, 1, 1>{xy[0] + std::pow(xy[1], 2) - 7};
   }
 
+  // Himmelblau w/ box constraints to clamp it into the typical region.
   void TestHimmelblau() {
     TestResidualFunctionDerivative<1, 2>(&ConstrainedNLSTest::Himmelblau1, Vector2d{0, 0});
     TestResidualFunctionDerivative<1, 2>(&ConstrainedNLSTest::Himmelblau1, Vector2d{4, -3});
     TestResidualFunctionDerivative<1, 2>(&ConstrainedNLSTest::Himmelblau2, Vector2d{-1, 3});
     TestResidualFunctionDerivative<1, 2>(&ConstrainedNLSTest::Himmelblau2, Vector2d{0.5, -1.5});
 
-    // break problem into 2 costs
+    // break problem into 2 costs for testing
     Problem problem{};
     problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau1));
     problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau2));
@@ -471,6 +470,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
   }
 
+  // Himmelblau but constrained to one global optimum.
   void TestHimmelblauQuadrantConstrained() {
     // break problem into 2 costs
     Problem problem{};
@@ -525,6 +525,20 @@ class ConstrainedNLSTest : public ::testing::Test {
           << logger.GetString();
     }
   }
+
+  // Test a problem with a non-linear equality constraint.
+  void TestLinearWithNonlinearEqualityConstraints() {
+    const Vector2d a{1.2, -2.1};
+    const auto relaxed_2d_rot = [&](const Vector2d& p, Matrix<double, 2, 2>* J) -> Vector2d {
+      const Matrix2d R = (Matrix2d() << p.x(), -p.y(), p.y(), p.x()).finished();
+      if (J) {
+        J->operator()(0, 0) = a.x();
+        J->operator()(0, 1) = -a.y();
+        J->operator()(1, 0) = a.x();
+      }
+      return R * a;
+    };
+  };
 
   // Test a simple non-linear least squares problem.
   void TestActuatorChain() {
@@ -741,6 +755,7 @@ TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock)
 TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock6D)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblau)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblauQuadrantConstrained)
+TEST_FIXTURE(ConstrainedNLSTest, TestLinearWithNonlinearEqualityConstraints)
 
 // TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
