@@ -21,6 +21,24 @@ std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) 
   return stream;
 }
 
+std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult& result) {
+  switch (result) {
+    case StepSizeSelectionResult::SUCCESS:
+      stream << "SUCCESS";
+      break;
+    case StepSizeSelectionResult::FAILURE_MAX_ITERATIONS:
+      stream << "FAILURE_MAX_ITERATIONS";
+      break;
+    case StepSizeSelectionResult::FAILURE_POSITIVE_DERIVATIVE:
+      stream << "FAILURE_POSITIVE_DERIVATIVE";
+      break;
+    case StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED:
+      stream << "FAILURE_FIRST_ORDER_SATISFIED";
+      break;
+  }
+  return stream;
+}
+
 std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state) {
   switch (state) {
     case NLSTerminationState::NONE:

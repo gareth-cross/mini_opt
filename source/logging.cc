@@ -83,18 +83,27 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
     stream_ << Color(RED);
   }
   stream_ << "Iteration #" << info.iteration << ", lambda = " << info.lambda;
-  stream_ << ", L2(0): " << std::setprecision(std::numeric_limits<double>::max_digits10)
-          << info.errors_initial.total_l2 << ", L2-eq(0): " << info.errors_initial.equality_l2
+  stream_ << ", f(0): " << std::setprecision(std::numeric_limits<double>::max_digits10)
+          << info.errors_initial.f << ", c(0): " << info.errors_initial.equality
           << ", termination = " << info.termination_state << "\n";
+  stream_ << "  penalty = " << info.penalty << "\n";
   stream_ << "  QP: " << info.qp_term_state.termination_state << ", "
           << info.qp_term_state.num_iterations << "\n";
-  stream_ << "  dphi(alpha)/dalpha = " << info.cost_directional_derivative << "\n";
+  stream_ << "  df/dalpha = " << info.directional_derivatives.d_f
+          << ", dc/dalpha = " << info.directional_derivatives.d_equality << "\n";
   stream_ << Color(NO_COLOR);
+  if (info.step_result == StepSizeSelectionResult::SUCCESS) {
+    stream_ << Color(GREEN);
+  } else {
+    stream_ << Color(RED);
+  }
+  stream_ << "  Search result: " << info.step_result << "\n" << Color(NO_COLOR);
 
   int i = 0;
   for (const LineSearchStep& step : info.steps) {
-    stream_ << "  L2(" << i << "): " << step.errors.total_l2 << ", L2-eq(" << i
-            << "): " << step.errors.equality_l2 << ", alpha = " << step.alpha << "\n";
+    stream_ << "  f(" << i << "): " << std::setprecision(std::numeric_limits<double>::max_digits10)
+            << step.errors.f << ", c(" << i << "): " << step.errors.equality
+            << ", alpha = " << step.alpha << "\n";
     ++i;
   }
   // print extra details

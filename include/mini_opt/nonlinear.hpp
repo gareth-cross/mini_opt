@@ -99,7 +99,7 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* problem,
-                                            const Retraction& retraction = nullptr);
+                                            Retraction retraction = nullptr);
 
   /*
    *
@@ -137,17 +137,23 @@ struct ConstrainedNonlinearLeastSquares {
   NLSTerminationState UpdateLambdaAndCheckExitConditions(const Params& params,
                                                          const StepSizeSelectionResult& step_result,
                                                          const Errors& initial_errors,
-                                                         double* lambda);
+                                                         double penalty, double* lambda);
 
   // Execute a back-tracking search until the cost decreases, or we hit
   // a max number of iterations. This will repeatedly approximate the cost
   // function as a polynomial, and find the minimum. Returns true if we
   // find a step that decreases, false otherwise.
   StepSizeSelectionResult SelectStepSize(int max_iterations, double abs_first_derivative_tol,
-                                         const Errors& errors_pre, double phi_prime_0);
+                                         const Errors& errors_pre,
+                                         const DirectionalDerivatives& derivatives, double penalty,
+                                         double armijo_c1);
 
   // Compute first derivative of the QP cost function.
-  static double ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx);
+  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx);
+
+  // Computes the penalty param for the nonlinear merit function.
+  // Implement equation (18.33)
+  static double ComputeEqualityPenalty(double d_f, double c, double rho);
 
   // Solve the quadratic approximation of the cost function for best alpha.
   // Implements equation (3.57/3.58)
@@ -176,6 +182,9 @@ struct ConstrainedNonlinearLeastSquares {
   // Parameters (the current linearization point)
   Eigen::VectorXd variables_;
   Eigen::VectorXd candidate_vars_;
+
+  // Storage for computing errors.
+  Eigen::VectorXd error_buffer_;
 
   // Buffer for line search steps
   std::vector<LineSearchStep> steps_;

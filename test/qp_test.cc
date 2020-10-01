@@ -313,15 +313,16 @@ class QPSolverTest : public ::testing::Test {
 
       // solve it
       QPInteriorPointSolver::Params params{};
-      params.termination_kkt_tol = tol::kNano;
+      params.termination_kkt_tol = tol::kPico;
       params.initial_mu = 0.1;
       params.sigma = 0.1;
       params.initial_guess_method = method;
-      const auto term_state = solver.Solve(params).termination_state;
+      const auto outputs = solver.Solve(params);
 
       // check the solution
-      ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                   << logger.GetString();
+      ASSERT_EQ(outputs.termination_state, QPTerminationState::SATISFIED_KKT_TOL)
+          << "\nSummary:\n"
+          << logger.GetString();
       ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro) << "Summary:\n"
                                                                             << logger.GetString();
       ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), tol::kMicro) << "Summary:\n"
@@ -459,7 +460,7 @@ class QPSolverTest : public ::testing::Test {
       solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
       QPInteriorPointSolver::Params params{};
-      params.termination_kkt_tol = tol::kNano;
+      params.termination_kkt_tol = tol::kPico;
       params.initial_mu = 0.1;
       params.sigma = 0.1;
       params.initial_guess_method = method;
@@ -563,13 +564,13 @@ class QPSolverTest : public ::testing::Test {
         const QPSolverOutputs outputs = solver.Solve(params);
         iter_counts[method] += outputs.num_iterations;  //  total up # number of iterations
 
-        ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 2.0e-5)
+        ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 5.0e-5)
             << "Term: " << outputs.termination_state << "\n"
             << "Problem p = " << p << "\nSummary:\n"
             << logger.GetString();
 
         // check the variables that are constrained
-        ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 2.0e-5)
+        ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 5.0e-5)
             << "Term: " << outputs.termination_state << "\n"
             << "Problem p = " << p << "\nSummary:\n"
             << logger.GetString();

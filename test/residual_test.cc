@@ -40,6 +40,14 @@ static Eigen::MatrixXd CreateRemapMatrix(const std::array<int, N>& index, const 
   return small_D_large;
 }
 
+template <int ResidualDim, int NumParams>
+static double L2SquaredError(const Residual<ResidualDim, NumParams>& res,
+                             const Eigen::VectorXd& params) {
+  Eigen::VectorXd out(res.Dimension());
+  res.ErrorVector(params, out.head(out.rows()));
+  return 0.5 * out.squaredNorm();
+}
+
 // Test the statically-sized residual struct.
 TEST(MiniOptTest, TestStaticResidualSimple) {
   Residual<2, 3> res;
@@ -58,7 +66,7 @@ TEST(MiniOptTest, TestStaticResidualSimple) {
 
   // check error
   const VectorXd global_params = params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.Error(global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * L2SquaredError(res, global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -87,7 +95,7 @@ TEST(MiniOptTest, TestStaticResidualOutOfOrder) {
 
   // check error
   const VectorXd global_params = local_D_global.transpose() * params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.Error(global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * L2SquaredError(res, global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -118,7 +126,7 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
 
   // check error
   const VectorXd global_params = local_D_global.transpose() * params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.Error(global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * L2SquaredError(res, global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -170,7 +178,7 @@ TEST(MiniOptTest, TestDynamicParameterVector) {
 
   // check error
   const VectorXd global_params = params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.Error(global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * L2SquaredError(res, global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);

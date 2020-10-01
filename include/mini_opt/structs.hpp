@@ -1,6 +1,8 @@
 // Copyright 2020 Gareth Cross
 #pragma once
-#include <numeric>
+#include <limits>
+#include <ostream>
+#include <vector>
 
 namespace mini_opt {
 
@@ -80,12 +82,21 @@ struct QPSolverOutputs {
 // Total squared errors from a nonlinear optimization.
 struct Errors {
   // Sum of squared costs.
-  double total_l2{0};
-  // Squared error in the non-linear equality constraints.
-  double equality_l2{0};
+  double f{0};
+  // Error in the non-linear equality constraints.
+  double equality{0};
 
-  // Total squared error in soft costs and equality constraints.
-  double Total() const { return total_l2 + equality_l2; }
+  double Total(double penalty) const { return f + penalty * equality; }
+};
+
+// Derivatives of `Errors`.
+struct DirectionalDerivatives {
+  // Derivative of sum of squared costs wrt alpha.
+  double d_f;
+  // Derivative of the equality constraints wrt alpha.
+  double d_equality;
+
+  double Total(double penalty) const { return d_f + penalty * d_equality; }
 };
 
 // Pair together a step size and the error achieved.
@@ -104,9 +115,13 @@ enum class StepSizeSelectionResult {
   SUCCESS = 0,
   // Failure, hit max # of iterations.
   FAILURE_MAX_ITERATIONS = 1,
-  // Failure, directional derivative of cost is >= 0 at the current point.
+  // Failure, directional derivative of cost is ~= 0 at the current point.
   FAILURE_FIRST_ORDER_SATISFIED = 2,
+  // Failure, the directional derivative is positive in the direction selected by QP.
+  FAILURE_POSITIVE_DERIVATIVE = 3,
 };
+
+std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult& result);
 
 // Exit condition of the non-linear optimization.
 enum class NLSTerminationState {
@@ -140,13 +155,16 @@ std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state)
 // Details for the log, the current state of the non-linear optimizer.
 struct NLSLogInfo {
   NLSLogInfo(int iteration, double lambda, const Errors& errors_initial, const QPSolverOutputs& qp,
-             double cost_directional_derivative, const std::vector<LineSearchStep>& steps,
+             const DirectionalDerivatives& directional_derivatives, double penalty,
+             const StepSizeSelectionResult& step_result, const std::vector<LineSearchStep>& steps,
              const NLSTerminationState& termination_state)
       : iteration(iteration),
         lambda(lambda),
         errors_initial(errors_initial),
         qp_term_state(qp),
-        cost_directional_derivative(cost_directional_derivative),
+        directional_derivatives(directional_derivatives),
+        penalty(penalty),
+        step_result(step_result),
         steps(steps),
         termination_state(termination_state) {}
 
@@ -154,7 +172,9 @@ struct NLSLogInfo {
   double lambda;
   Errors errors_initial;
   QPSolverOutputs qp_term_state;
-  double cost_directional_derivative;
+  DirectionalDerivatives directional_derivatives;
+  double penalty;
+  StepSizeSelectionResult step_result;
   const std::vector<LineSearchStep>& steps;
   NLSTerminationState termination_state;
 };

@@ -3,7 +3,7 @@
 
 #include <stdarg.h>
 
-#include <cstdlib>
+#include <cstring>
 #include <sstream>
 #include <stdexcept>
 

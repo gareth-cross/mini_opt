@@ -20,8 +20,9 @@ struct ResidualBase {
   // Dimension of the residual vector.
   virtual int Dimension() const = 0;
 
-  // Get the error: (1/2) * h(x)^T * h(x)
-  virtual double Error(const Eigen::VectorXd& params) const = 0;
+  // Get the error vector: h(x)
+  virtual void ErrorVector(const Eigen::VectorXd& params,
+                           Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
 
   // Update a system of equations Hx=b by writing to `H` and `b`.
   // Returns the value of `Error` as well (the constant part of the quadratic).
@@ -30,9 +31,8 @@ struct ResidualBase {
 
   // Output the jacobian for the linear system: J * dx + b
   // `J_out` and `b_out` are set to the correct rows of a larger matrix.
-  // Returns the value of `Error` as well.
-  virtual double UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
-                                Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
+  virtual void UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
+                              Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
 };
 
 // Helper for declaring either vector or array, depending on whether size is known at compile time.
@@ -76,7 +76,8 @@ struct Residual : public ResidualBase {
 
   // Map params from the global state vector to those required for this function, and
   // then evaluate the function.
-  double Error(const Eigen::VectorXd& params) const override;
+  void ErrorVector(const Eigen::VectorXd& params,
+                   Eigen::VectorBlock<Eigen::VectorXd> b_out) const override;
 
   // Map params from the global state vector to those required for this function, and
   // then evaluate the function and its derivative. Update the linear system [H|b] w/
@@ -85,8 +86,8 @@ struct Residual : public ResidualBase {
                        Eigen::VectorXd* b) const override;
 
   // Implementation of abstract method UpdateJacobian.
-  double UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
-                        Eigen::VectorBlock<Eigen::VectorXd> b_out) const override;
+  void UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
+                      Eigen::VectorBlock<Eigen::VectorXd> b_out) const override;
 
  private:
   // Copy out the params that matter for this function.
@@ -122,10 +123,11 @@ Residual<ResidualDim, NumParams>::GetParamSlice(const Eigen::VectorXd& params) c
 }
 
 template <int ResidualDim, int NumParams>
-double Residual<ResidualDim, NumParams>::Error(const Eigen::VectorXd& params) const {
+void Residual<ResidualDim, NumParams>::ErrorVector(
+    const Eigen::VectorXd& params, Eigen::VectorBlock<Eigen::VectorXd> b_out) const {
+  ASSERT(b_out.rows() == Dimension(), "Output vector is wrong dimension");
   const ParamType relevant_params = GetParamSlice(params);
-  const ResidualType err = function(relevant_params, nullptr);
-  return 0.5 * err.squaredNorm();
+  b_out = function(relevant_params, nullptr);
 }
 
 // TODO(gareth): Probably faster to associate a dimension to each variable,
@@ -177,7 +179,7 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
 
 // This version takes blocks so we can write directly into A_eq.
 template <int ResidualDim, int NumParams>
-double Residual<ResidualDim, NumParams>::UpdateJacobian(
+void Residual<ResidualDim, NumParams>::UpdateJacobian(
     const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
     Eigen::VectorBlock<Eigen::VectorXd> b_out) const {
   ASSERT(ResidualDim == b_out.rows());
@@ -198,7 +200,6 @@ double Residual<ResidualDim, NumParams>::UpdateJacobian(
            col_global);
     J_out.col(col_global).noalias() = J.col(col_local);
   }
-  return 0.5 * b_out.squaredNorm();
 }
 
 #ifdef _MSC_VER

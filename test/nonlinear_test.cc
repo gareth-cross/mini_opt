@@ -1,6 +1,9 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt/nonlinear.hpp"
 
+#include <numeric>
+#include <random>
+
 #include "geometry_utils/numerical_derivative.hpp"
 #include "mini_opt/logging.hpp"
 #include "mini_opt/transform_chains.hpp"
@@ -62,12 +65,12 @@ class ConstrainedNLSTest : public ::testing::Test {
     Residual<2, 3> eq;
     eq.index = {{3, 4, 0}};
     eq.function = [](const Vector3d& params, Matrix<double, 2, 3>* J_out) -> Vector2d {
-      const Vector2d result{params[0] - params[1], params[2] * params[2]};
+      const Vector2d result{params[0] - params[1], -params[2] * params[2]};
       if (J_out) {
         J_out->setZero();
         J_out->operator()(0, 0) = 1;
         J_out->operator()(0, 1) = -1;
-        J_out->operator()(1, 2) = 2 * params[2];
+        J_out->operator()(1, 2) = -2 * params[2];
       }
       return result;
     };
@@ -80,9 +83,16 @@ class ConstrainedNLSTest : public ::testing::Test {
     // pick a direction for the directional derivative
     const Vector5 dx = (Vector5() << 0.1, 0.25, -0.87, 1.1, -0.02).finished();
 
+    // The penalty on the equality constraint
+    const double penalty = 0.334;
+
     // compute the derivative of the sum cost function
     const Matrix<double, 1, 1> J_numerical = math::NumericalJacobian(0.0, [&](const double alpha) {
-      return cost.Error(params + dx * alpha) + eq.Error(params + dx * alpha);
+      Eigen::VectorXd cost_out(3);
+      Eigen::VectorXd equality_out(2);
+      cost.ErrorVector(params + dx * alpha, cost_out.head(3));
+      eq.ErrorVector(params + dx * alpha, equality_out.head(2));
+      return 0.5 * cost_out.squaredNorm() + penalty * equality_out.lpNorm<1>();
     });
 
     // set up a problem
@@ -97,8 +107,9 @@ class ConstrainedNLSTest : public ::testing::Test {
     qp.b_eq.resize(2);
     ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(params, 0.0, problem, &qp);
 
-    const double J_analytical = ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(qp, dx);
-    ASSERT_NEAR(J_numerical[0], J_analytical, tol::kPico);
+    const DirectionalDerivatives J_analytical =
+        ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(qp, dx);
+    ASSERT_NEAR(J_numerical[0], J_analytical.Total(penalty), tol::kPico);
   }
 
   void TestQuadraticApproxMinimum() {
@@ -423,14 +434,14 @@ class ConstrainedNLSTest : public ::testing::Test {
     valid_solutions.emplace_back(-3.779310, -3.283186);
     valid_solutions.emplace_back(3.584428, -1.848126);
     for (const Vector2d& sol : valid_solutions) {
-      ASSERT_NEAR(0.0, nls.EvaluateNonlinearErrors(sol).Total(), tol::kMicro);
+      ASSERT_NEAR(0.0, nls.EvaluateNonlinearErrors(sol).Total(1.), tol::kMicro);
     }
 
     ConstrainedNonlinearLeastSquares::Params p{};
     p.max_iterations = 20;
     p.max_qp_iterations = 10;
     p.relative_exit_tol = tol::kPico;
-    p.absolute_first_derivative_tol = tol::kPico;
+    p.absolute_first_derivative_tol = tol::kNano * 10;
     p.termination_kkt_tolerance = tol::kMicro;
 
     // generate a bunch of initial guesses
@@ -440,6 +451,7 @@ class ConstrainedNLSTest : public ::testing::Test {
         initial_guesses.emplace_back(x, y);
       }
     }
+    PRINT(initial_guesses.size());
 
     for (const Vector2d& guess : initial_guesses) {
       Logger logger{false, true};
@@ -491,7 +503,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.max_iterations = 20;
     p.max_qp_iterations = 10;
     p.relative_exit_tol = tol::kPico;
-    p.absolute_first_derivative_tol = tol::kPico;
+    p.absolute_first_derivative_tol = tol::kNano * 10;
     p.termination_kkt_tolerance = tol::kMicro;
 
     // generate a bunch of initial guesses
@@ -501,6 +513,7 @@ class ConstrainedNLSTest : public ::testing::Test {
         initial_guesses.emplace_back(x, y);
       }
     }
+    PRINT(initial_guesses.size());
 
     for (const Vector2d& guess : initial_guesses) {
       Logger logger{false, true};
@@ -526,18 +539,100 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
   }
 
+  template <int N>
+  static Matrix<double, N, 1> SphereFunction(const Matrix<double, N, 1>& x,
+                                             Matrix<double, N, N>* J) {
+    if (J) {
+      J->setIdentity();
+    }
+    return x;
+  }
+
   // Test a problem with a non-linear equality constraint.
-  void TestLinearWithNonlinearEqualityConstraints() {
-    const Vector2d a{1.2, -2.1};
-    const auto relaxed_2d_rot = [&](const Vector2d& p, Matrix<double, 2, 2>* J) -> Vector2d {
-      const Matrix2d R = (Matrix2d() << p.x(), -p.y(), p.y(), p.x()).finished();
+  void TestSphereWithNonlinearEqualityConstraints() {
+    constexpr int N = 6;
+    std::array<int, N> index;
+    std::iota(index.begin(), index.end(), 0);
+
+    Problem problem{};
+    problem.costs.emplace_back(new Residual<N, N>(index, &ConstrainedNLSTest::SphereFunction<N>));
+    problem.dimension = N;
+
+    const auto eq1 = [](const Vector2d& x, const double v,
+                        Matrix<double, 1, 2>* J) -> Matrix<double, 1, 1> {
       if (J) {
-        J->operator()(0, 0) = a.x();
-        J->operator()(0, 1) = -a.y();
-        J->operator()(1, 0) = a.x();
+        J->operator[](0) = x[1];
+        J->operator[](1) = x[0];
       }
-      return R * a;
+      return Matrix<double, 1, 1>{x[0] * x[1] - v};
     };
+    problem.equality_constraints.emplace_back(
+        new Residual<1, 2>({{0, 1}}, std::bind(eq1, _1, 4.0, _2)));
+    problem.equality_constraints.emplace_back(
+        new Residual<1, 2>({{2, 3}}, std::bind(eq1, _1, 9.0, _2)));
+
+    // add a nonlinear equality constraint
+    ConstrainedNonlinearLeastSquares nls(&problem);
+    ConstrainedNonlinearLeastSquares::Params p{};
+    p.max_iterations = 20;
+    p.max_qp_iterations = 10;
+    p.relative_exit_tol = tol::kPico;
+    p.absolute_first_derivative_tol = tol::kPico;
+    p.termination_kkt_tolerance = tol::kMicro;
+
+    // generate a bunch of random initial guesses
+    AlignedVector<Matrix<double, N, 1>> guesses;
+    std::default_random_engine engine{};
+    std::uniform_real_distribution<double> dist{-30.0, 30.0};
+    for (int i = 0; i < 100; ++i) {
+      Matrix<double, N, 1> guess;
+      for (int j = 0; j < N; ++j) {
+        guess[j] = dist(engine);
+      }
+      guesses.push_back(guess);
+    }
+
+    // viable solutions
+    AlignedVector<Matrix<double, N, 1>> solutions;
+    for (double x0 : {-2.0, 2.0}) {
+      for (double x2 : {-3.0, 3.0}) {
+        Matrix<double, N, 1> sol;
+        sol.setZero();
+        sol[0] = x0;
+        sol[1] = x0;
+        sol[2] = x2;
+        sol[3] = x2;
+        solutions.push_back(sol);
+      }
+    }
+
+    for (const auto& guess : guesses) {
+      Logger logger{false, true};
+      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
+      //      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3,
+      //      _4));
+
+      // solve it
+      const NLSSolverOutputs outputs = nls.Solve(p, guess);
+
+      // we can terminate due to absolute tol, derivative tol, etc
+      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
+                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
+                  (outputs.termination_state != NLSTerminationState::NONE))
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+
+      const auto min_it =
+          std::min_element(solutions.begin(), solutions.end(), [&](const auto& a, const auto& b) {
+            return (a - nls.variables()).squaredNorm() < (b - nls.variables()).squaredNorm();
+          });
+
+      ASSERT_EIGEN_NEAR(*min_it, nls.variables(), tol::kMicro)
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+    }
   };
 
   // Test a simple non-linear least squares problem.
@@ -730,9 +825,9 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     // PRINT(y_residual.Error(angles_out));
     // PRINT(x_eq_constraint.Error(angles_out));
-    PRINT(combined_soft.Error(angles_out));
-
-    combined_soft.Error(angles_out);
+    //    PRINT(combined_soft.Error(angles_out));
+    //
+    //    combined_soft.Error(angles_out);
     const Pose start_T_end = chain->chain_buffer_.start_T_end();
 
     for (int i = 0; i < chain->chain_buffer_.i_t_end.cols(); ++i) {
@@ -755,7 +850,7 @@ TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock)
 TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock6D)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblau)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblauQuadrantConstrained)
-TEST_FIXTURE(ConstrainedNLSTest, TestLinearWithNonlinearEqualityConstraints)
+TEST_FIXTURE(ConstrainedNLSTest, TestSphereWithNonlinearEqualityConstraints)
 
 // TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
