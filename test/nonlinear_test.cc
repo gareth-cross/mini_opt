@@ -574,11 +574,16 @@ class ConstrainedNLSTest : public ::testing::Test {
     // add a nonlinear equality constraint
     ConstrainedNonlinearLeastSquares nls(&problem);
     ConstrainedNonlinearLeastSquares::Params p{};
-    p.max_iterations = 20;
-    p.max_qp_iterations = 10;
+    p.max_iterations = 30;
+    p.max_qp_iterations = 1;  //  no inequalities, should be solved in a single step
     p.relative_exit_tol = tol::kPico;
     p.absolute_first_derivative_tol = tol::kPico;
     p.termination_kkt_tolerance = tol::kMicro;
+
+    // We can speed up convergence by adding some non-zero value to the diagonal of the hessian.
+    // This might be because once the last two (unconstrained) x values reach 0, the hessian
+    // becomes positive semi-definite instead of PD.
+    p.lambda_initial = 0.001;
 
     // generate a bunch of random initial guesses
     AlignedVector<Matrix<double, N, 1>> guesses;
@@ -628,7 +633,7 @@ class ConstrainedNLSTest : public ::testing::Test {
             return (a - nls.variables()).squaredNorm() < (b - nls.variables()).squaredNorm();
           });
 
-      ASSERT_EIGEN_NEAR(*min_it, nls.variables(), tol::kMicro)
+      ASSERT_EIGEN_NEAR(*min_it, nls.variables(), tol::kMicro * 10)
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
