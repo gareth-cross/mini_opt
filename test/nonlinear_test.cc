@@ -549,6 +549,7 @@ class ConstrainedNLSTest : public ::testing::Test {
   }
 
   // Test a problem with a non-linear equality constraint.
+  // This is a quadratic problem subject to a quadratic equality constraint.
   void TestSphereWithNonlinearEqualityConstraints() {
     constexpr int N = 6;
     std::array<int, N> index;
@@ -558,6 +559,10 @@ class ConstrainedNLSTest : public ::testing::Test {
     problem.costs.emplace_back(new Residual<N, N>(index, &ConstrainedNLSTest::SphereFunction<N>));
     problem.dimension = N;
 
+    // This constraint makes the problem tricky, because as one variable tends towards 0, the
+    // other goes to infinity and the cost x^2 becomes very large. It also requires that both
+    // variables have the same sign, which means if one starts negative and the other positive,
+    // the optimizer has to cross over the gap at 0.
     const auto eq1 = [](const Vector2d& x, const double v,
                         Matrix<double, 1, 2>* J) -> Matrix<double, 1, 1> {
       if (J) {
@@ -574,20 +579,18 @@ class ConstrainedNLSTest : public ::testing::Test {
     // add a nonlinear equality constraint
     ConstrainedNonlinearLeastSquares nls(&problem);
     ConstrainedNonlinearLeastSquares::Params p{};
-    p.max_iterations = 30;
+    p.max_iterations = 40;
     p.max_qp_iterations = 1;  //  no inequalities, should be solved in a single step
     p.relative_exit_tol = tol::kPico;
     p.absolute_first_derivative_tol = tol::kPico;
     p.termination_kkt_tolerance = tol::kMicro;
 
     // We can speed up convergence by adding some non-zero value to the diagonal of the hessian.
-    // This might be because once the last two (unconstrained) x values reach 0, the hessian
-    // becomes positive semi-definite instead of PD.
     p.lambda_initial = 0.001;
 
     // generate a bunch of random initial guesses
     AlignedVector<Matrix<double, N, 1>> guesses;
-    std::default_random_engine engine{};
+    std::default_random_engine engine{7};
     std::uniform_real_distribution<double> dist{-30.0, 30.0};
     for (int i = 0; i < 100; ++i) {
       Matrix<double, N, 1> guess;
@@ -614,8 +617,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     for (const auto& guess : guesses) {
       Logger logger{false, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-      //      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3,
-      //      _4));
+      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
@@ -624,10 +626,12 @@ class ConstrainedNLSTest : public ::testing::Test {
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
                   (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
                   (outputs.termination_state != NLSTerminationState::NONE))
+          << "Termination: " << outputs.termination_state << "\n"
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
 
+      // find whichever of the 4 best solutions we found
       const auto min_it =
           std::min_element(solutions.begin(), solutions.end(), [&](const auto& a, const auto& b) {
             return (a - nls.variables()).squaredNorm() < (b - nls.variables()).squaredNorm();
@@ -638,7 +642,9 @@ class ConstrainedNLSTest : public ::testing::Test {
           << "\nSummary:\n"
           << logger.GetString();
     }
-  };
+  }
+
+  //  void Test
 
   // Test a simple non-linear least squares problem.
   void TestActuatorChain() {
