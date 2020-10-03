@@ -76,6 +76,12 @@ struct ConstrainedNonlinearLeastSquares {
     // Max # of line-search iterations.
     int max_line_search_iterations{2};
 
+    // Line search method.
+    LineSearchStrategy line_search_strategy{LineSearchStrategy::POLYNOMIAL_APPROXIMATION};
+
+    // Value by which to decrease alpha for the backtracking line search.
+    double armijo_search_tau{0.8};
+
     // Initial lambda value.
     double lambda_initial{0.0};
 
@@ -140,16 +146,20 @@ struct ConstrainedNonlinearLeastSquares {
                                                          double penalty, double* lambda);
 
   // Execute a back-tracking search until the cost decreases, or we hit
-  // a max number of iterations. This will repeatedly approximate the cost
-  // function as a polynomial, and find the minimum. Returns true if we
-  // find a step that decreases, false otherwise.
+  // a max number of iterations
   StepSizeSelectionResult SelectStepSize(int max_iterations, double abs_first_derivative_tol,
                                          const Errors& errors_pre,
                                          const DirectionalDerivatives& derivatives, double penalty,
-                                         double armijo_c1);
+                                         double armijo_c1, const LineSearchStrategy& strategy,
+                                         double backtrack_search_tau);
+
+  // Repeatedly approximate the cost function as a polynomial, and find the minimum.
+  double ComputeAlphaPolynomialApproximation(int iteration, double alpha, const Errors& errors_pre,
+                                             const DirectionalDerivatives& derivatives,
+                                             double penalty) const;
 
   // Compute first derivative of the QP cost function.
-  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx);
+  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const ConstVectorBlock& dx);
 
   // Computes the penalty param for the nonlinear merit function.
   // Implement equation (18.33)
@@ -182,6 +192,7 @@ struct ConstrainedNonlinearLeastSquares {
   // Parameters (the current linearization point)
   Eigen::VectorXd variables_;
   Eigen::VectorXd candidate_vars_;
+  Eigen::VectorXd prev_variables_;
 
   // Storage for computing errors.
   Eigen::VectorXd error_buffer_;

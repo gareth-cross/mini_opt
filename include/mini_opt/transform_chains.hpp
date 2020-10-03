@@ -86,7 +86,12 @@ struct ChainComputationBuffer {
  *
  * If `links` is empty, we clear the buffer.
  */
-void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const c);
+void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* c);
+
+/**
+ * Compute all the intermediate poses `start_T_i`, including `start_T_end`.
+ */
+std::vector<Pose> ComputeAllPoses(const ChainComputationBuffer& buffer);
 
 /**
  * Store a single link in a chain of actuators. Each "actuator" executes a rotation
@@ -115,8 +120,8 @@ struct ActuatorLink {
 
   // Return pose representing this transform, given the euler angles.
   // Derivative is only of the rotation part, as translation is constant.
-  Pose Compute(const math::Vector<double>& angles, const int position,
-               math::Matrix<double, 3, Eigen::Dynamic>* const J_out) const;
+  Pose Compute(const math::Vector<double>& angles, int position,
+               math::Matrix<double, 3, Eigen::Dynamic>* J_out) const;
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
@@ -149,8 +154,7 @@ struct ActuatorChain {
  public:
   // Compute rotation and translation of the effector.
   math::Vector<double, 3> ComputeEffectorPosition(
-      const math::Vector<double>& angles,
-      math::Matrix<double, 3, Eigen::Dynamic>* const J = nullptr);
+      const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* J = nullptr);
 
   int TotalActive() const;
 };

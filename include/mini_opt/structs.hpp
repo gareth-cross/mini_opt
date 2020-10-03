@@ -1,5 +1,6 @@
 // Copyright 2020 Gareth Cross
 #pragma once
+#include <Eigen/Core>
 #include <limits>
 #include <ostream>
 #include <vector>
@@ -9,6 +10,10 @@ namespace mini_opt {
 // Fwd declare.
 struct ConstrainedNonlinearLeastSquares;
 struct QPInteriorPointSolver;
+
+// Blocks into dynamic vectors.
+using ConstVectorBlock = Eigen::VectorBlock<const Eigen::VectorXd>;
+using VectorBlock = Eigen::VectorBlock<Eigen::VectorXd>;
 
 // Possible methods of picking the barrier parameter, `mu`.
 enum class BarrierStrategy {
@@ -77,6 +82,15 @@ struct QPSolverOutputs {
 
   QPSolverOutputs(const QPTerminationState state, const int iters)
       : termination_state(state), num_iterations(iters) {}
+};
+
+// Different methods we can execute the linear search in the nonlinear LS solver.
+enum class LineSearchStrategy {
+  // Just decrease alpha according to: alpha[k+1] = alpha * scale
+  ARMIJO_BACKTRACK = 0,
+  // Approximate cost function as a polynomial and compute the minimum.
+  POLYNOMIAL_APPROXIMATION = 1,
+
 };
 
 // Total squared errors from a nonlinear optimization.
@@ -155,13 +169,14 @@ std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state)
 // Details for the log, the current state of the non-linear optimizer.
 struct NLSLogInfo {
   NLSLogInfo(int iteration, double lambda, const Errors& errors_initial, const QPSolverOutputs& qp,
-             const DirectionalDerivatives& directional_derivatives, double penalty,
-             const StepSizeSelectionResult& step_result, const std::vector<LineSearchStep>& steps,
-             const NLSTerminationState& termination_state)
+             ConstVectorBlock dx, const DirectionalDerivatives& directional_derivatives,
+             double penalty, const StepSizeSelectionResult& step_result,
+             const std::vector<LineSearchStep>& steps, const NLSTerminationState& termination_state)
       : iteration(iteration),
         lambda(lambda),
         errors_initial(errors_initial),
         qp_term_state(qp),
+        dx(std::move(dx)),
         directional_derivatives(directional_derivatives),
         penalty(penalty),
         step_result(step_result),
@@ -172,6 +187,7 @@ struct NLSLogInfo {
   double lambda;
   Errors errors_initial;
   QPSolverOutputs qp_term_state;
+  const ConstVectorBlock dx;
   DirectionalDerivatives directional_derivatives;
   double penalty;
   StepSizeSelectionResult step_result;

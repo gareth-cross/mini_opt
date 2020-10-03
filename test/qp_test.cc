@@ -270,11 +270,12 @@ class QPSolverTest : public ::testing::Test {
     params.termination_kkt_tol = tol::kNano;
     params.sigma = 0.1;
     params.initial_mu = 0.1;
-    const auto term_state = solver.Solve(params).termination_state;
+    const QPSolverOutputs outputs = solver.Solve(params);
 
     // check the solution
-    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                 << logger.GetString();
+    ASSERT_EQ(outputs.termination_state, QPTerminationState::SATISFIED_KKT_TOL)
+        << "\nSummary:\n"
+        << logger.GetString();
     ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
     ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
     ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]) << "Summary:\n" << logger.GetString();

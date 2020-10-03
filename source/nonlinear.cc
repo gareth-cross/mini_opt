@@ -33,22 +33,13 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   // leave uninitialized, we'll fill this in later
   variables_.resize(p_->dimension);
   candidate_vars_.resizeLike(variables_);
+  prev_variables_.resizeLike(variables_);
 
   // also compute max error size for the soft costs too
   for (const ResidualBase::unique_ptr& cost : p_->costs) {
     max_error_size = std::max(max_error_size, cost->Dimension());
   }
   error_buffer_.resize(max_error_size);
-}
-
-template <typename T>
-static T Mod2Pi(T value) {
-  if (value < 0) {
-    return -Mod2Pi(-value);
-  } else {
-    constexpr T two_pi = static_cast<T>(2 * M_PI);
-    return std::fmod(value, two_pi);
-  }
 }
 
 static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) {
@@ -67,6 +58,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   ASSERT(p_ != nullptr, "Must have a valid problem");
   CheckParams(params);
   variables_ = variables;
+  prev_variables_ = variables;
 
   // Set up params, TODO(gareth): Tune this better.
   QPInteriorPointSolver::Params qp_params{};
@@ -78,7 +70,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 
   // Iterate until max.
   double lambda{params.lambda_initial};
-  double penalty{1};  //  TODO(gareth): Arbitrary, get this in a more principled way?
+  double penalty{0};
   int num_qp_iters = 0;
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // Fill out the QP and compute current errors.
@@ -99,8 +91,8 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
-    const DirectionalDerivatives directional_derivative =
-        ComputeQPCostDerivative(qp_, solver_.x_block());
+    const auto dx = const_cast<const QPInteriorPointSolver&>(solver_).x_block();
+    const DirectionalDerivatives directional_derivative = ComputeQPCostDerivative(qp_, dx);
 
     // Compute penalty parameter.
     const double new_penalty =
@@ -112,15 +104,17 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     // Select the step size.
     const StepSizeSelectionResult step_result =
         SelectStepSize(params.max_line_search_iterations, params.absolute_first_derivative_tol,
-                       errors_pre, directional_derivative, penalty, 1.0e-4 /* todo param */);
+                       errors_pre, directional_derivative, penalty, 1.0e-4 /* todo: add param */,
+                       params.line_search_strategy, params.armijo_search_tau);
 
-    // Check if we should terminate.
+    // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
     const NLSTerminationState maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, &lambda);
     if (logging_callback_) {
-      const NLSLogInfo info{iter,    old_lambda,  errors_pre, qp_outputs, directional_derivative,
-                            penalty, step_result, steps_,     maybe_exit};
+      const NLSLogInfo info{
+          iter,    old_lambda,  errors_pre, qp_outputs, dx, directional_derivative,
+          penalty, step_result, steps_,     maybe_exit};
       logging_callback_(*this, info);
     }
 
@@ -208,7 +202,8 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
   if (step_result == StepSizeSelectionResult::SUCCESS) {
     ASSERT(!steps_.empty(), "Must have logged a step");
     // Update the state, and decrease lambda.
-    variables_.swap(candidate_vars_);
+    prev_variables_.swap(variables_);  //  save the current variables
+    variables_.swap(candidate_vars_);  //  replace w/ the candidate variables
     *lambda = std::max(*lambda * 0.1, params.min_lambda);
 
     // Check termination criteria.
@@ -250,7 +245,8 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
  */
 StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     const int max_iterations, const double abs_first_derivative_tol, const Errors& errors_pre,
-    const DirectionalDerivatives& derivatives, const double penalty, const double armijo_c1) {
+    const DirectionalDerivatives& derivatives, const double penalty, const double armijo_c1,
+    const LineSearchStrategy& strategy, const double backtrack_search_tau) {
   steps_.clear();
 
   // compute the directional derivative, w/ the current penalty
@@ -259,29 +255,14 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
   // iterate to find a viable alpha, or give up
   double alpha{1};
   for (int iter = 0; iter <= max_iterations; ++iter) {
-    if (iter == 1) {
-      // Pick a new alpha by approximating cost as a quadratic.
-      // steps_.back() here is the "full step" error.
-      const LineSearchStep& prev_step = steps_.back();
-      alpha = QuadraticApproxMinimum(errors_pre.Total(penalty), directional_derivative,
-                                     prev_step.alpha, prev_step.errors.Total(penalty));
-      ASSERT(alpha < prev_step.alpha, "Alpha must decrease, alpha = %f, prev_alpha = %f", alpha,
-             prev_step.alpha);
-    } else if (iter > 1) {
-      // Try the cubic approximation.
-      const LineSearchStep& second_last_step = steps_[steps_.size() - 2];
-      const LineSearchStep& last_step = steps_.back();
-
-      // Compute coefficients
-      const Eigen::Vector2d ab = CubicApproxCoeffs(
-          errors_pre.Total(penalty), directional_derivative, second_last_step.alpha,
-          second_last_step.errors.Total(penalty), last_step.alpha, last_step.errors.Total(penalty));
-
-      // Solve.
-      alpha = CubicApproxMinimum(directional_derivative, ab);
-      ASSERT(alpha < last_step.alpha,
-             "Alpha must decrease in the line search, alpha = %f, prev_alpha = %f", alpha,
-             last_step.alpha);
+    // compute nwe alpha value
+    if (strategy == LineSearchStrategy::POLYNOMIAL_APPROXIMATION) {
+      alpha = ComputeAlphaPolynomialApproximation(iter, alpha, errors_pre, derivatives, penalty);
+    } else {
+      ASSERT(strategy == LineSearchStrategy::ARMIJO_BACKTRACK);
+      if (iter > 0) {
+        alpha = alpha * backtrack_search_tau;
+      }
     }
 
     // Update our candidate state.
@@ -310,7 +291,45 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
   return StepSizeSelectionResult::FAILURE_MAX_ITERATIONS;
 }
 
-static double Sign(double x) {
+double ConstrainedNonlinearLeastSquares::ComputeAlphaPolynomialApproximation(
+    const int iteration, const double alpha, const Errors& errors_pre,
+    const DirectionalDerivatives& derivatives, const double penalty) const {
+  ASSERT(iteration >= 0);
+  if (iteration == 0) {
+    return alpha;
+  } else if (iteration == 1) {
+    ASSERT(steps_.size() == 1);
+    // Pick a new alpha by approximating cost as a quadratic.
+    // steps_.back() here is the "full step" error.
+    const LineSearchStep& prev_step = steps_.back();
+    const double new_alpha =
+        QuadraticApproxMinimum(errors_pre.Total(penalty), derivatives.Total(penalty),
+                               prev_step.alpha, prev_step.errors.Total(penalty));
+    ASSERT(new_alpha < prev_step.alpha, "Alpha must decrease, alpha = %f, prev_alpha = %f", alpha,
+           prev_step.alpha);
+    return new_alpha;
+  }
+  ASSERT(steps_.size() >= 2);
+  // Try the cubic approximation.
+  const LineSearchStep& second_last_step = steps_[steps_.size() - 2];
+  const LineSearchStep& last_step = steps_.back();
+
+  // Compute coefficients
+  const Eigen::Vector2d ab = CubicApproxCoeffs(
+      errors_pre.Total(penalty), derivatives.Total(penalty), second_last_step.alpha,
+      second_last_step.errors.Total(penalty), last_step.alpha, last_step.errors.Total(penalty));
+
+  // Solve.
+  const double new_alpha = CubicApproxMinimum(derivatives.Total(penalty), ab);
+  ASSERT(new_alpha < last_step.alpha,
+         "Alpha must decrease in the line search, alpha = %f, prev_alpha = %f", alpha,
+         last_step.alpha);
+  return new_alpha;
+}
+
+template <typename T>
+static T Sign(T x) {
+  static_assert(std::is_floating_point<T>::value, "");
   if (x > 0) {
     return 1;
   } else if (x < 0) {
@@ -320,9 +339,8 @@ static double Sign(double x) {
   }
 }
 
-// TODO(gareth): Pass block for dx directly here instead...
 DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(
-    const QP& qp, const Eigen::VectorXd& dx) {
+    const QP& qp, const ConstVectorBlock& dx) {
   // We want the first derivative of the cost function, evaluated at the current linearization
   // point.
   //  d( 0.5 * h(x + dx * alpha)^T * h(x + dx * alpha) ) =
@@ -345,6 +363,20 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
   return out;
 }
 
+// Equation (18.33)
+// The idea here is to compute a value of the penalty (mu in the textbook, but not the same mu
+// as used in the IP solver, of course) that will result in `dx` being a descent direction of
+// the aggregated cost:
+//    phi(x) = f(x) + mu * |c(x)|, where we are taking the L1 norm of the equality
+// constraint c(x). This works because for the L1 norm you can show that the derivative of the
+// aggregated cost is:
+//    dphi(x + alpha * dx)/dalpha = df(x)^T * dx - mu * |c(x)|
+// Then (and this seems arbitrary, AFAIK), you require that the derivative satisfy:
+//   df(x)^T * dx - mu * |c(x)| <=-rho * |c(x)|
+// Where rho is a parameter between [0, 1). Small rho will lead to lower penalty, and rho near
+// 1 will lead to a massive penalty. In practice on some problems I have found that this
+// approximation does not play nice with the quadratic approximation line search, in that it
+// produces large penalties as |c(x)| -> 0, resulting in tiny step sizes and very slow convergence.
 double ConstrainedNonlinearLeastSquares::ComputeEqualityPenalty(double d_f, double c, double rho) {
   ASSERT(rho < 1);
   ASSERT(rho >= 0);
@@ -366,7 +398,7 @@ double ConstrainedNonlinearLeastSquares::ComputeEqualityPenalty(double d_f, doub
 //  phi_alpha_0 - phi_0 > alpha_0 * phi_prime_0
 //
 // We already enforce phi_alpha_0 - phi_0 > 0, and since phi_prime_0 has to be
-// a descent direction (as a result of the QP solver), it will be <= 0
+// a descent direction (as a result of the QP solver), it will be < 0
 double ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(const double phi_0,
                                                                 const double phi_prime_0,
                                                                 const double alpha_0,

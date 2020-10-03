@@ -16,9 +16,6 @@
  */
 namespace mini_opt {
 
-using ConstVectorBlock = Eigen::VectorBlock<const Eigen::VectorXd>;
-using VectorBlock = Eigen::VectorBlock<Eigen::VectorXd>;
-
 /*
  * Describes a linear (technically affine) inequality constraint.
  *

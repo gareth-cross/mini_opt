@@ -11,7 +11,7 @@ namespace mini_opt {
  * and records it in a string stream. We print it later if the test fails.
  */
 struct Logger {
-  Logger(bool print_qp_variables = false, bool print_nonlinear_variables = false)
+  explicit Logger(bool print_qp_variables = false, bool print_nonlinear_variables = false)
       : print_qp_variables_(print_qp_variables),
         print_nonlinear_variables_(print_nonlinear_variables) {}
 
@@ -25,6 +25,9 @@ struct Logger {
 
   // Get the resulting string from the stream.
   std::string GetString() const;
+
+  // Access the stream.
+  std::stringstream& stream() { return stream_; }
 
  private:
   const bool print_qp_variables_;

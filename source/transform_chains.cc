@@ -66,6 +66,16 @@ void ComputeChain(const std::vector<Pose>& links, ChainComputationBuffer* const 
   c->orientation_D_tangent.rightCols<3>().setIdentity();
 }
 
+std::vector<Pose> ComputeAllPoses(const ChainComputationBuffer& buffer) {
+  const Pose start_T_end{buffer.i_R_end.front(), buffer.i_t_end.leftCols<1>()};
+  std::vector<Pose> start_T_i;
+  start_T_i.reserve(buffer.i_R_end.size());
+  for (int i = 0; i < buffer.i_R_end.size(); ++i) {
+    start_T_i.push_back(start_T_end * Pose(buffer.i_R_end[i], buffer.i_t_end.col(i)).Inverse());
+  }
+  return start_T_i;
+}
+
 int ActuatorLink::ActiveCount() const {
   return static_cast<int>(active[0] > 0) + static_cast<int>(active[1] > 0) +
          static_cast<int>(active[2] > 0);
@@ -99,8 +109,7 @@ Pose ActuatorLink::Compute(const math::Vector<double>& angles, const int positio
     }
   }
   // Return a pose w/ our fixed translation.
-  // TODO(gareth): Dumb that we have to copy the fixed translation always...
-  return Pose{rot.q, translation};
+  return {rot.q, translation};
 }
 
 void ActuatorChain::Update(const math::Vector<double>& angles) {

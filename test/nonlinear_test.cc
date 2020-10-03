@@ -1,11 +1,13 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt/nonlinear.hpp"
 
+#include <fstream>
 #include <numeric>
 #include <random>
 
 #include "geometry_utils/numerical_derivative.hpp"
 #include "mini_opt/logging.hpp"
+#include "mini_opt/math_utils.hpp"
 #include "mini_opt/transform_chains.hpp"
 #include "test_utils.hpp"
 
@@ -81,7 +83,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     TestResidualFunctionDerivative<2, 3>(eq.function, params.head<3>());
 
     // pick a direction for the directional derivative
-    const Vector5 dx = (Vector5() << 0.1, 0.25, -0.87, 1.1, -0.02).finished();
+    const VectorXd dx = (Vector5() << 0.1, 0.25, -0.87, 1.1, -0.02).finished();
 
     // The penalty on the equality constraint
     const double penalty = 0.334;
@@ -108,7 +110,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(params, 0.0, problem, &qp);
 
     const DirectionalDerivatives J_analytical =
-        ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(qp, dx);
+        ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(qp, dx.head(5));
     ASSERT_NEAR(J_numerical[0], J_analytical.Total(penalty), tol::kPico);
   }
 
@@ -548,6 +550,20 @@ class ConstrainedNLSTest : public ::testing::Test {
     return x;
   }
 
+  // x_0 * x_1 = v
+  // This constraint makes the problem tricky, because as one variable tends towards 0, the
+  // other goes to infinity and the cost x^2 becomes very large. It also requires that both
+  // variables have the same sign, which means if one starts negative and the other positive,
+  // the optimizer has to cross over the gap at 0.
+  static Matrix<double, 1, 1> ProductExpression(const Vector2d& x, double v,
+                                                Matrix<double, 1, 2>* J) {
+    if (J) {
+      J->operator[](0) = x[1];
+      J->operator[](1) = x[0];
+    }
+    return Matrix<double, 1, 1>{x[0] * x[1] - v};
+  }
+
   // Test a problem with a non-linear equality constraint.
   // This is a quadratic problem subject to a quadratic equality constraint.
   void TestSphereWithNonlinearEqualityConstraints() {
@@ -559,22 +575,10 @@ class ConstrainedNLSTest : public ::testing::Test {
     problem.costs.emplace_back(new Residual<N, N>(index, &ConstrainedNLSTest::SphereFunction<N>));
     problem.dimension = N;
 
-    // This constraint makes the problem tricky, because as one variable tends towards 0, the
-    // other goes to infinity and the cost x^2 becomes very large. It also requires that both
-    // variables have the same sign, which means if one starts negative and the other positive,
-    // the optimizer has to cross over the gap at 0.
-    const auto eq1 = [](const Vector2d& x, const double v,
-                        Matrix<double, 1, 2>* J) -> Matrix<double, 1, 1> {
-      if (J) {
-        J->operator[](0) = x[1];
-        J->operator[](1) = x[0];
-      }
-      return Matrix<double, 1, 1>{x[0] * x[1] - v};
-    };
-    problem.equality_constraints.emplace_back(
-        new Residual<1, 2>({{0, 1}}, std::bind(eq1, _1, 4.0, _2)));
-    problem.equality_constraints.emplace_back(
-        new Residual<1, 2>({{2, 3}}, std::bind(eq1, _1, 9.0, _2)));
+    problem.equality_constraints.emplace_back(new Residual<1, 2>(
+        {{0, 1}}, std::bind(&ConstrainedNLSTest::ProductExpression, _1, 4.0, _2)));
+    problem.equality_constraints.emplace_back(new Residual<1, 2>(
+        {{2, 3}}, std::bind(&ConstrainedNLSTest::ProductExpression, _1, 9.0, _2)));
 
     // add a nonlinear equality constraint
     ConstrainedNonlinearLeastSquares nls(&problem);
@@ -644,8 +648,6 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
   }
 
-  //  void Test
-
   // Test a simple non-linear least squares problem.
   void TestActuatorChain() {
     // We have a chain of three rotational actuators, at the end of which we have an effector.
@@ -663,7 +665,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     y_residual.index = {0, 1};
     y_residual.function = [&](const VectorXd& params,
                               Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
-      // todo: don't evaluate full xyz jacobian here
+      // TODO(gareth): don't evaluate full xyz jacobian here
       Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
       const Vector3d effector_xyz =
           chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
@@ -672,18 +674,6 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
       return Matrix<double, 1, 1>{effector_xyz.y() - 0.6};
     };
-
-    // make a cost that minimizes the sum of squares of the angles
-    /*Residual<2, Dynamic> ss_residual;
-    ss_residual.index = {{0, 1}};
-    ss_residual.function = [&](const VectorXd& params,
-                               Matrix<double, 2, Dynamic>* const J_out) -> Matrix<double, 2, 1> {
-      if (J_out) {
-        J_out->setZero();
-        J_out->diagonal().setConstant(0.1);
-      }
-      return 0.1 * params;
-    };*/
 
     // make an equality constraint on x
     Residual<1, Dynamic> x_eq_constraint;
@@ -699,26 +689,27 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
       return Matrix<double, 1, 1>{effector_xyz.x() - 0.45};
     };
+    //
+    //    Residual<2, Dynamic> combined_soft;
+    //    combined_soft.index = {0, 1};
+    //    combined_soft.function = [&](const VectorXd& params,
+    //                                 Matrix<double, 2, Dynamic>* const J_out) -> Matrix<double, 2,
+    //                                 1> {
+    //      // todo: don't evaluate full xyz jacobian here
+    //      Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
+    //      const Vector3d effector_xyz =
+    //          chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
+    //      if (J_out) {
+    //        ASSERT(J_out->cols() == 2);
+    //        *J_out = J_full.topRows<2>();
+    //      }
+    //      return effector_xyz.head<2>() - Vector2d{0.45, 0.6};
+    //    };
 
-    Residual<2, Dynamic> combined_soft;
-    combined_soft.index = {0, 1};
-    combined_soft.function = [&](const VectorXd& params,
-                                 Matrix<double, 2, Dynamic>* const J_out) -> Matrix<double, 2, 1> {
-      // todo: don't evaluate full xyz jacobian here
-      Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
-      const Vector3d effector_xyz =
-          chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
-      if (J_out) {
-        ASSERT(J_out->cols() == 2);
-        *J_out = J_full.topRows<2>();
-      }
-      return effector_xyz.head<2>() - Vector2d{0.45, 0.6};
-    };
-
-    std::vector<double> angles;
-    for (double angle = -M_PI * 0.999; angle <= M_PI * 0.999; angle += (0.5 * M_PI / 180.0)) {
-      angles.push_back(angle);
-    }
+    //    std::vector<double> angles;
+    //    for (double angle = -M_PI * 0.999; angle <= M_PI * 0.999; angle += (0.5 * M_PI / 180.0)) {
+    //      angles.push_back(angle);
+    //    }
 
     // Eigen::MatrixXd costs(angles.size(), angles.size());
     ///* Eigen::MatrixXd gradients(angles.size(), angles.size() * 2);
@@ -770,84 +761,122 @@ class ConstrainedNLSTest : public ::testing::Test {
     out_hessian << hessian_det.format(csv_format);
     out_hessian.flush();*/
 
-    TestResidualFunctionDerivative<2, Dynamic>(combined_soft.function,
-                                               VectorXd{Vector2d(-0.5, 0.4)});
     TestResidualFunctionDerivative<1, Dynamic>(y_residual.function, VectorXd{Vector2d(-0.5, 0.4)});
     TestResidualFunctionDerivative<1, Dynamic>(x_eq_constraint.function,
                                                VectorXd{Vector2d(0.3, -0.6)});
 
     Problem problem{};
     problem.costs.emplace_back(new Residual<1, Dynamic>(y_residual));
-    // problem.costs.emplace_back(new Residual<2, Dynamic>(combined_soft));
-    // problem.costs.emplace_back(new Residual<2, Dynamic>(ss_residual));
     problem.equality_constraints.emplace_back(new Residual<1, Dynamic>(x_eq_constraint));
-    // problem.inequality_constraints.push_back(Var(0) <= 3 * M_PI / 4);
-    // problem.inequality_constraints.push_back(Var(0) >= -3 * M_PI / 4);
-    // problem.inequality_constraints.push_back(Var(1) <= 3 * M_PI / 4);
-    problem.inequality_constraints.push_back(Var(1) >= 0);
     problem.dimension = 2;
 
-    ConstrainedNonlinearLeastSquares nls(&problem);
-    // nls.SetQPLoggingCallback(&QPSolverTest::ProgressPrinter);
+    ConstrainedNonlinearLeastSquares nls(
+        &problem, [](Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha) {
+          for (int i = 0; i < x->rows(); ++i) {
+            x->operator[](i) = ModPi(x->operator[](i) + dx[i] * alpha);
+          }
+        });
 
-    const Vector2d initial_values{M_PI / 4, -M_PI / 6};
-    // nls.SetVariables(initial_values);
-    //// try {
-    // nls.LinearizeAndSolve(10.0);
-    // nls.LinearizeAndSolve(0.001);
-    // nls.LinearizeAndSolve(0.001);
-    // nls.LinearizeAndSolve(0.001);
-    // nls.LinearizeAndSolve(0.001);
-    // nls.LinearizeAndSolve(0.001);
-    //} catch (const FailedFactorization&) {
-    //}
+    ConstrainedNonlinearLeastSquares::Params p{};
 
-    /*nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(0.1);
-    nls.LinearizeAndSolve(0.01);
-    nls.LinearizeAndSolve(1.0);
-    nls.LinearizeAndSolve(0.1);
-    nls.LinearizeAndSolve(0.1);
-    nls.LinearizeAndSolve(0.1);
-    nls.LinearizeAndSolve(0.1);
-    nls.LinearizeAndSolve(0.1);*/
+    // This can take quite a while to converge since we have linearized the equality constraint
+    // in the IP solver. I would like to try leaving that term nonlinear in the IP solver and
+    // see if it takes fewer total QP iterations.
+    p.max_iterations = 20;
+    p.max_qp_iterations = 1;
+    p.relative_exit_tol = tol::kPico;
+    p.absolute_first_derivative_tol = 1.0e-10;
+    p.termination_kkt_tolerance = tol::kMicro;
+    p.max_line_search_iterations = 10;
+    p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
 
-    const VectorXd angles_out = nls.variables();
-    PRINT_MATRIX(chain->ComputeEffectorPosition(angles_out).transpose());
+    // We add some non-zero lambda because this problem technically does not have
+    // a positive semi-definite hessian (since there is only one nonlinear cost
+    // on the effector position).
+    p.lambda_initial = 0.001;
+    p.min_lambda = 1.0e-9;
 
-    /*   const Eigen::Matrix2d hessian =
-           math::NumericalJacobian(Vector2d(angles_out), [&](const Vector2d& angles_pt) ->
-       Vector2d { return math::NumericalJacobian( angles_pt,
-                        [&](const Vector2d& angles_pt) -> double {
-                          return combined_soft.function(angles_pt, nullptr).squaredNorm();
-                        })
-                 .transpose();
-           });
+    // generate a bunch of initial guesses
+    AlignedVector<Vector2d> initial_guesses;
+    for (double theta0 = 0.0; theta0 <= M_PI / 2; theta0 += 0.1) {
+      for (double theta1 = -M_PI / 3; theta1 <= M_PI / 3; theta1 += 0.1) {
+        initial_guesses.emplace_back(theta0, theta1);
+      }
+    }
 
-       PRINT_MATRIX(hessian);*/
+    int counter = 0;
+    for (const auto& guess : initial_guesses) {
+      if (counter != 74) {
+        counter++;
+        continue;
+      }
 
-    // PRINT(y_residual.Error(angles_out));
-    // PRINT(x_eq_constraint.Error(angles_out));
-    //    PRINT(combined_soft.Error(angles_out));
-    //
-    //    combined_soft.Error(angles_out);
-    const Pose start_T_end = chain->chain_buffer_.start_T_end();
+      Logger logger{false, true};
+      //      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
+      //      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3,
+      //      _4));
 
-    for (int i = 0; i < chain->chain_buffer_.i_t_end.cols(); ++i) {
-      const Quaterniond i_R_end = chain->chain_buffer_.i_R_end[i];
-      const Vector3d& i_t_end = chain->chain_buffer_.i_t_end.col(i);
-      const Pose start_T_i = start_T_end * Pose(i_R_end, i_t_end).Inverse();
+      char thing[1000];
+      sprintf(thing, "%05i", counter);
 
-      PRINT(i);
-      PRINT_MATRIX(start_T_i.translation);
+      std::ofstream writer("/home/gareth/outputs/" + std::string(thing) + ".csv");
+      chain->ComputeEffectorPosition(guess);
+      const ChainComputationBuffer& buffer = chain->chain_buffer_;
+
+      // write out the poses
+      const std::vector<Pose> poses = ComputeAllPoses(buffer);
+      for (int c = 0; c < poses.size(); ++c) {
+        writer << poses[c].translation.x() << ", " << poses[c].translation.y() << ", "
+               << poses[c].translation.z() << ",";
+      }
+      writer << "0, 0, 0, 0";
+      writer << "\n";
+      writer.flush();
+
+      nls.SetLoggingCallback(
+          [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
+            logger.NonlinearSolverCallback(solver, info);
+
+            // write out all the poses
+            Matrix<double, 3, Dynamic> J;
+            J.resize(3, problem.dimension);
+            logger.stream() << "  Effector: "
+                            << chain->ComputeEffectorPosition(solver.variables(), &J).transpose()
+                            << std::endl;
+            const ChainComputationBuffer& buffer = chain->chain_buffer_;
+
+            const Vector2d xy_delta = (J * info.dx).head<2>();
+
+            // write out the poses
+            const std::vector<Pose> poses = ComputeAllPoses(buffer);
+            for (const auto& pose : poses) {
+              writer << pose.translation.x() << ", " << pose.translation.y() << ", "
+                     << pose.translation.z() << ", ";
+            }
+            for (int i = 0; i < info.dx.rows(); ++i) {
+              writer << info.dx[i] << ", ";
+            }
+            writer << xy_delta.x() << ", ";
+            writer << xy_delta.y();
+            writer << "\n";
+          });
+
+      writer.flush();
+
+      // solve it
+      const NLSSolverOutputs outputs = nls.Solve(p, guess);
+
+      std::cout << logger.GetString() << std::endl;
+
+      // check that we reached the desired position
+      const VectorXd& angles_out = nls.variables();
+      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->ComputeEffectorPosition(angles_out).head(2),
+                        tol::kMilli * 2)
+          << "Termination: " << outputs.termination_state << "\n"
+          << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+          << "\nSummary:\n"
+          << logger.GetString();
+      ++counter;
     }
   }
 };
@@ -862,7 +891,6 @@ TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock6D)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblau)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblauQuadrantConstrained)
 TEST_FIXTURE(ConstrainedNLSTest, TestSphereWithNonlinearEqualityConstraints)
-
-// TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
+TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
 
 }  // namespace mini_opt
