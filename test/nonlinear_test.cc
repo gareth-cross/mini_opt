@@ -583,7 +583,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     // add a nonlinear equality constraint
     ConstrainedNonlinearLeastSquares nls(&problem);
     ConstrainedNonlinearLeastSquares::Params p{};
-    p.max_iterations = 40;
+    p.max_iterations = 45;
     p.max_qp_iterations = 1;  //  no inequalities, should be solved in a single step
     p.relative_exit_tol = tol::kPico;
     p.absolute_first_derivative_tol = tol::kPico;
@@ -649,7 +649,7 @@ class ConstrainedNLSTest : public ::testing::Test {
   }
 
   // Test a simple non-linear least squares problem.
-  void TestActuatorChain() {
+  void TestTwoAngleActuatorChain() {
     // We have a chain of three rotational actuators, at the end of which we have an effector.
     // Two actuators can effectuate translation, whereas the last one can only rotate the
     // effector.
@@ -815,6 +815,6 @@ TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock6D)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblau)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblauQuadrantConstrained)
 TEST_FIXTURE(ConstrainedNLSTest, TestSphereWithNonlinearEqualityConstraints)
-TEST_FIXTURE(ConstrainedNLSTest, TestActuatorChain)
+TEST_FIXTURE(ConstrainedNLSTest, TestTwoAngleActuatorChain)
 
 }  // namespace mini_opt
