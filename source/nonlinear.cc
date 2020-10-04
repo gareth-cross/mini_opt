@@ -95,10 +95,21 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const DirectionalDerivatives directional_derivative = ComputeQPCostDerivative(qp_, dx);
 
     // Compute penalty parameter.
-    const double new_penalty =
-        ComputeEqualityPenalty(directional_derivative.d_f, errors_pre.equality, /* rho = */ 0.5);
-    if (new_penalty > penalty) {
-      penalty = new_penalty;
+    //    const double new_penalty =
+    //        ComputeEqualityPenalty(directional_derivative.d_f, errors_pre.equality, /* rho = */
+    //        0.5);
+    ////    if (new_penalty > penalty) {
+    ////      penalty = new_penalty * 0.1 + penalty * 0.9;
+    ////    }
+
+    // Equation 18.32, raise the penalty parameter if necessary such that it exceeds the largest
+    // lagrange multiplier. Note that this is not the recommended algorithm in the book, instead
+    // they suggest 18.33. But this seems to work a lot better for me.
+    if (!p_->equality_constraints.empty()) {
+      const double new_penalty = solver_.y_block().lpNorm<Eigen::Infinity>();
+      if (new_penalty > penalty) {
+        penalty = new_penalty;
+      }
     }
 
     // Select the step size.

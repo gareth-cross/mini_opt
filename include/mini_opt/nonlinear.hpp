@@ -127,6 +127,9 @@ struct ConstrainedNonlinearLeastSquares {
   // Get the current linearization point.
   const Eigen::VectorXd& variables() const { return variables_; }
 
+  // Variables at the start of the last iteration.
+  const Eigen::VectorXd& previous_variables() const { return prev_variables_; }
+
  private:
   // Update candidate_vars w/ a step size of alpha.
   void RetractCandidateVars(double alpha);

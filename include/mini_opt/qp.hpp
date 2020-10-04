@@ -273,6 +273,7 @@ struct QPInteriorPointSolver {
   void BuildFullSystem(Eigen::MatrixXd* H, Eigen::VectorXd* r) const;
 
   friend class QPSolverTest;
+  friend class ConstrainedNLSTest;
 };
 
 /*

@@ -689,77 +689,6 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
       return Matrix<double, 1, 1>{effector_xyz.x() - 0.45};
     };
-    //
-    //    Residual<2, Dynamic> combined_soft;
-    //    combined_soft.index = {0, 1};
-    //    combined_soft.function = [&](const VectorXd& params,
-    //                                 Matrix<double, 2, Dynamic>* const J_out) -> Matrix<double, 2,
-    //                                 1> {
-    //      // todo: don't evaluate full xyz jacobian here
-    //      Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
-    //      const Vector3d effector_xyz =
-    //          chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
-    //      if (J_out) {
-    //        ASSERT(J_out->cols() == 2);
-    //        *J_out = J_full.topRows<2>();
-    //      }
-    //      return effector_xyz.head<2>() - Vector2d{0.45, 0.6};
-    //    };
-
-    //    std::vector<double> angles;
-    //    for (double angle = -M_PI * 0.999; angle <= M_PI * 0.999; angle += (0.5 * M_PI / 180.0)) {
-    //      angles.push_back(angle);
-    //    }
-
-    // Eigen::MatrixXd costs(angles.size(), angles.size());
-    ///* Eigen::MatrixXd gradients(angles.size(), angles.size() * 2);
-    // Eigen::MatrixXd hessian_det(angles.size(), angles.size());*/
-    // for (int row = 0; row < angles.size(); ++row) {
-    //  for (int col = 0; col < angles.size(); ++col) {
-    //    const Vector2d angles_pt(angles[row], angles[col]);
-
-    //    /* const Eigen::Vector2d gradient =
-    //         math::NumericalJacobian(angles_pt, [&](const Vector2d& angles_pt) -> double {
-    //           return combined_soft.function(angles_pt, nullptr).squaredNorm();
-    //         }).transpose();
-
-    //     const Eigen::Matrix2d hessian =
-    //         math::NumericalJacobian(angles_pt, [&](const Vector2d& angles_pt) -> Vector2d {
-    //           return math::NumericalJacobian(
-    //                      angles_pt,
-    //                      [&](const Vector2d& angles_pt) -> double {
-    //                        return combined_soft.function(angles_pt, nullptr).squaredNorm();
-    //                      })
-    //               .transpose();
-    //         });
-    //     hessian_det(row, col) = hessian.determinant();
-
-    //     gradients(row, col) = gradient[0];
-    //     gradients(row, angles.size() + col) = gradient[1];*/
-
-    //    costs(row, col) = 0.5 * combined_soft.function(angles_pt, nullptr).squaredNorm();
-    //  }
-    //}
-
-    // Eigen::Index min_row, min_col;
-    // const double min_coeff = costs.minCoeff(&min_row, &min_col);
-
-    /*PRINT(min_coeff);
-    PRINT(angles[min_row]);
-    PRINT(angles[min_col]);*/
-
-    /*const IOFormat csv_format(FullPrecision, 0, ", ", "\n", "", "", "", "");
-    std::ofstream out("C:/Users/garet/Documents/test.csv");
-    out << costs.format(csv_format);
-    out.flush();*/
-    /*
-    std::ofstream out_gradients("C:/Users/garet/Documents/gradients.csv");
-    out_gradients << gradients.format(csv_format);
-    out_gradients.flush();
-
-    std::ofstream out_hessian("C:/Users/garet/Documents/hessian.csv");
-    out_hessian << hessian_det.format(csv_format);
-    out_hessian.flush();*/
 
     TestResidualFunctionDerivative<1, Dynamic>(y_residual.function, VectorXd{Vector2d(-0.5, 0.4)});
     TestResidualFunctionDerivative<1, Dynamic>(x_eq_constraint.function,
@@ -773,22 +702,19 @@ class ConstrainedNLSTest : public ::testing::Test {
     ConstrainedNonlinearLeastSquares nls(
         &problem, [](Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha) {
           for (int i = 0; i < x->rows(); ++i) {
+            // These are angles, so clamp them in range of [-pi, pi]
             x->operator[](i) = ModPi(x->operator[](i) + dx[i] * alpha);
           }
         });
 
     ConstrainedNonlinearLeastSquares::Params p{};
-
-    // This can take quite a while to converge since we have linearized the equality constraint
-    // in the IP solver. I would like to try leaving that term nonlinear in the IP solver and
-    // see if it takes fewer total QP iterations.
     p.max_iterations = 20;
     p.max_qp_iterations = 1;
     p.relative_exit_tol = tol::kPico;
     p.absolute_first_derivative_tol = 1.0e-10;
     p.termination_kkt_tolerance = tol::kMicro;
     p.max_line_search_iterations = 10;
-    p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
+    p.line_search_strategy = LineSearchStrategy::POLYNOMIAL_APPROXIMATION;
 
     // We add some non-zero lambda because this problem technically does not have
     // a positive semi-definite hessian (since there is only one nonlinear cost
@@ -803,81 +729,79 @@ class ConstrainedNLSTest : public ::testing::Test {
         initial_guesses.emplace_back(theta0, theta1);
       }
     }
+    PRINT(initial_guesses.size());
 
-    int counter = 0;
+    int iteration_counter = 0;
     for (const auto& guess : initial_guesses) {
-      if (counter != 74) {
-        counter++;
-        continue;
-      }
+      Logger logger{true, true};
+      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
-      Logger logger{false, true};
-      //      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-      //      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3,
-      //      _4));
-
-      char thing[1000];
-      sprintf(thing, "%05i", counter);
-
-      std::ofstream writer("/home/gareth/outputs/" + std::string(thing) + ".csv");
-      chain->ComputeEffectorPosition(guess);
-      const ChainComputationBuffer& buffer = chain->chain_buffer_;
-
-      // write out the poses
-      const std::vector<Pose> poses = ComputeAllPoses(buffer);
-      for (int c = 0; c < poses.size(); ++c) {
-        writer << poses[c].translation.x() << ", " << poses[c].translation.y() << ", "
-               << poses[c].translation.z() << ",";
-      }
-      writer << "0, 0, 0, 0";
-      writer << "\n";
-      writer.flush();
-
+      //      char thing[1000];
+      //      sprintf(thing, "%05i", counter);
+      //
+      //      std::ofstream writer("/home/gareth/outputs/" + std::string(thing) + ".csv");
+      //      chain->ComputeEffectorPosition(guess);
+      //      const ChainComputationBuffer& buffer = chain->chain_buffer_;
+      //
+      //      // write out the poses
+      //      const std::vector<Pose> poses = ComputeAllPoses(buffer);
+      //      for (int c = 0; c < poses.size(); ++c) {
+      //        writer << poses[c].translation.x() << ", " << poses[c].translation.y() << ", "
+      //               << poses[c].translation.z() << ",";
+      //      }
+      //      writer << "0, 0, 0, 0";
+      //      writer << "\n";
+      //      writer.flush();
+      //
       nls.SetLoggingCallback(
           [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
             logger.NonlinearSolverCallback(solver, info);
 
-            // write out all the poses
+            // compute jacobian about the previous linearization and dump it
             Matrix<double, 3, Dynamic> J;
             J.resize(3, problem.dimension);
+            chain->ComputeEffectorPosition(solver.previous_variables(), &J);
+
             logger.stream() << "  Effector: "
-                            << chain->ComputeEffectorPosition(solver.variables(), &J).transpose()
+                            << chain->ComputeEffectorPosition(solver.variables()).transpose()
                             << std::endl;
-            const ChainComputationBuffer& buffer = chain->chain_buffer_;
-
-            const Vector2d xy_delta = (J * info.dx).head<2>();
-
-            // write out the poses
-            const std::vector<Pose> poses = ComputeAllPoses(buffer);
-            for (const auto& pose : poses) {
-              writer << pose.translation.x() << ", " << pose.translation.y() << ", "
-                     << pose.translation.z() << ", ";
-            }
-            for (int i = 0; i < info.dx.rows(); ++i) {
-              writer << info.dx[i] << ", ";
-            }
-            writer << xy_delta.x() << ", ";
-            writer << xy_delta.y();
-            writer << "\n";
+            logger.stream() << "  J:\n" << J.format(test_utils::kNumPyMatrixFmt) << std::endl;
+            //
+            //            const ChainComputationBuffer& buffer = chain->chain_buffer_;
+            //
+            //            ASSERT(J.cols() == info.dx.rows());
+            //            const Vector2d xy_delta = (J * info.dx).head<2>();
+            //
+            //            // write out the poses
+            //            const std::vector<Pose> poses = ComputeAllPoses(buffer);
+            //            for (const auto& pose : poses) {
+            //              writer << pose.translation.x() << ", " << pose.translation.y() << ", "
+            //                     << pose.translation.z() << ", ";
+            //            }
+            //            for (int i = 0; i < info.dx.rows(); ++i) {
+            //              writer << info.dx[i] << ", ";
+            //            }
+            //            writer << xy_delta.x() << ", ";
+            //            writer << xy_delta.y();
+            //            writer << "\n";
           });
 
-      writer.flush();
+      //            writer.flush();
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-
-      std::cout << logger.GetString() << std::endl;
+      iteration_counter += outputs.num_iterations;
 
       // check that we reached the desired position
       const VectorXd& angles_out = nls.variables();
       ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->ComputeEffectorPosition(angles_out).head(2),
-                        tol::kMilli * 2)
+                        5.0e-5)
           << "Termination: " << outputs.termination_state << "\n"
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
-      ++counter;
     }
+    PRINT(iteration_counter);
   }
 };
 
