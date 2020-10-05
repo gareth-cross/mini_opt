@@ -49,7 +49,12 @@ struct Logger {
   std::stringstream& stream() { return stream_; }
 
   // Get the counters.
-  StatCounters counters() const { return counters_; }
+  const StatCounters& counters() const { return counters_; }
+
+  // Get a count for a given enum value.
+  int GetCount(const StatCounters::Stats& v) const {
+    return (counters_.counts.count(v) > 0) ? counters_.counts.at(v) : 0;
+  }
 
  private:
   const bool print_qp_variables_;

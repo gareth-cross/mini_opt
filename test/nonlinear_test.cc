@@ -782,8 +782,7 @@ class ConstrainedNLSTest : public ::testing::Test {
           << "\nSummary:\n"
           << logger.GetString();
 
-      ASSERT_EQ(logger.counters().counts[StatCounters::NUM_FAILED_LINE_SEARCHES], 0)
-          << logger.GetString();
+      ASSERT_EQ(logger.GetCount(StatCounters::NUM_FAILED_LINE_SEARCHES), 0) << logger.GetString();
     }
     SummarizeCounts("Sphere With Nonlinear Equalities", counters);
   }
