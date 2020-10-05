@@ -62,14 +62,14 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
   // Use the total size here
   r_.resizeLike(variables_);
   r_dual_aug_.resize(dims_.N);
-  r_.setZero();
-  r_dual_aug_.setZero();
+  //  r_.setZero();
+  //  r_dual_aug_.setZero();
 
   // Space for the output of all variables
   delta_.resizeLike(variables_);
   delta_affine_.resizeLike(variables_);
-  delta_.setZero();
-  delta_affine_.setZero();
+  //  delta_.setZero();
+  //  delta_affine_.setZero();
 
 #if 0
   // To help catch access of un-initialized arrays, set to NaN.
@@ -121,6 +121,7 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
   ComputeInitialGuess(params);
 
   // on the first iteration, the residual needs to be filled first
+  // TODO(gareth): this is superfluous, just get it as the output of Iterate()
   EvaluateKKTConditions();
 
   double mu{params.initialize_mu_with_complementarity ? ComputeMu() : params.initial_mu};

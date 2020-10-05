@@ -43,6 +43,14 @@ struct Problem {
   std::vector<ResidualBase::unique_ptr> equality_constraints;
 };
 
+// Norms that we can place on the equality constraint.
+enum class Norm {
+  // L1 norm/absolute value: |c(x)|
+  L1 = 0,
+  // L2 squared: (1/2) * c(x)^T * c(x)
+  QUADRATIC = 1
+};
+
 /*
  * Solve constrained non-linear least squares problems using SQP.
  *
@@ -81,6 +89,9 @@ struct ConstrainedNonlinearLeastSquares {
 
     // Value by which to decrease alpha for the backtracking line search.
     double armijo_search_tau{0.8};
+
+    // Norm on the equality constraints in the merit function.
+    Norm equality_constraint_norm{Norm::L1};
 
     // Initial lambda value.
     double lambda_initial{0.0};
@@ -136,10 +147,10 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Linearize and fill the QP w/ the problem definition.
   static Errors LinearizeAndFillQP(const Eigen::VectorXd& variables, double lambda,
-                                   const Problem& problem, QP* qp);
+                                   const Norm& equality_norm, const Problem& problem, QP* qp);
 
   // Evaluate the non-linear error.
-  Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars);
+  Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars, const Norm& equality_norm);
 
   // Based on the outcome of the step selection, update lambda and check if
   // we should exit. Returns NONE if no exit is required.
@@ -154,7 +165,7 @@ struct ConstrainedNonlinearLeastSquares {
                                          const Errors& errors_pre,
                                          const DirectionalDerivatives& derivatives, double penalty,
                                          double armijo_c1, const LineSearchStrategy& strategy,
-                                         double backtrack_search_tau);
+                                         double backtrack_search_tau, const Norm& equality_norm);
 
   // Repeatedly approximate the cost function as a polynomial, and find the minimum.
   double ComputeAlphaPolynomialApproximation(int iteration, double alpha, const Errors& errors_pre,
@@ -162,7 +173,12 @@ struct ConstrainedNonlinearLeastSquares {
                                              double penalty) const;
 
   // Compute first derivative of the QP cost function.
-  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const ConstVectorBlock& dx);
+  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const ConstVectorBlock& dx,
+                                                        const Norm& equality_norm);
+
+  // Select a new penalty parameter, depending on norm type.
+  static double SelectPenalty(const Norm& norm_type, const ConstVectorBlock& lagrange_multipliers,
+                              double equality_cost);
 
   // Computes the penalty param for the nonlinear merit function.
   // Implement equation (18.33)
@@ -181,6 +197,12 @@ struct ConstrainedNonlinearLeastSquares {
   // Get the solution of the cubic approximation.
   static double CubicApproxMinimum(double phi_prime_0, const Eigen::Vector2d& ab);
 
+  // Compute the second order correction to the equality constraints.
+  static void ComputeSecondOrderCorrection(
+      const Eigen::VectorXd& updated_x,
+      const std::vector<ResidualBase::unique_ptr>& equality_constraints, QP* qp,
+      Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver, Eigen::VectorXd* dx_out);
+
   const Problem* const p_;
 
   // Custom retraction operator, optional.
@@ -196,6 +218,7 @@ struct ConstrainedNonlinearLeastSquares {
   Eigen::VectorXd variables_;
   Eigen::VectorXd candidate_vars_;
   Eigen::VectorXd prev_variables_;
+  Eigen::VectorXd dx_;
 
   // Storage for computing errors.
   Eigen::VectorXd error_buffer_;

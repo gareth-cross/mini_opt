@@ -34,6 +34,8 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   variables_.resize(p_->dimension);
   candidate_vars_.resizeLike(variables_);
   prev_variables_.resizeLike(variables_);
+  dx_.resizeLike(variables_);
+  dx_.setZero();
 
   // also compute max error size for the soft costs too
   for (const ResidualBase::unique_ptr& cost : p_->costs) {
@@ -74,7 +76,8 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   int num_qp_iters = 0;
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // Fill out the QP and compute current errors.
-    const Errors errors_pre = LinearizeAndFillQP(variables_, lambda, *p_, &qp_);
+    const Errors errors_pre =
+        LinearizeAndFillQP(variables_, lambda, params.equality_constraint_norm, *p_, &qp_);
 
     if (iter == 0 && !qp_.constraints.empty()) {
       // If there are inequality constraints, try initializing by just solving the
@@ -91,32 +94,49 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
-    const auto dx = const_cast<const QPInteriorPointSolver&>(solver_).x_block();
-    const DirectionalDerivatives directional_derivative = ComputeQPCostDerivative(qp_, dx);
+    dx_ = solver_.x_block();
+    const auto dx_block = const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension);
+    const DirectionalDerivatives directional_derivative =
+        ComputeQPCostDerivative(qp_, dx_block, params.equality_constraint_norm);
 
-    // Compute penalty parameter.
-    //    const double new_penalty =
-    //        ComputeEqualityPenalty(directional_derivative.d_f, errors_pre.equality, /* rho = */
-    //        0.5);
-    ////    if (new_penalty > penalty) {
-    ////      penalty = new_penalty * 0.1 + penalty * 0.9;
-    ////    }
-
-    // Equation 18.32, raise the penalty parameter if necessary such that it exceeds the largest
-    // lagrange multiplier. Note that this is not the recommended algorithm in the book, instead
-    // they suggest 18.33. But this seems to work a lot better for me.
+    // Raise the penalty parameter if necessary.
     if (!p_->equality_constraints.empty()) {
-      const double new_penalty = solver_.y_block().lpNorm<Eigen::Infinity>();
+      const double new_penalty = SelectPenalty(
+          params.equality_constraint_norm,
+          const_cast<const QPInteriorPointSolver&>(solver_).y_block(), errors_pre.equality);
       if (new_penalty > penalty) {
-        penalty = new_penalty;
+        penalty = new_penalty * 1.01;
       }
     }
 
-    // Select the step size.
-    const StepSizeSelectionResult step_result =
-        SelectStepSize(params.max_line_search_iterations, params.absolute_first_derivative_tol,
-                       errors_pre, directional_derivative, penalty, 1.0e-4 /* todo: add param */,
-                       params.line_search_strategy, params.armijo_search_tau);
+    // solve for second order correction
+    //    RetractCandidateVars(1.);
+    //
+    //    const auto errs = EvaluateNonlinearErrors(candidate_vars_);
+    //    std::cout << "before = " << errs.equality << std::endl;
+    //
+    //    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> decomp;
+    //    Eigen::VectorXd dx_before = dx_;
+    //    ComputeSecondOrderCorrection(candidate_vars_, p_->equality_constraints, &qp_, &decomp,
+    //    &dx_); std::cout << "wtf " << (dx_ - dx_before).norm() << std::endl;
+    //
+    //    RetractCandidateVars(1.);
+    //    std::cout << "after = " << EvaluateNonlinearErrors(candidate_vars_).equality << std::endl;
+
+    //    StepSizeSelectionResult step_result = SelectStepSize(
+    //        0, params.absolute_first_derivative_tol, errors_pre, directional_derivative, penalty,
+    //        1.0e-4 /* todo: add param */, params.line_search_strategy, params.armijo_search_tau);
+    //    if (step_result != StepSizeSelectionResult::SUCCESS) {
+    //      steps_.clear();
+    //      dx_ = solver_.x_block();  //  reset
+    const StepSizeSelectionResult step_result = SelectStepSize(
+        params.max_line_search_iterations, params.absolute_first_derivative_tol, errors_pre,
+        directional_derivative, penalty, 1.0e-4 /* todo: add param */, params.line_search_strategy,
+        params.armijo_search_tau, params.equality_constraint_norm);
+    //    } else {
+    //      // keep this result
+    //      std::cout << "worked\n";
+    //    }
 
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
@@ -124,7 +144,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, &lambda);
     if (logging_callback_) {
       const NLSLogInfo info{
-          iter,    old_lambda,  errors_pre, qp_outputs, dx, directional_derivative,
+          iter,    old_lambda,  errors_pre, qp_outputs, dx_block, directional_derivative,
           penalty, step_result, steps_,     maybe_exit};
       logging_callback_(*this, info);
     }
@@ -139,15 +159,16 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 void ConstrainedNonlinearLeastSquares::RetractCandidateVars(const double alpha) {
   candidate_vars_ = variables_;
   if (custom_retraction_) {
-    const QPInteriorPointSolver& const_solver = solver_;
-    custom_retraction_(&candidate_vars_, const_solver.x_block(), alpha);
+    custom_retraction_(&candidate_vars_,
+                       const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension), alpha);
   } else {
-    candidate_vars_ += solver_.x_block() * alpha;
+    candidate_vars_ += dx_ * alpha;
   }
 }
 
 Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorXd& variables,
                                                             const double lambda,
+                                                            const Norm& equality_norm,
                                                             const Problem& problem, QP* const qp) {
   ASSERT(qp != nullptr);
   ASSERT(qp->G.rows() == problem.dimension);
@@ -178,7 +199,12 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
     eq->UpdateJacobian(variables, qp->A_eq.middleRows(row, dim), b_seg);
 
     // total L1 norm in the equality constraints
-    output_errors.equality += b_seg.lpNorm<1>();
+    if (equality_norm == Norm::L1) {
+      output_errors.equality += b_seg.lpNorm<1>();
+    } else {
+      ASSERT(equality_norm == Norm::QUADRATIC);
+      output_errors.equality += 0.5 * b_seg.squaredNorm();
+    }
     row += dim;
   }
 
@@ -190,7 +216,8 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   return output_errors;
 }
 
-Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars) {
+Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars,
+                                                                 const Norm& equality_norm) {
   Errors output_errors{};
   for (const ResidualBase::unique_ptr& cost : p_->costs) {
     const auto err_out = error_buffer_.head(cost->Dimension());
@@ -200,7 +227,11 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
   for (const ResidualBase::unique_ptr& eq : p_->equality_constraints) {
     const auto err_out = error_buffer_.head(eq->Dimension());
     eq->ErrorVector(vars, err_out);
-    output_errors.equality += err_out.lpNorm<1>();
+    if (equality_norm == Norm::L1) {
+      output_errors.equality += err_out.lpNorm<1>();
+    } else if (equality_norm == Norm::QUADRATIC) {
+      output_errors.equality += 0.5 * err_out.squaredNorm();
+    }
   }
   return output_errors;
 }
@@ -257,7 +288,8 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
 StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     const int max_iterations, const double abs_first_derivative_tol, const Errors& errors_pre,
     const DirectionalDerivatives& derivatives, const double penalty, const double armijo_c1,
-    const LineSearchStrategy& strategy, const double backtrack_search_tau) {
+    const LineSearchStrategy& strategy, const double backtrack_search_tau,
+    const Norm& equality_norm) {
   steps_.clear();
 
   // compute the directional derivative, w/ the current penalty
@@ -280,7 +312,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     RetractCandidateVars(alpha);
 
     // Compute errors.
-    const Errors errors_step = EvaluateNonlinearErrors(candidate_vars_);
+    const Errors errors_step = EvaluateNonlinearErrors(candidate_vars_, equality_norm);
     steps_.emplace_back(alpha, errors_step);
 
     if (std::abs(directional_derivative) < abs_first_derivative_tol) {
@@ -351,7 +383,7 @@ static T Sign(T x) {
 }
 
 DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(
-    const QP& qp, const ConstVectorBlock& dx) {
+    const QP& qp, const ConstVectorBlock& dx, const Norm& equality_norm) {
   // We want the first derivative of the cost function, evaluated at the current linearization
   // point.
   //  d( 0.5 * h(x + dx * alpha)^T * h(x + dx * alpha) ) =
@@ -367,11 +399,39 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
   // Now we do the equality constraints, which for now have an L1 norm:
   //    d|c(x + alpha * dx)|/dalpha = d|v|/dv * dc(x)/dx * dx
   // Where d|v|/dv evaluates to the sign of each element.
-  for (int i = 0; i < qp.A_eq.rows(); ++i) {
-    const double sign_ci = Sign(qp.b_eq[i]);
-    out.d_equality += sign_ci * qp.A_eq.row(i).dot(dx);
+  if (equality_norm == Norm::L1) {
+    for (int i = 0; i < qp.A_eq.rows(); ++i) {
+      const double sign_ci = Sign(qp.b_eq[i]);
+      out.d_equality += sign_ci * qp.A_eq.row(i).dot(dx);
+    }
+  } else {
+    ASSERT(equality_norm == Norm::QUADRATIC, "No other norm supported");
+    // Simple L2 squared cost.
+    for (int i = 0; i < qp.A_eq.rows(); ++i) {
+      out.d_equality += qp.b_eq[i] * qp.A_eq.row(i).dot(dx);
+    }
   }
   return out;
+}
+
+double ConstrainedNonlinearLeastSquares::SelectPenalty(const Norm& norm_type,
+                                                       const ConstVectorBlock& lagrange_multipliers,
+                                                       double equality_cost) {
+  if (norm_type == Norm::L1) {
+    // Equation 18.32. Note that this is not the recommended algorithm in the book, instead
+    // they suggest 18.33. But this seems to work better for me.
+    return lagrange_multipliers.lpNorm<Eigen::Infinity>();
+  } else {
+    ASSERT(norm_type == Norm::QUADRATIC);
+    // See: http://www.numerical.rl.ac.uk/people/nimg/oumsc/lectures/part5.2.pdf
+    const double l2_eq = std::sqrt(equality_cost);
+    if (l2_eq == 0) {
+      // If the cost is zero, the penalty will be multiplied by zero.
+      return 0;
+    }
+    // Ratio of the two L2 norms (non quadratic).
+    return lagrange_multipliers.norm() / l2_eq;
+  }
 }
 
 // Equation (18.33)
@@ -450,6 +510,29 @@ double ConstrainedNonlinearLeastSquares::CubicApproxMinimum(const double phi_pri
   ASSERT(arg_sqrt >= kNegativeTol, "This term must be positive: a=%f, b=%f, phi_prime_0=%f", ab[0],
          ab[1], phi_prime_0);
   return (std::sqrt(std::max(arg_sqrt, 0.)) - ab[1]) / (3 * ab[0]);
+}
+
+// These objects are passed as arguments to a static function for ease of testing this method.
+void ConstrainedNonlinearLeastSquares::ComputeSecondOrderCorrection(
+    const Eigen::VectorXd& updated_x,
+    const std::vector<ResidualBase::unique_ptr>& equality_constraints, QP* qp,
+    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver, Eigen::VectorXd* dx_out) {
+  ASSERT(qp);
+  ASSERT(solver);
+  ASSERT(dx_out);
+
+  // we use the QP `b` vector as storage for this operation
+  int row = 0;
+  for (const ResidualBase::unique_ptr& eq : equality_constraints) {
+    const int dim = eq->Dimension();
+    ASSERT(row + dim <= qp->b_eq.rows(), "Insufficient rows in vector b");
+    eq->ErrorVector(updated_x, qp->b_eq.segment(row, dim));
+    row += dim;
+  }
+
+  // compute the pseudo-inverse
+  solver->compute(qp->A_eq);
+  dx_out->noalias() -= solver->solve(qp->b_eq);
 }
 
 }  // namespace mini_opt
