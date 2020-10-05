@@ -753,18 +753,25 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
   }
 
-  static void SummarizeIterationCounts(const std::string& name, const std::vector<int>& counts) {
-    ASSERT_GT(counts.size(), 0);
-    // lazy man's median
-    std::vector<int> sorted = counts;
-    std::sort(sorted.begin(), sorted.end());
-    const int total = std::accumulate(sorted.begin(), sorted.end(), 0);
-    std::cout << "Iteration counts for [" << name << "]:\n"
-              << "  Mean: " << total / static_cast<double>(counts.size()) << "\n"
-              << "  Median: " << counts[counts.size() / 2] << "\n"
-              << "  Max: " << counts.back() << "\n"
-              << "  Min: " << counts.front() << "\n"
-              << "  95 percentile: " << counts[(counts.size() * 95) / 100] << "\n";
+  static void SummarizeCounts(const std::string& name, const std::vector<StatCounters>& counters) {
+    ASSERT_GT(counters.size(), 0);
+    // get all the stats and dump them
+    for (const StatCounters::Stats& v :
+         {StatCounters::NUM_NLS_ITERATIONS, StatCounters::NUM_QP_ITERATIONS,
+          StatCounters::NUM_FAILED_LINE_SEARCHES}) {
+      std::vector<int> sorted;
+      std::transform(
+          counters.begin(), counters.end(), std::back_inserter(sorted),
+          [&](const StatCounters& c) { return (c.counts.count(v) > 0) ? c.counts.at(v) : 0; });
+      std::sort(sorted.begin(), sorted.end());
+      const auto total = std::accumulate(sorted.begin(), sorted.end(), 0);
+      std::cout << "Iteration counts for [" << name << "], " << v << ":\n"
+                << "  Mean: " << total / static_cast<double>(sorted.size()) << "\n"
+                << "  Median: " << sorted[sorted.size() / 2] << "\n"
+                << "  Max: " << sorted.back() << "\n"
+                << "  Min: " << sorted.front() << "\n"
+                << "  95 percentile: " << sorted[(sorted.size() * 95) / 100] << "\n";
+    }
   }
 
   // Test a simple non-linear least squares problem.
@@ -833,7 +840,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.absolute_first_derivative_tol = 1.0e-10;
     p.termination_kkt_tolerance = tol::kMicro;
     p.max_line_search_iterations = 10;
-    p.line_search_strategy = LineSearchStrategy::POLYNOMIAL_APPROXIMATION;
+    p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
     p.equality_constraint_norm = Norm::L1;
 
     // We add some non-zero lambda because this problem technically does not have
@@ -850,8 +857,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
     }
 
-    std::vector<int> iteration_counts;
-    std::vector<int> qp_iteration_counts;
+    std::vector<StatCounters> counters;
     for (const auto& guess : initial_guesses) {
       Logger logger{true, true};
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
@@ -869,7 +875,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      iteration_counts.push_back(outputs.num_iterations);
+      counters.push_back(logger.counters());
 
       // check that we reached the desired position
       const VectorXd& angles_out = nls.variables();
@@ -880,7 +886,7 @@ class ConstrainedNLSTest : public ::testing::Test {
           << "\nSummary:\n"
           << logger.GetString();
     }
-    SummarizeIterationCounts("Only Equality Constrained (NLS)", iteration_counts);
+    SummarizeCounts("Only Equality Constrained (NLS)", counters);
 
     // Now add an inequality constraint and solve it again.
     // force angle 1 to be positive.
@@ -899,9 +905,8 @@ class ConstrainedNLSTest : public ::testing::Test {
     nls.SetLoggingCallback(nullptr);
     nls.SetQPLoggingCallback(nullptr);
 
-    iteration_counts.clear();
-    qp_iteration_counts.clear();
     int counter = 0;
+    counters.clear();
     for (const auto& guess : initial_guesses) {
       Logger logger{true, true};
 
@@ -939,8 +944,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       dump_pos(guess, Vector2d::Zero(), Vector2d::Zero());
 
-      //      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3,
-      //      _4));
+      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
       nls.SetLoggingCallback([&](const ConstrainedNonlinearLeastSquares& solver,
                                  const NLSLogInfo& info) {
         logger.NonlinearSolverCallback(solver, info);
@@ -957,8 +961,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      iteration_counts.push_back(outputs.num_iterations);
-      qp_iteration_counts.push_back(outputs.num_qp_iterations);
+      counters.push_back(logger.counters());
       //
       //      MatrixXd cost(900, 900);
       //      for (int i = 0; i < 900; ++i) {
@@ -993,8 +996,7 @@ class ConstrainedNLSTest : public ::testing::Test {
           << logger.GetString();
       counter++;
     }
-    SummarizeIterationCounts("Inequality constrained (NLS)", iteration_counts);
-    SummarizeIterationCounts("Inequality constrained (QP)", qp_iteration_counts);
+    SummarizeCounts("Inequality constrained (NLS)", counters);
   }
 };
 

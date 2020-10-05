@@ -30,8 +30,37 @@ std::ostream& operator<<(std::ostream& stream, const Color& c) {
   return stream;
 }
 
+StatCounters StatCounters::operator+(const StatCounters& c) {
+  StatCounters out = *this;
+  out += c;
+  return out;
+}
+
+StatCounters& StatCounters::operator+=(const StatCounters& c) {
+  for (const auto& pair : c.counts) {
+    counts[pair.first] += pair.second;
+  }
+  return *this;
+}
+
+std::ostream& operator<<(std::ostream& s, const StatCounters::Stats& val) {
+  switch (val) {
+    case StatCounters::NUM_FAILED_LINE_SEARCHES:
+      s << "NUM_FAILED_LINE_SEARCHES";
+      break;
+    case StatCounters::NUM_NLS_ITERATIONS:
+      s << "NUM_NLS_ITERATIONS";
+      break;
+    case StatCounters::NUM_QP_ITERATIONS:
+      s << "NUM_QP_ITERATIONS";
+      break;
+  }
+  return s;
+}
+
 void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
                               const KKTError& kkt_after, const IPIterationOutputs& outputs) {
+  counters_.counts[StatCounters::NUM_QP_ITERATIONS]++;
   stream_ << "Iteration summary: ";
   stream_ << "||kkt|| max: " << kkt_prev.Max() << " --> " << kkt_after.Max()
           << ", mu = " << outputs.mu << ", a_p = " << outputs.alpha.primal
@@ -76,6 +105,7 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
 
 void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
                                      const NLSLogInfo& info) {
+  counters_.counts[StatCounters::NUM_NLS_ITERATIONS]++;
   if (info.termination_state != NLSTerminationState::MAX_LAMBDA &&
       info.termination_state != NLSTerminationState::MAX_ITERATIONS) {
     stream_ << Color(GREEN);
@@ -95,6 +125,9 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
   if (info.step_result == StepSizeSelectionResult::SUCCESS) {
     stream_ << Color(GREEN);
   } else {
+    if (info.step_result != StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED) {
+      counters_.counts[StatCounters::NUM_FAILED_LINE_SEARCHES]++;
+    }
     stream_ << Color(RED);
   }
   stream_ << "  Search result: " << info.step_result << "\n" << Color(NO_COLOR);

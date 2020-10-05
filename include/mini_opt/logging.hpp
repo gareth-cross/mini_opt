@@ -1,10 +1,28 @@
 // Copyright 2020 Gareth Cross
 #pragma once
+#include <map>
 #include <sstream>
 
 #include "mini_opt/structs.hpp"
 
 namespace mini_opt {
+
+// Accumulate counts for testing.
+struct StatCounters {
+  enum Stats : int32_t {
+    NUM_NLS_ITERATIONS = 0,
+    NUM_QP_ITERATIONS,
+    NUM_FAILED_LINE_SEARCHES,
+  };
+
+  // All the counts.
+  std::map<StatCounters::Stats, int> counts;
+
+  StatCounters operator+(const StatCounters& c);
+  StatCounters& operator+=(const StatCounters& c);
+};
+
+std::ostream& operator<<(std::ostream& s, const StatCounters::Stats& val);
 
 /**
  * For use primarily in tests. Logger receives callbacks w/ iteration info
@@ -29,10 +47,14 @@ struct Logger {
   // Access the stream.
   std::stringstream& stream() { return stream_; }
 
+  // Get the counters.
+  StatCounters counters() const { return counters_; }
+
  private:
   const bool print_qp_variables_;
   const bool print_nonlinear_variables_;
   std::stringstream stream_;
+  StatCounters counters_{};
 };
 
 }  // namespace mini_opt
