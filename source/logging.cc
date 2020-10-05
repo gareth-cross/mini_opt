@@ -54,6 +54,9 @@ std::ostream& operator<<(std::ostream& s, const StatCounters::Stats& val) {
     case StatCounters::NUM_QP_ITERATIONS:
       s << "NUM_QP_ITERATIONS";
       break;
+    case StatCounters::NUM_LINE_SEARCH_STEPS:
+      s << "NUM_LINE_SEARCH_STEPS";
+      break;
   }
   return s;
 }
@@ -106,6 +109,7 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
 void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
                                      const NLSLogInfo& info) {
   counters_.counts[StatCounters::NUM_NLS_ITERATIONS]++;
+  counters_.counts[StatCounters::NUM_LINE_SEARCH_STEPS] += info.steps.size();
   if (info.termination_state != NLSTerminationState::MAX_LAMBDA &&
       info.termination_state != NLSTerminationState::MAX_ITERATIONS) {
     stream_ << Color(GREEN);
@@ -141,8 +145,9 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
   }
   // print extra details
   if (print_nonlinear_variables_) {
-    stream_ << "  Variables post update:\n";
-    stream_ << "    x = " << solver.variables().transpose().format(kMatrixFmt) << "\n";
+    stream_ << "  Variables:\n";
+    stream_ << "    x_old = " << solver.previous_variables().transpose().format(kMatrixFmt) << "\n";
+    stream_ << "    x_new = " << solver.variables().transpose().format(kMatrixFmt) << "\n";
   }
 }
 

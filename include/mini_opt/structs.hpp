@@ -100,7 +100,11 @@ struct Errors {
   // Error in the non-linear equality constraints.
   double equality{0};
 
+  // Total weighted cost function.
   double Total(double penalty) const { return f + penalty * equality; }
+
+  // L-infinity norm
+  double LInfinity() const { return std::max(f, equality); }
 };
 
 // Derivatives of `Errors`.
@@ -111,6 +115,9 @@ struct DirectionalDerivatives {
   double d_equality;
 
   double Total(double penalty) const { return d_f + penalty * d_equality; }
+
+  // L-infinity norm
+  double LInfinity() const { return std::max(std::abs(d_f), std::abs(d_equality)); }
 };
 
 // Pair together a step size and the error achieved.

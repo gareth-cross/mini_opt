@@ -13,6 +13,7 @@ struct StatCounters {
     NUM_NLS_ITERATIONS = 0,
     NUM_QP_ITERATIONS,
     NUM_FAILED_LINE_SEARCHES,
+    NUM_LINE_SEARCH_STEPS,
   };
 
   // All the counts.

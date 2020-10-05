@@ -266,6 +266,28 @@ class ConstrainedNLSTest : public ::testing::Test {
               eq.function(x_lin + dx_in + dx_out, nullptr).norm());
   }
 
+  static void SummarizeCounts(const std::string& name, const std::vector<StatCounters>& counters) {
+    ASSERT_GT(counters.size(), 0);
+    // get all the stats and dump them
+    std::cout << "Stats from " << counters.size() << " trials.\n";
+    for (const StatCounters::Stats& v :
+         {StatCounters::NUM_NLS_ITERATIONS, StatCounters::NUM_QP_ITERATIONS,
+          StatCounters::NUM_FAILED_LINE_SEARCHES, StatCounters::NUM_LINE_SEARCH_STEPS}) {
+      std::vector<int> sorted;
+      std::transform(
+          counters.begin(), counters.end(), std::back_inserter(sorted),
+          [&](const StatCounters& c) { return (c.counts.count(v) > 0) ? c.counts.at(v) : 0; });
+      std::sort(sorted.begin(), sorted.end());
+      const auto total = std::accumulate(sorted.begin(), sorted.end(), 0);
+      std::cout << "Iteration counts for [" << name << "], " << v << ":\n"
+                << "  Mean: " << total / static_cast<double>(sorted.size()) << "\n"
+                << "  Median: " << sorted[sorted.size() / 2] << "\n"
+                << "  Max: " << sorted.back() << "\n"
+                << "  Min: " << sorted.front() << "\n"
+                << "  95 percentile: " << sorted[(sorted.size() * 95) / 100] << "\n";
+    }
+  }
+
   static Vector2d Rosenbrock(const Vector2d& params, Matrix2d* const J_out = nullptr) {
     constexpr double a = 1.0;
     constexpr double b = 100.0;
@@ -389,6 +411,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     // The last three are actually infeasible to begin with.
     const AlignedVector<Vector2d> initial_guesses = {
         {12, -5}, {100.0, -20.0}, {1423.0, -400.0}, {-20.0, 10.0}, {-120.0, 35.0}, {-50.0, 0.5}};
+    std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
       Logger logger{false, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
@@ -396,6 +419,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
+      counters.push_back(logger.counters());
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -410,6 +434,7 @@ class ConstrainedNLSTest : public ::testing::Test {
           << "\nSummary:\n"
           << logger.GetString();
     }
+    SummarizeCounts("Rosenbrock 2D", counters);
   }
 
   static Matrix<double, 10, 1> Rosenbrock6D(const Matrix<double, 6, 1>& params,
@@ -469,6 +494,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     const Vector6 solution =
         (Vector6() << 2.3, -1.2, 3.0, -2.5, 6.19802, std::pow(6.19802, 2)).finished();
 
+    std::vector<StatCounters> counters;
     for (const Vector6& guess : {guess0, guess1}) {
       Logger logger{false, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
@@ -476,9 +502,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-
-      PRINT(outputs.num_iterations);
-      PRINT(outputs.num_qp_iterations);
+      counters.push_back(logger.counters());
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -494,6 +518,7 @@ class ConstrainedNLSTest : public ::testing::Test {
           << "\nSummary:\n"
           << logger.GetString();
     }
+    SummarizeCounts("Rosenbrock 6D", counters);
   }
 
   // For testing, break the Himmelblau function up into two parts.
@@ -558,8 +583,8 @@ class ConstrainedNLSTest : public ::testing::Test {
         initial_guesses.emplace_back(x, y);
       }
     }
-    PRINT(initial_guesses.size());
 
+    std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
       Logger logger{false, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
@@ -567,6 +592,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
+      counters.push_back(logger.counters());
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -587,6 +613,7 @@ class ConstrainedNLSTest : public ::testing::Test {
           << "\nSummary:\n"
           << logger.GetString();
     }
+    SummarizeCounts("Himmelblau", counters);
   }
 
   // Himmelblau but constrained to one global optimum.
@@ -620,8 +647,8 @@ class ConstrainedNLSTest : public ::testing::Test {
         initial_guesses.emplace_back(x, y);
       }
     }
-    PRINT(initial_guesses.size());
 
+    std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
       Logger logger{false, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
@@ -629,6 +656,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
+      counters.push_back(logger.counters());
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -644,6 +672,7 @@ class ConstrainedNLSTest : public ::testing::Test {
           << "\nSummary:\n"
           << logger.GetString();
     }
+    SummarizeCounts("Himmelblau Quadrant Inequality Constrained", counters);
   }
 
   template <int N>
@@ -688,10 +717,10 @@ class ConstrainedNLSTest : public ::testing::Test {
     // add a nonlinear equality constraint
     ConstrainedNonlinearLeastSquares nls(&problem);
     ConstrainedNonlinearLeastSquares::Params p{};
-    p.max_iterations = 45;
+    p.max_iterations = 100;
     p.max_qp_iterations = 1;  //  no inequalities, should be solved in a single step
     p.relative_exit_tol = tol::kPico;
-    p.absolute_first_derivative_tol = tol::kPico;
+    p.absolute_first_derivative_tol = tol::kNano;
     p.termination_kkt_tolerance = tol::kMicro;
 
     // We can speed up convergence by adding some non-zero value to the diagonal of the hessian.
@@ -723,13 +752,15 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
     }
 
+    std::vector<StatCounters> counters;
     for (const auto& guess : guesses) {
-      Logger logger{false, true};
+      Logger logger{true, true};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
+      counters.push_back(logger.counters());
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -746,32 +777,15 @@ class ConstrainedNLSTest : public ::testing::Test {
             return (a - nls.variables()).squaredNorm() < (b - nls.variables()).squaredNorm();
           });
 
-      ASSERT_EIGEN_NEAR(*min_it, nls.variables(), tol::kMicro * 10)
+      ASSERT_EIGEN_NEAR(*min_it, nls.variables(), 5.0e-5)
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
-    }
-  }
 
-  static void SummarizeCounts(const std::string& name, const std::vector<StatCounters>& counters) {
-    ASSERT_GT(counters.size(), 0);
-    // get all the stats and dump them
-    for (const StatCounters::Stats& v :
-         {StatCounters::NUM_NLS_ITERATIONS, StatCounters::NUM_QP_ITERATIONS,
-          StatCounters::NUM_FAILED_LINE_SEARCHES}) {
-      std::vector<int> sorted;
-      std::transform(
-          counters.begin(), counters.end(), std::back_inserter(sorted),
-          [&](const StatCounters& c) { return (c.counts.count(v) > 0) ? c.counts.at(v) : 0; });
-      std::sort(sorted.begin(), sorted.end());
-      const auto total = std::accumulate(sorted.begin(), sorted.end(), 0);
-      std::cout << "Iteration counts for [" << name << "], " << v << ":\n"
-                << "  Mean: " << total / static_cast<double>(sorted.size()) << "\n"
-                << "  Median: " << sorted[sorted.size() / 2] << "\n"
-                << "  Max: " << sorted.back() << "\n"
-                << "  Min: " << sorted.front() << "\n"
-                << "  95 percentile: " << sorted[(sorted.size() * 95) / 100] << "\n";
+      ASSERT_EQ(logger.counters().counts[StatCounters::NUM_FAILED_LINE_SEARCHES], 0)
+          << logger.GetString();
     }
+    SummarizeCounts("Sphere With Nonlinear Equalities", counters);
   }
 
   // Test a simple non-linear least squares problem.
@@ -852,7 +866,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     // generate a bunch of initial guesses
     AlignedVector<Vector2d> initial_guesses;
-    for (double theta0 = 0.0; theta0 <= M_PI / 2; theta0 += 0.1) {
+    for (double theta0 = tol::kDeci; theta0 <= M_PI / 2; theta0 += 0.1) {
       for (double theta1 = -M_PI / 3; theta1 <= M_PI / 3; theta1 += 0.1) {
         initial_guesses.emplace_back(theta0, theta1);
       }
@@ -865,7 +879,6 @@ class ConstrainedNLSTest : public ::testing::Test {
       nls.SetLoggingCallback(
           [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
             logger.NonlinearSolverCallback(solver, info);
-            chain->ComputeEffectorPosition(solver.previous_variables());
             logger.stream() << "  Effector: "
                             << chain->ComputeEffectorPosition(solver.variables())
                                    .head(2)
@@ -894,7 +907,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     problem.inequality_constraints.push_back(Var(1) >= 0);
     problem.inequality_constraints.push_back(Var(1) <= M_PI);
     initial_guesses.clear();
-    for (double theta0 = 0.0; theta0 <= M_PI / 2; theta0 += 0.1) {
+    for (double theta0 = tol::kDeci; theta0 <= M_PI / 2; theta0 += 0.1) {
       for (double theta1 = tol::kMilli; theta1 <= M_PI / 2 - tol::kMilli; theta1 += 0.1) {
         initial_guesses.emplace_back(theta0, theta1);
       }

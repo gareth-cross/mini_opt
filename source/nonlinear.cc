@@ -2,6 +2,7 @@
 #include "mini_opt/nonlinear.hpp"
 
 #include <Eigen/Dense>  //  for inverse()
+#include <iomanip>
 #include <iostream>
 #include <utility>
 
@@ -133,10 +134,6 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
         params.max_line_search_iterations, params.absolute_first_derivative_tol, errors_pre,
         directional_derivative, penalty, 1.0e-4 /* todo: add param */, params.line_search_strategy,
         params.armijo_search_tau, params.equality_constraint_norm);
-    //    } else {
-    //      // keep this result
-    //      std::cout << "worked\n";
-    //    }
 
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
@@ -250,12 +247,11 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
 
     // Check termination criteria.
     const LineSearchStep& final_step = steps_.back();
-    if (final_step.errors.Total(penalty) < params.absolute_exit_tol) {
+    if (final_step.errors.LInfinity() < params.absolute_exit_tol) {
       // Satisfied absolute tolerance, exit.
       return NLSTerminationState::SATISFIED_ABSOLUTE_TOL;
     } else if (final_step.errors.Total(penalty) >
                initial_errors.Total(penalty) * (1 - params.relative_exit_tol)) {
-      // todo: check if this works correctly w/ the penalty?
       return NLSTerminationState::SATISFIED_RELATIVE_TOL;
     }
   } else if (step_result == StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED) {
@@ -315,7 +311,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     const Errors errors_step = EvaluateNonlinearErrors(candidate_vars_, equality_norm);
     steps_.emplace_back(alpha, errors_step);
 
-    if (std::abs(directional_derivative) < abs_first_derivative_tol) {
+    if (derivatives.LInfinity() < abs_first_derivative_tol) {
       // at a stationary point
       return StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED;
     } else if (directional_derivative > 0) {
