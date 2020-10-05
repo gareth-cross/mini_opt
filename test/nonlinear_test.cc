@@ -842,6 +842,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.max_line_search_iterations = 10;
     p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
     p.equality_constraint_norm = Norm::L1;
+    p.lambda_failure_init = 0.001;
 
     // We add some non-zero lambda because this problem technically does not have
     // a positive semi-definite hessian (since there is only one nonlinear cost
@@ -905,44 +906,9 @@ class ConstrainedNLSTest : public ::testing::Test {
     nls.SetLoggingCallback(nullptr);
     nls.SetQPLoggingCallback(nullptr);
 
-    int counter = 0;
     counters.clear();
     for (const auto& guess : initial_guesses) {
       Logger logger{true, true};
-
-      char fuck[1000];
-      sprintf(fuck, "%05i", counter++);
-
-      std::ofstream output("/home/gareth/outputs/" + std::string(fuck) + ".csv");
-
-      std::ofstream output_pos("/home/gareth/outputs/" + std::string(fuck) + "_pos.csv");
-
-      const auto dump_pos = [&](const Eigen::VectorXd& x, const VectorXd& step_x,
-                                const Eigen::VectorXd& step) {
-        chain->ComputeEffectorPosition(x);
-        const auto poses = ComputeAllPoses(chain->chain_buffer_);
-        for (int i = 0; i < poses.size(); ++i) {
-          output << poses[i].translation.x() << ", " << poses[i].translation.y() << ", "
-                 << poses[i].translation.z() << ", ";
-        }
-
-        chain->ComputeEffectorPosition(x + step);
-        const auto poses2 = ComputeAllPoses(chain->chain_buffer_);
-        for (int i = 0; i < poses2.size(); ++i) {
-          output << poses2[i].translation.x() << ", " << poses2[i].translation.y() << ", "
-                 << poses2[i].translation.z() << ", ";
-        }
-
-        Matrix<double, 3, Dynamic> J(3, 2);
-        chain->ComputeEffectorPosition(step_x, &J);
-
-        const Vector2d delta = (J * step).head<2>();
-        output << delta.x() << ", " << delta.y();
-        output << "\n";
-        output.flush();
-      };
-
-      dump_pos(guess, Vector2d::Zero(), Vector2d::Zero());
 
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
       nls.SetLoggingCallback([&](const ConstrainedNonlinearLeastSquares& solver,
@@ -950,51 +916,20 @@ class ConstrainedNLSTest : public ::testing::Test {
         logger.NonlinearSolverCallback(solver, info);
         logger.stream() << "    dx = " << info.dx.transpose().format(test_utils::kNumPyMatrixFmt)
                         << std::endl;
-
-        output_pos << (solver.previous_variables()[0] + M_PI) / (2 * M_PI) * 900 << ", "
-                   << (solver.previous_variables()[1] / M_PI * 900) << ", "
-                   << (solver.dx_[0] / (2 * M_PI) * 900) << ", " << solver.dx_[1] / M_PI * 900
-                   << "\n";
-
-        dump_pos(solver.variables(), solver.previous_variables(), solver.solver_.x_block());
       });
 
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
       counters.push_back(logger.counters());
-      //
-      //      MatrixXd cost(900, 900);
-      //      for (int i = 0; i < 900; ++i) {
-      //        for (int j = 0; j < 900; ++j) {
-      //          const double theta0 = i / 900.0 * 2 * M_PI - M_PI;
-      //          const double theta1 = j / 900.0 * M_PI;
-      //
-      //          const auto pos = chain->ComputeEffectorPosition(Vector2d(theta0, theta1));
-      //
-      //          cost(i, j) = 0.5 * std::pow(pos.y() - 0.6, 2) + 259 * std::pow(pos.x() - 0.45, 2);
-      //        }
-      //      }
-      //
-      //      std::ofstream output2("/home/gareth/outputs/" + std::string(fuck) + "_costs.csv");
-      //      for (int i = 0; i < 900; ++i) {
-      //        for (int j = 0; j < 900; ++j) {
-      //          output2 << cost(i, j);
-      //          if (j < 900 - 1) {
-      //            output2 << ",";
-      //          }
-      //        }
-      //        output2 << "\n";
-      //      }
 
       // check that we reached the desired position
       const VectorXd& angles_out = nls.variables();
       ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->ComputeEffectorPosition(angles_out).head(2),
-                        tol::kMilli)
+                        5.0e-5)
           << "Termination: " << outputs.termination_state << "\n"
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
-      counter++;
     }
     SummarizeCounts("Inequality constrained (NLS)", counters);
   }
