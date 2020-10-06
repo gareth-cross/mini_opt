@@ -226,6 +226,9 @@ struct ConstrainedNonlinearLeastSquares {
   // Buffer for line search steps
   std::vector<LineSearchStep> steps_;
 
+  // Storage for QP intermediates.
+  Eigen::VectorXd cached_qp_states_;
+
   // Logging callback.
   LoggingCallback logging_callback_{};
 

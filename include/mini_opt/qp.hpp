@@ -122,6 +122,10 @@ struct QPInteriorPointSolver {
     // If max(||kkt||) < termination_kkt_tol, we terminate optimization (L2 norm).
     double termination_kkt_tol{1.0e-9};
 
+    // Tolerance on the complementarity condition required to terminate.
+    // If (s^T * z) / M <= tol, we can exit (provided KKT tol is also met).
+    double termination_complementarity_tol{1.0e-6};
+
     // Max # of iterations.
     int max_iterations{10};
 
@@ -177,6 +181,12 @@ struct QPInteriorPointSolver {
   VectorBlock s_block();
   VectorBlock y_block();
   VectorBlock z_block();
+
+  // Access all variables.
+  const Eigen::VectorXd& variables() const;
+
+  // Set variables.
+  void SetVariables(const Eigen::VectorXd& v);
 
   // Type for a callback that we call after each iteration, used for logging stats, tests.
   using LoggingCallback =

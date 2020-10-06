@@ -62,14 +62,10 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
   // Use the total size here
   r_.resizeLike(variables_);
   r_dual_aug_.resize(dims_.N);
-  //  r_.setZero();
-  //  r_dual_aug_.setZero();
 
   // Space for the output of all variables
   delta_.resizeLike(variables_);
   delta_affine_.resizeLike(variables_);
-  //  delta_.setZero();
-  //  delta_affine_.setZero();
 
 #if 0
   // To help catch access of un-initialized arrays, set to NaN.
@@ -143,7 +139,8 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
                        iteration_outputs);
     }
 
-    if (kkt_after.Max() < params.termination_kkt_tol) {
+    if (kkt_after.Max() < params.termination_kkt_tol &&
+        ComputeMu() < params.termination_complementarity_tol) {
       // error is low enough, stop
       return QPSolverOutputs(QPTerminationState::SATISFIED_KKT_TOL, iter + 1);
     }
@@ -227,6 +224,10 @@ VectorBlock QPInteriorPointSolver::s_block() { return SBlock(dims_, variables_);
 VectorBlock QPInteriorPointSolver::y_block() { return YBlock(dims_, variables_); }
 
 VectorBlock QPInteriorPointSolver::z_block() { return ZBlock(dims_, variables_); }
+
+const Eigen::VectorXd& QPInteriorPointSolver::variables() const { return variables_; }
+
+void QPInteriorPointSolver::SetVariables(const Eigen::VectorXd& v) { variables_ = v; }
 
 const QP& QPInteriorPointSolver::problem() const {
   ASSERT(p_, "Cannot call unless initialized");
@@ -450,6 +451,10 @@ KKTError QPInteriorPointSolver::ComputeErrors(const double mu) const {
 }
 
 void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
+  if (params.initial_guess_method == InitialGuessMethod::USER_PROVIDED) {
+    return;
+  }
+
   // Initialize to zero.
   XBlock(dims_, variables_).setZero();
   YBlock(dims_, variables_).setZero();
@@ -485,7 +490,7 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
     // TODO(gareth): This value for z is a totally made up heuristic. I set it this way so
     // the norm of |r_comp| = 0 initially for mu=1. This produces implausibly huge values for
     // the lagrange multipliers, in turn making |r_dual| huge. It does non-trivially accelerate
-    // convergence on my toy problem. Maybe it has to do w/ Z being identity on iteration 0?
+    // convergence on my toy problem. Maybe it has to do w/ \Sigma being identity on iteration 0?
     z[i] = 1.0 / s[i];
   }
 }

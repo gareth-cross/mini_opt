@@ -31,6 +31,8 @@ enum class InitialGuessMethod {
   NAIVE = 0,
   // Solve the equality constrained problem, then clamp to the feasible region.
   SOLVE_EQUALITY_CONSTRAINED,
+  // Do nothing, we expect the variables to be initialized externally.
+  USER_PROVIDED,
 };
 
 struct AlphaValues {

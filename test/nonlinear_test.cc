@@ -856,6 +856,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
     p.equality_constraint_norm = Norm::L1;
     p.lambda_failure_init = 0.001;
+    p.armijo_search_tau = 0.5;  //  backtrack more aggressively
 
     // We add some non-zero lambda because this problem technically does not have
     // a positive semi-definite hessian (since there is only one nonlinear cost
@@ -937,7 +938,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       // check that we reached the desired position
       const VectorXd& angles_out = nls.variables();
       ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->ComputeEffectorPosition(angles_out).head(2),
-                        5.0e-5)
+                        tol::kMilli)
           << "Termination: " << outputs.termination_state << "\n"
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"

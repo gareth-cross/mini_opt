@@ -62,6 +62,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   CheckParams(params);
   variables_ = variables;
   prev_variables_ = variables;
+  bool has_cached_qp_state{false};
 
   // Set up params, TODO(gareth): Tune this better.
   QPInteriorPointSolver::Params qp_params{};
@@ -80,16 +81,31 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const Errors errors_pre =
         LinearizeAndFillQP(variables_, lambda, params.equality_constraint_norm, *p_, &qp_);
 
-    if (iter == 0 && !qp_.constraints.empty()) {
+    if (iter == 0 || !has_cached_qp_state) {
       // If there are inequality constraints, try initializing by just solving the
       // equality constrained quadratic problem.
-      qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
+      if (!qp_.constraints.empty()) {
+        qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
+      } else {
+        qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
+      }
     } else {
-      qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
+      // We'll use our initial guess from the previous iteration.
+      // This seems to produce a 2-3x reduction in # of QP iterations.
+      qp_params.initial_guess_method = InitialGuessMethod::USER_PROVIDED;
+      qp_params.initialize_mu_with_complementarity = true;
+      // Reduce the barrier more aggressively. This seems to make a small reduction in
+      // number of iterations, but needs more testing.
+      qp_params.sigma = 0.05;
     }
 
     // Solve the QP.
     solver_.Setup(&qp_);
+    if (has_cached_qp_state) {
+      solver_.SetVariables(cached_qp_states_);
+      solver_.x_block().setZero();
+    }
+
     const QPSolverOutputs qp_outputs = solver_.Solve(qp_params);
     num_qp_iters += qp_outputs.num_iterations;
 
@@ -110,30 +126,17 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
       }
     }
 
-    // solve for second order correction
-    //    RetractCandidateVars(1.);
-    //
-    //    const auto errs = EvaluateNonlinearErrors(candidate_vars_);
-    //    std::cout << "before = " << errs.equality << std::endl;
-    //
-    //    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd> decomp;
-    //    Eigen::VectorXd dx_before = dx_;
-    //    ComputeSecondOrderCorrection(candidate_vars_, p_->equality_constraints, &qp_, &decomp,
-    //    &dx_); std::cout << "wtf " << (dx_ - dx_before).norm() << std::endl;
-    //
-    //    RetractCandidateVars(1.);
-    //    std::cout << "after = " << EvaluateNonlinearErrors(candidate_vars_).equality << std::endl;
-
-    //    StepSizeSelectionResult step_result = SelectStepSize(
-    //        0, params.absolute_first_derivative_tol, errors_pre, directional_derivative, penalty,
-    //        1.0e-4 /* todo: add param */, params.line_search_strategy, params.armijo_search_tau);
-    //    if (step_result != StepSizeSelectionResult::SUCCESS) {
-    //      steps_.clear();
-    //      dx_ = solver_.x_block();  //  reset
+    // Do line search.
     const StepSizeSelectionResult step_result = SelectStepSize(
         params.max_line_search_iterations, params.absolute_first_derivative_tol, errors_pre,
         directional_derivative, penalty, 1.0e-4 /* todo: add param */, params.line_search_strategy,
         params.armijo_search_tau, params.equality_constraint_norm);
+
+    if (step_result == StepSizeSelectionResult::SUCCESS) {
+      // save the states of slacks, multipliers, etc...
+      cached_qp_states_ = solver_.variables();
+      has_cached_qp_state = true;
+    }
 
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
