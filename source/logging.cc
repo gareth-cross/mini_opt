@@ -116,7 +116,8 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
   } else {
     stream_ << Color(RED);
   }
-  stream_ << "Iteration #" << info.iteration << ", lambda = " << info.lambda;
+  stream_ << "Iteration #" << info.iteration << ", state = " << info.optimizer_state
+          << ", lambda = " << info.lambda;
   stream_ << ", f(0): " << std::setprecision(std::numeric_limits<double>::max_digits10)
           << info.errors_initial.f << ", c(0): " << info.errors_initial.equality
           << ", termination = " << info.termination_state << "\n";

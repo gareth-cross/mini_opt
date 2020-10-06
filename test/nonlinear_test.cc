@@ -846,13 +846,19 @@ class ConstrainedNLSTest : public ::testing::Test {
           }
         });
 
+    // These tolerances are pretty tight - we're likely prompting more iterations than are really
+    // useful in practice, but it helps for testing.
     ConstrainedNonlinearLeastSquares::Params p{};
     p.max_iterations = 50;
     p.max_qp_iterations = 1;
     p.relative_exit_tol = tol::kPico;
     p.absolute_first_derivative_tol = 1.0e-10;
+    p.absolute_exit_tol = tol::kNano;
     p.termination_kkt_tolerance = tol::kMicro;
     p.max_line_search_iterations = 10;
+
+    // The polynomial approximation does very poorly on this problem near the minimum. Perhaps
+    // the quadratic approximation is just really unsuitable?
     p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
     p.equality_constraint_norm = Norm::L1;
     p.lambda_failure_init = 0.001;
@@ -943,6 +949,8 @@ class ConstrainedNLSTest : public ::testing::Test {
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
           << logger.GetString();
+
+      ASSERT_LT(logger.GetCount(StatCounters::NUM_LINE_SEARCH_STEPS), 100) << logger.GetString();
     }
     SummarizeCounts("Inequality constrained (NLS)", counters);
   }

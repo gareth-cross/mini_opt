@@ -21,6 +21,18 @@ std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) 
   return stream;
 }
 
+std::ostream& operator<<(std::ostream& stream, const OptimizerState& v) {
+  switch (v) {
+    case OptimizerState::NOMINAL:
+      stream << "NOMINAL";
+      break;
+    case OptimizerState::ATTEMPTING_RESTORE_LM:
+      stream << "ATTEMPTING_RESTORE_LM";
+      break;
+  }
+  return stream;
+}
+
 std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult& result) {
   switch (result) {
     case StepSizeSelectionResult::SUCCESS:

@@ -92,8 +92,17 @@ enum class LineSearchStrategy {
   ARMIJO_BACKTRACK = 0,
   // Approximate cost function as a polynomial and compute the minimum.
   POLYNOMIAL_APPROXIMATION = 1,
-
 };
+
+// State of the nonlinear optimizer.
+enum class OptimizerState {
+  // Optimizer is making progress.
+  NOMINAL = 0,
+  // Attempting to restore progress via Levenberg Marquardt.
+  ATTEMPTING_RESTORE_LM = 1,
+};
+
+std::ostream& operator<<(std::ostream& stream, const OptimizerState& v);
 
 // Total squared errors from a nonlinear optimization.
 struct Errors {
@@ -177,11 +186,13 @@ std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state)
 
 // Details for the log, the current state of the non-linear optimizer.
 struct NLSLogInfo {
-  NLSLogInfo(int iteration, double lambda, const Errors& errors_initial, const QPSolverOutputs& qp,
-             ConstVectorBlock dx, const DirectionalDerivatives& directional_derivatives,
-             double penalty, const StepSizeSelectionResult& step_result,
-             const std::vector<LineSearchStep>& steps, const NLSTerminationState& termination_state)
+  NLSLogInfo(int iteration, OptimizerState optimizer_state, double lambda,
+             const Errors& errors_initial, const QPSolverOutputs& qp, ConstVectorBlock dx,
+             const DirectionalDerivatives& directional_derivatives, double penalty,
+             const StepSizeSelectionResult& step_result, const std::vector<LineSearchStep>& steps,
+             const NLSTerminationState& termination_state)
       : iteration(iteration),
+        optimizer_state(optimizer_state),
         lambda(lambda),
         errors_initial(errors_initial),
         qp_term_state(qp),
@@ -193,6 +204,7 @@ struct NLSLogInfo {
         termination_state(termination_state) {}
 
   int iteration;
+  OptimizerState optimizer_state;
   double lambda;
   Errors errors_initial;
   QPSolverOutputs qp_term_state;

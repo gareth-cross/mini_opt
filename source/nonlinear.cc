@@ -54,6 +54,11 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   ASSERT(params.relative_exit_tol >= 0);
   ASSERT(params.relative_exit_tol <= 1);
   ASSERT(params.absolute_first_derivative_tol >= 0);
+  ASSERT(params.max_lambda >= 0);
+  ASSERT(params.min_lambda <= params.max_lambda);
+  ASSERT(params.lambda_initial >= params.min_lambda);
+  ASSERT(params.lambda_initial <= params.max_lambda);
+  ASSERT(params.lambda_failure_init >= 0);
 }
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
@@ -62,6 +67,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   CheckParams(params);
   variables_ = variables;
   prev_variables_ = variables;
+  state_ = OptimizerState::NOMINAL;
   bool has_cached_qp_state{false};
 
   // Set up params, TODO(gareth): Tune this better.
@@ -105,16 +111,14 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
       solver_.SetVariables(cached_qp_states_);
       solver_.x_block().setZero();
     }
-
     const QPSolverOutputs qp_outputs = solver_.Solve(qp_params);
     num_qp_iters += qp_outputs.num_iterations;
 
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
     dx_ = solver_.x_block();
-    const auto dx_block = const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension);
     const DirectionalDerivatives directional_derivative =
-        ComputeQPCostDerivative(qp_, dx_block, params.equality_constraint_norm);
+        ComputeQPCostDerivative(qp_, dx_, params.equality_constraint_norm);
 
     // Raise the penalty parameter if necessary.
     if (!p_->equality_constraints.empty()) {
@@ -143,9 +147,18 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const NLSTerminationState maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, &lambda);
     if (logging_callback_) {
-      const NLSLogInfo info{
-          iter,    old_lambda,  errors_pre, qp_outputs, dx_block, directional_derivative,
-          penalty, step_result, steps_,     maybe_exit};
+      const auto dx_block = const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension);
+      const NLSLogInfo info{iter,
+                            state_,
+                            old_lambda,
+                            errors_pre,
+                            qp_outputs,
+                            dx_block,
+                            directional_derivative,
+                            penalty,
+                            step_result,
+                            steps_,
+                            maybe_exit};
       logging_callback_(*this, info);
     }
 
@@ -236,6 +249,7 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
   return output_errors;
 }
 
+// TODO(gareth): Investigate an approach like algorithm 11.5?
 NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitConditions(
     const Params& params, const StepSizeSelectionResult& step_result, const Errors& initial_errors,
     const double penalty, double* const lambda) {
@@ -246,6 +260,7 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
     // Update the state, and decrease lambda.
     prev_variables_.swap(variables_);  //  save the current variables
     variables_.swap(candidate_vars_);  //  replace w/ the candidate variables
+    state_ = OptimizerState::NOMINAL;
     *lambda = std::max(*lambda * 0.1, params.min_lambda);
 
     // Check termination criteria.
@@ -262,11 +277,13 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
     return NLSTerminationState::SATISFIED_FIRST_ORDER_TOL;
   } else if (step_result == StepSizeSelectionResult::FAILURE_MAX_ITERATIONS ||
              step_result == StepSizeSelectionResult::FAILURE_POSITIVE_DERIVATIVE) {
-    // We did not find an acceptable step, increase lambda.
-    if (*lambda == 0) {
+    if (state_ == OptimizerState::NOMINAL) {
+      // Things were going well, but we failed - initialize lambda to attempt restore.
       *lambda = params.lambda_failure_init;
+      state_ = OptimizerState::ATTEMPTING_RESTORE_LM;
     } else {
-      // TODO(gareth): Investigate an approach like algorithm 11.5
+      ASSERT(state_ == OptimizerState::ATTEMPTING_RESTORE_LM);
+      // We are already attempting to recover and failing, ramp up lambda.
       *lambda *= 10;
     }
     if (*lambda > params.max_lambda) {
@@ -382,7 +399,7 @@ static T Sign(T x) {
 }
 
 DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(
-    const QP& qp, const ConstVectorBlock& dx, const Norm& equality_norm) {
+    const QP& qp, const Eigen::VectorXd& dx, const Norm& equality_norm) {
   // We want the first derivative of the cost function, evaluated at the current linearization
   // point.
   //  d( 0.5 * h(x + dx * alpha)^T * h(x + dx * alpha) ) =

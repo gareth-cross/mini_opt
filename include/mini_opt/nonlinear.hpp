@@ -96,7 +96,7 @@ struct ConstrainedNonlinearLeastSquares {
     // Initial lambda value.
     double lambda_initial{0.0};
 
-    // Initial lambda value on failure to decrease cost.
+    // Initial lambda value on entering the ATTEMPTING_RESTORE_LM state.
     double lambda_failure_init{1.0e-2};
 
     // Maximum lambda value.
@@ -119,7 +119,16 @@ struct ConstrainedNonlinearLeastSquares {
                                             Retraction retraction = nullptr);
 
   /*
+   * Iteratively minimize the provided costs. Implements an SQP-like algorithm where
+   * we approximate the nonlinear function as a QP, with linearized equality constraints
+   * and inequality constraints shifted to the linearization point.
    *
+   * We solve that sub-problem with the interior point QP solver, and then run a line search
+   * on the descent direction. A merit function combines the quadratic objective with
+   * a penalty on violations of the non-linear equality constraints.
+   *
+   * The solver can also damp the approximated hessian (LM/trust-region) if the optimizer fails to
+   * make progress.
    */
   NLSSolverOutputs Solve(const Params& params, const Eigen::VectorXd& variables);
 
@@ -173,7 +182,7 @@ struct ConstrainedNonlinearLeastSquares {
                                              double penalty) const;
 
   // Compute first derivative of the QP cost function.
-  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const ConstVectorBlock& dx,
+  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx,
                                                         const Norm& equality_norm);
 
   // Select a new penalty parameter, depending on norm type.
@@ -228,6 +237,9 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Storage for QP intermediates.
   Eigen::VectorXd cached_qp_states_;
+
+  // Current state of the optimization
+  OptimizerState state_{OptimizerState::NOMINAL};
 
   // Logging callback.
   LoggingCallback logging_callback_{};
