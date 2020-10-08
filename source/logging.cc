@@ -120,7 +120,8 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
           << ", lambda = " << info.lambda;
   stream_ << ", f(0): " << std::setprecision(std::numeric_limits<double>::max_digits10)
           << info.errors_initial.f << ", c(0): " << info.errors_initial.equality
-          << ", termination = " << info.termination_state << "\n";
+          << ", total: " << info.errors_initial.Total(info.penalty) << "\n";
+  stream_ << "  termination = " << info.termination_state << "\n";
   stream_ << "  penalty = " << info.penalty << "\n";
   stream_ << "  QP: " << info.qp_term_state.termination_state << ", "
           << info.qp_term_state.num_iterations << "\n";
@@ -141,7 +142,7 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
   for (const LineSearchStep& step : info.steps) {
     stream_ << "  f(" << i << "): " << std::setprecision(std::numeric_limits<double>::max_digits10)
             << step.errors.f << ", c(" << i << "): " << step.errors.equality
-            << ", alpha = " << step.alpha << "\n";
+            << ", total: " << step.errors.Total(info.penalty) << ", alpha = " << step.alpha << "\n";
     ++i;
   }
   // print extra details

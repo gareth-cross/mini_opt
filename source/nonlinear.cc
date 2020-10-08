@@ -59,6 +59,8 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   ASSERT(params.lambda_initial >= params.min_lambda);
   ASSERT(params.lambda_initial <= params.max_lambda);
   ASSERT(params.lambda_failure_init >= 0);
+  ASSERT(params.equality_constraint_norm == Norm::L1 ||
+         params.equality_constraint_norm == Norm::QUADRATIC);
 }
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
@@ -214,8 +216,7 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
     // total L1 norm in the equality constraints
     if (equality_norm == Norm::L1) {
       output_errors.equality += b_seg.lpNorm<1>();
-    } else {
-      ASSERT(equality_norm == Norm::QUADRATIC);
+    } else if (equality_norm == Norm::QUADRATIC) {
       output_errors.equality += 0.5 * b_seg.squaredNorm();
     }
     row += dim;
@@ -279,7 +280,7 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
              step_result == StepSizeSelectionResult::FAILURE_POSITIVE_DERIVATIVE) {
     if (state_ == OptimizerState::NOMINAL) {
       // Things were going well, but we failed - initialize lambda to attempt restore.
-      *lambda = params.lambda_failure_init;
+      *lambda = std::max(params.lambda_failure_init, *lambda);
       state_ = OptimizerState::ATTEMPTING_RESTORE_LM;
     } else {
       ASSERT(state_ == OptimizerState::ATTEMPTING_RESTORE_LM);
@@ -420,8 +421,7 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
       const double sign_ci = Sign(qp.b_eq[i]);
       out.d_equality += sign_ci * qp.A_eq.row(i).dot(dx);
     }
-  } else {
-    ASSERT(equality_norm == Norm::QUADRATIC, "No other norm supported");
+  } else if (equality_norm == Norm::QUADRATIC) {
     // Simple L2 squared cost.
     for (int i = 0; i < qp.A_eq.rows(); ++i) {
       out.d_equality += qp.b_eq[i] * qp.A_eq.row(i).dot(dx);
@@ -438,7 +438,7 @@ double ConstrainedNonlinearLeastSquares::SelectPenalty(const Norm& norm_type,
     // they suggest 18.33. But this seems to work better for me.
     return lagrange_multipliers.lpNorm<Eigen::Infinity>();
   } else {
-    ASSERT(norm_type == Norm::QUADRATIC);
+    // norm_type == Norm::QUADRATIC
     // See: http://www.numerical.rl.ac.uk/people/nimg/oumsc/lectures/part5.2.pdf
     const double l2_eq = std::sqrt(equality_cost);
     if (l2_eq == 0) {

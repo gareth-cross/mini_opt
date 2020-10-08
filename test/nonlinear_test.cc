@@ -954,6 +954,206 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
     SummarizeCounts("Inequality constrained (NLS)", counters);
   }
+
+  void TestDualActuatorBalancing() {
+    const std::array<uint8_t, 3> mask = {{0, 0, 1}};
+    const std::array<uint8_t, 3> mask_off = {{0, 0, 0}};
+
+    // front leg
+    const Vector3d robot_origin{0, 0.4, 0};
+    std::unique_ptr<ActuatorChain> chain_front = std::make_unique<ActuatorChain>();
+    chain_front->links.emplace_back(Pose(Quaterniond::Identity(), robot_origin), mask);
+    chain_front->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.25, 0.0, 0.0}), mask);
+    chain_front->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}), mask);
+    chain_front->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}),
+                                    mask_off);
+
+    // rear leg
+    std::unique_ptr<ActuatorChain> chain_rear = std::make_unique<ActuatorChain>();
+    chain_rear->links.emplace_back(Pose(Quaterniond::Identity(), robot_origin), mask);
+    chain_rear->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.0, 0.0, 0.0}), mask);
+    chain_rear->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}), mask);
+    chain_rear->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}),
+                                   mask_off);
+
+    // Assume we have a robot position in XY, the Y component of which we want to align at ~0.4
+    // meters.
+    Problem problem{};
+    problem.dimension = 5;
+
+    // Try to keep the body orientation close to level.
+    const auto level_cost = [](const Matrix<double, 1, 1>& body_angle,
+                               Matrix<double, 1, 1>* const J_out) -> Matrix<double, 1, 1> {
+      if (J_out) {
+        J_out->setConstant(0.1);
+      }
+      return 0.1 * body_angle;
+    };
+    problem.costs.emplace_back(new Residual<1, 1>({{0}}, level_cost));
+    TestResidualFunctionDerivative<1, 1>(level_cost, Matrix<double, 1, 1>{0.4});
+
+    // We want feet to contact the floor (y=0) and achieve a position of the body (which is
+    // located on top of the first joint of rear leg) of y=0.4
+    const double rear_foot_y = 0.0;
+    const double front_foot_y = 0.05;
+    const auto rear_foot_y_expr = [&](const Matrix<double, 3, 1>& angles_rear,
+                                      Matrix<double, 1, 3>* const J_out) -> Matrix<double, 1, 1> {
+      Matrix<double, 3, Dynamic> foot_D_angles(3, 3);
+      const Vector3d anchor_t_foot =
+          chain_rear->ComputeEffectorPosition(angles_rear, &foot_D_angles);
+      if (J_out) {
+        *J_out = foot_D_angles.middleRows<1>(1);
+      }
+      return Matrix<double, 1, 1>{anchor_t_foot.y() - rear_foot_y};
+    };
+    problem.equality_constraints.emplace_back(new Residual<1, 3>({{0, 1, 2}}, rear_foot_y_expr));
+    TestResidualFunctionDerivative<1, 3>(rear_foot_y_expr, Vector3d{-0.4, 0.2, 0.5});
+
+    // front foot has to end at y=0 as well
+    const auto front_foot_expr = [&](const Matrix<double, 3, 1>& angles_front,
+                                     Matrix<double, 1, 3>* const J_out) -> Matrix<double, 1, 1> {
+      Matrix<double, 3, Dynamic> foot_D_angles(3, 3);
+      const Vector3d anchor_t_foot =
+          chain_front->ComputeEffectorPosition(angles_front, &foot_D_angles);
+      if (J_out) {
+        *J_out = foot_D_angles.middleRows<1>(1);
+      }
+      return Matrix<double, 1, 1>{anchor_t_foot.y() - front_foot_y};
+    };
+    problem.equality_constraints.emplace_back(new Residual<1, 3>({{0, 3, 4}}, front_foot_expr));
+    TestResidualFunctionDerivative<1, 3>(front_foot_expr, Vector3d{0.4, 0.2221, -.8});
+
+    // We want the moments to cancel out.
+    // We set mg = 1 (gravity force) and assume two different frictions, mu_rear and mu_front.
+    // For simplicity we assume friction on the rear foot acts to the left (negative x).
+    const double mu1 = 1.;
+    const double mu2 = 2.;
+    const auto moment_expression = [&](const Matrix<double, 5, 1>& all_angles,
+                                       Matrix<double, 1, 5>* J_out) -> Matrix<double, 1, 1> {
+      Matrix<double, 3, Dynamic> rear_foot_D_angles(3, 3);
+      const Vector3d anchor_t_foot_rear =
+          chain_rear->ComputeEffectorPosition(all_angles.head<3>(), &rear_foot_D_angles);
+      Matrix<double, 3, Dynamic> front_foot_D_angles(3, 3);
+      const Vector3d anchor_t_foot_front = chain_front->ComputeEffectorPosition(
+          Vector3d{all_angles[0], all_angles[3], all_angles[4]}, &front_foot_D_angles);
+
+      // sum of moments must equal zero
+      const double moments = mu1 * (anchor_t_foot_rear.y() - anchor_t_foot_front.y()) +
+                             anchor_t_foot_rear.x() + anchor_t_foot_front.x() * mu1 / mu2;
+      if (J_out) {
+        J_out->setZero();
+        // rear
+        J_out->leftCols<3>() = mu1 * rear_foot_D_angles.middleRows<1>(1);
+        J_out->leftCols<3>() += rear_foot_D_angles.topRows<1>();
+        // front
+        J_out->leftCols<1>() -= mu1 * front_foot_D_angles.middleRows<1>(1).leftCols<1>();
+        J_out->leftCols<1>() += (mu1 / mu2) * front_foot_D_angles.topRows<1>().leftCols<1>();
+        J_out->rightCols<2>() -= mu1 * front_foot_D_angles.middleRows<1>(1).rightCols<2>();
+        J_out->rightCols<2>() += (mu1 / mu2) * front_foot_D_angles.topRows<1>().rightCols<2>();
+      }
+      return Matrix<double, 1, 1>{moments};
+    };
+    problem.costs.emplace_back(new Residual<1, 5>({{0, 1, 2, 3, 4}}, moment_expression));
+    TestResidualFunctionDerivative<1, 5>(
+        moment_expression, (Matrix<double, 5, 1>() << 0.22, -0.3, 0.45, 0.6, -0.1, 0.2).finished());
+
+    //    problem.inequality_constraints.push_back(Var(2) >= 0.0);
+    //    problem.inequality_constraints.push_back(Var(2) <= M_PI);
+    //
+    //    problem.inequality_constraints.push_back(Var(2) <= 0);
+    //    problem.inequality_constraints.push_back(Var(2) >= -M_PI);
+
+    // everything is an angle, so retract in the range [-pi, pi]
+    ConstrainedNonlinearLeastSquares nls(
+        &problem, [](Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha) {
+          for (int i = 0; i < x->rows(); ++i) {
+            // These are angles, so clamp them in range of [-pi, pi]
+            x->operator[](i) = ModPi(x->operator[](i) + dx[i] * alpha);
+          }
+        });
+
+    // set up optimizer params
+    ConstrainedNonlinearLeastSquares::Params p{};
+    p.max_iterations = 100;
+    p.max_qp_iterations = 1;
+    p.relative_exit_tol = tol::kPico;
+    p.absolute_first_derivative_tol = 1.0e-10;
+    p.absolute_exit_tol = tol::kNano;
+    p.termination_kkt_tolerance = tol::kMicro;
+    p.max_line_search_iterations = 10;
+
+    // The polynomial approximation does very poorly on this problem near the minimum. Perhaps
+    // the quadratic approximation is just really unsuitable?
+    p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
+    p.equality_constraint_norm = Norm::L1;
+    p.lambda_failure_init = 0.01;
+    p.armijo_search_tau = 0.5;  //  backtrack more aggressively
+
+    // We add some non-zero lambda because this problem technically does not have
+    // a positive semi-definite hessian (since there is only one nonlinear cost
+    // on the effector position).
+    p.lambda_initial = 0.001;
+    p.min_lambda = 1.0e-9;
+
+    Logger logger{true, true};
+    nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
+    nls.SetLoggingCallback([&](const ConstrainedNonlinearLeastSquares& solver,
+                               const NLSLogInfo& info) {
+      logger.NonlinearSolverCallback(solver, info);
+      const auto& vars = solver.variables();
+      logger.stream() << "  Rear: "
+                      << chain_rear->ComputeEffectorPosition(vars.head<3>())
+                             .head(2)
+                             .transpose()
+                             .format(test_utils::kNumPyMatrixFmt)
+                      << std::endl;
+      logger.stream() << "  Front: "
+                      << chain_front->ComputeEffectorPosition(Vector3d{vars[0], vars[3], vars[4]})
+                             .head(2)
+                             .transpose()
+                             .format(test_utils::kNumPyMatrixFmt)
+                      << std::endl;
+    });
+
+    // create a guess, both legs straight-ish out
+    Matrix<double, 5, 1> guess;
+    guess[0] = M_PI / 6;
+    guess[1] = -M_PI / 2;
+    guess[2] = -M_PI / 6;
+    guess[3] = -M_PI / 2;
+    guess[4] = M_PI / 4;
+
+    // solve it
+    const NLSSolverOutputs outputs = nls.Solve(p, guess);
+    PRINT(outputs.termination_state);
+    //    counters.push_back(logger.counters());
+    //
+    std::cout << logger.GetString() << std::endl;
+
+    const auto poses_rear = ComputeAllPoses(chain_rear->chain_buffer_);
+    const auto poses_front = ComputeAllPoses(chain_front->chain_buffer_);
+
+    for (int i = 1; i < poses_rear.size(); ++i) {
+      const Pose& pose = poses_rear[i];
+      std::cout << pose.translation.head<2>().transpose().format(test_utils::kNumPyMatrixFmt)
+                << ",\n";
+    }
+    std::cout << "front:\n";
+    for (int i = 1; i < poses_front.size(); ++i) {
+      const Pose& pose = poses_front[i];
+      std::cout << pose.translation.head<2>().transpose().format(test_utils::kNumPyMatrixFmt)
+                << ",\n";
+    }
+
+    //    // check that we reached the desired position
+    //    const VectorXd& angles_out = nls.variables();
+    //    ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->ComputeEffectorPosition(angles_out).head(2),
+    //                      5.0e-5)
+    //        << "Termination: " << outputs.termination_state << "\n"
+    //        << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
+    //        << "\nSummary:\n"
+    //        << logger.GetString();
+  }
 };
 
 TEST_FIXTURE(ConstrainedNLSTest, TestComputeQPCostDerivative)
@@ -968,5 +1168,6 @@ TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblau)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblauQuadrantConstrained)
 TEST_FIXTURE(ConstrainedNLSTest, TestSphereWithNonlinearEqualityConstraints)
 TEST_FIXTURE(ConstrainedNLSTest, TestTwoAngleActuatorChain)
+TEST_FIXTURE(ConstrainedNLSTest, TestDualActuatorBalancing)
 
 }  // namespace mini_opt

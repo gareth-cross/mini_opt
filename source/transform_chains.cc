@@ -122,10 +122,12 @@ void ActuatorChain::Update(const math::Vector<double>& angles) {
   if (rotation_D_angles_.size() == 0) {
     // compute total active
     const int total_active = TotalActive();
-    ASSERT(angles.rows() == total_active);
     // allocate space
     rotation_D_angles_.resize(3, total_active);
   }
+  ASSERT(angles.rows() == rotation_D_angles_.cols(),
+         "Mismatch between # angles. angles.rows() = %i, expected = %i", angles.rows(),
+         rotation_D_angles_.cols());
 
   // compute poses and rotational derivatives
   pose_buffer_.resize(links.size());
