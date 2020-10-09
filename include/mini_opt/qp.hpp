@@ -201,9 +201,9 @@ struct QPInteriorPointSolver {
   const QP* p_{nullptr};
 
   struct ProblemDims {
-    std::size_t N;  //  number of variables `x`
-    std::size_t M;  //  number of inequality constraints, `s` and `z`
-    std::size_t K;  //  number of equality constraints, `y`
+    int N;  //  number of variables `x`
+    int M;  //  number of inequality constraints, `s` and `z`
+    int K;  //  number of equality constraints, `y`
   };
 
   // For convenience we save these here

@@ -68,7 +68,7 @@ TEST(ChainComputationBufferTest, TestComputeChain) {
   // note we are iterating over inverted poses `i_T_end`, so i = 0 is in fact the full transform
   Pose start_T_current{};
   const std::vector<Pose> start_T_i = ComputeAllPoses(c);
-  for (int i = 0; i < c.i_R_end.size(); ++i) {
+  for (std::size_t i = 0; i < c.i_R_end.size(); ++i) {
     // compare poses
     ASSERT_EIGEN_NEAR(start_T_current.translation, start_T_i[i].translation, tol::kNano)
         << "i = " << i;

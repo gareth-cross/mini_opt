@@ -70,7 +70,7 @@ std::vector<Pose> ComputeAllPoses(const ChainComputationBuffer& buffer) {
   const Pose start_T_end{buffer.i_R_end.front(), buffer.i_t_end.leftCols<1>()};
   std::vector<Pose> start_T_i;
   start_T_i.reserve(buffer.i_R_end.size());
-  for (int i = 0; i < buffer.i_R_end.size(); ++i) {
+  for (std::size_t i = 0; i < buffer.i_R_end.size(); ++i) {
     start_T_i.push_back(start_T_end * Pose(buffer.i_R_end[i], buffer.i_t_end.col(i)).Inverse());
   }
   return start_T_i;
@@ -131,7 +131,7 @@ void ActuatorChain::Update(const math::Vector<double>& angles) {
 
   // compute poses and rotational derivatives
   pose_buffer_.resize(links.size());
-  for (int i = 0, position = 0; i < links.size(); ++i) {
+  for (std::size_t i = 0, position = 0; i < links.size(); ++i) {
     const ActuatorLink& link = links[i];
     const int num_active = link.ActiveCount();
     pose_buffer_[i] = link.Compute(angles, position, &rotation_D_angles_);
@@ -168,7 +168,7 @@ math::Vector<double, 3> ActuatorChain::ComputeEffectorPosition(
   // chain rule
   if (J) {
     ASSERT(J->cols() == TotalActive());
-    for (int i = 0, position = 0; i < links.size(); ++i) {
+    for (int i = 0, position = 0; i < static_cast<int>(links.size()); ++i) {
       const ActuatorLink& link = links[i];
       const int active_count = link.ActiveCount();
       if (active_count == 0) {

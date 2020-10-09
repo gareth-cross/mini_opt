@@ -6,7 +6,7 @@
 namespace mini_opt {
 
 TEST(MathUtilsTest, TestModPi) {
-  ASSERT_EQ(0, ModPi(0));
+  ASSERT_EQ(0, ModPi(0.));
   ASSERT_EQ(M_PI / 3, ModPi(M_PI / 3));
   ASSERT_EQ(M_PI / 4, ModPi(M_PI / 4));
   ASSERT_NEAR(3 * M_PI / 4, ModPi(3 * M_PI / 4), tol::kPico);

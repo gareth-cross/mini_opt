@@ -282,9 +282,9 @@ const QP& QPInteriorPointSolver::problem() const {
  * It is assumed that `EvaluateKKTConditions` was called first.
  */
 void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
-  const std::size_t N = dims_.N;
-  const std::size_t M = dims_.M;
-  const std::size_t K = dims_.K;
+  const int N = dims_.N;
+  const int M = dims_.M;
+  const int K = dims_.K;
 
   // const-block expressions for these, for convenience
   const auto s = ConstSBlock(dims_, variables_);
@@ -304,7 +304,7 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
     H_.bottomLeftCorner(K, N) = p_->A_eq;
   }
   if (include_inequalities) {
-    for (std::size_t i = 0; i < M; ++i) {
+    for (int i = 0; i < M; ++i) {
       const LinearInequalityConstraint& c = p_->constraints[i];
       H_(c.variable, c.variable) += c.a * (z[i] / s[i]) * c.a;
     }
@@ -330,9 +330,9 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
 }
 
 void QPInteriorPointSolver::SolveForUpdate(const double mu) {
-  const std::size_t N = dims_.N;
-  const std::size_t M = dims_.M;
-  const std::size_t K = dims_.K;
+  const int N = dims_.N;
+  const int M = dims_.M;
+  const int K = dims_.K;
 
   const auto s = ConstSBlock(dims_, variables_);
   const auto z = ConstZBlock(dims_, variables_);
@@ -349,7 +349,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
 
   // apply the variable elimination, which updates r_d (make a copy to save the original)
   r_dual_aug_.noalias() = r_d;
-  for (std::size_t i = 0; i < M; ++i) {
+  for (int i = 0; i < M; ++i) {
     const LinearInequalityConstraint& c = p_->constraints[i];
     r_dual_aug_[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
     r_dual_aug_[c.variable] += c.a * (r_comp[i] + (ds_aff[i] * dz_aff[i]) - mu) / s[i];
@@ -370,7 +370,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   }
 
   // Go back and solve for dz and ds
-  for (std::size_t i = 0; i < M; ++i) {
+  for (int i = 0; i < M; ++i) {
     const LinearInequalityConstraint& c = p_->constraints[i];
     ds[i] = c.a * dx[c.variable] + r_pi[i];
     dz[i] = -(z[i] / s[i]) * ds[i] - (1 / s[i]) * (r_comp[i] + (ds_aff[i] * dz_aff[i]) - mu);
@@ -378,8 +378,8 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
 }
 
 void QPInteriorPointSolver::SolveForUpdateNoInequalities() {
-  const std::size_t N = dims_.N;
-  const std::size_t K = dims_.K;
+  const int N = dims_.N;
+  const int K = dims_.K;
 
   // dual and equality residuals
   const auto r_d = ConstXBlock(dims_, r_);
@@ -424,7 +424,7 @@ void QPInteriorPointSolver::EvaluateKKTConditions(const bool include_inequalitie
 
   // contributions from inequality constraints
   if (include_inequalities) {
-    for (std::size_t i = 0; i < dims_.M; ++i) {
+    for (int i = 0; i < dims_.M; ++i) {
       const LinearInequalityConstraint& c = p_->constraints[i];
       r_d[c.variable] -= c.a * z[i];
       r_pi[i] = c.a * x[c.variable] + c.b - s[i];
@@ -600,9 +600,9 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
                                             Eigen::VectorXd* const r) const {
   ASSERT(H != nullptr);
   ASSERT(r != nullptr);
-  const std::size_t N = dims_.N;
-  const std::size_t M = dims_.M;
-  const std::size_t K = dims_.K;
+  const int N = dims_.N;
+  const int M = dims_.M;
+  const int K = dims_.K;
 
   const auto x = ConstXBlock(dims_, variables_);
   const auto s = ConstSBlock(dims_, variables_);
@@ -625,7 +625,7 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
   if (M > 0) {
     A_i.setZero();
     // create sparse A_i for simplicity
-    for (std::size_t i = 0; i < M; ++i) {
+    for (int i = 0; i < M; ++i) {
       const LinearInequalityConstraint& c = p_->constraints[i];
       A_i(i, c.variable) = c.a;
       b_i[i] = c.b;

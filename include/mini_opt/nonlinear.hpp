@@ -31,7 +31,7 @@ struct Problem {
   using unique_ptr = std::unique_ptr<Problem>;
 
   // Problem dimension. (ie. max variable index + 1)
-  std::size_t dimension;
+  int dimension;
 
   // The errors that form the sum of squares part of the cost function.
   std::vector<ResidualBase::unique_ptr> costs;

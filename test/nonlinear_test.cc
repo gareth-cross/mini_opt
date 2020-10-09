@@ -267,7 +267,7 @@ class ConstrainedNLSTest : public ::testing::Test {
   }
 
   static void SummarizeCounts(const std::string& name, const std::vector<StatCounters>& counters) {
-    ASSERT_GT(counters.size(), 0);
+    ASSERT_GT(counters.size(), 0u);
     // get all the stats and dump them
     std::cout << "Stats from " << counters.size() << " trials.\n";
     for (const StatCounters::Stats& v :
