@@ -955,6 +955,9 @@ class ConstrainedNLSTest : public ::testing::Test {
     SummarizeCounts("Inequality constrained (NLS)", counters);
   }
 
+  // Simple two-legged robot. We apply equality constraints that the feet must contact
+  // the floor. We apply a soft cost that the moments must sum to zero (ie. the robot
+  // is statically stable).
   void TestDualActuatorBalancing() {
     const std::array<uint8_t, 3> mask = {{0, 0, 1}};
     const std::array<uint8_t, 3> mask_off = {{0, 0, 0}};
@@ -1078,7 +1081,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.absolute_first_derivative_tol = 1.0e-10;
     p.absolute_exit_tol = 1.0e-8;
     p.termination_kkt_tolerance = tol::kMicro;
-    p.max_line_search_iterations = 10;
+    p.max_line_search_iterations = 5;
     p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
     p.equality_constraint_norm = Norm::L1;
     p.lambda_failure_init = 0.01;
@@ -1093,12 +1096,12 @@ class ConstrainedNLSTest : public ::testing::Test {
     // create a guess
     AlignedVector<Matrix<double, 5, 1>> guesses;
     guesses.push_back(
-        (Matrix<double, 5, 1>() << M_PI / 6, -M_PI / 2, -M_PI / 6, -M_PI / 2, M_PI / 4).finished());
+        (Matrix<double, 5, 1>() << M_PI / 6, -M_PI / 2, M_PI / 6, -M_PI / 2, M_PI / 4).finished());
     guesses.push_back(
-        (Matrix<double, 5, 1>() << M_PI / 4, -M_PI / 4, -M_PI / 6, -M_PI / 3, -M_PI / 4)
+        (Matrix<double, 5, 1>() << -M_PI / 4, -M_PI / 4, M_PI / 6, -M_PI / 3, -M_PI / 4)
             .finished());
     guesses.push_back(
-        (Matrix<double, 5, 1>() << -M_PI / 3, -M_PI / 2, 0.0, -M_PI / 2, 0.0).finished());
+        (Matrix<double, 5, 1>() << -M_PI / 3, -M_PI / 2, 0.001, -M_PI / 2, 0.0).finished());
 
     // solve it
     std::vector<StatCounters> counters{};
@@ -1135,6 +1138,9 @@ class ConstrainedNLSTest : public ::testing::Test {
       for (const ResidualBase::unique_ptr& eq : problem.costs) {
         ASSERT_NEAR(0.0, eq->QuadraticError(nls.variables()), 1.0e-8);
       }
+
+      // No strong reason for 30, just place a max to track performance here.
+      ASSERT_LT(logger.GetCount(StatCounters::NUM_LINE_SEARCH_STEPS), 30) << logger.GetString();
     }
     SummarizeCounts("Dual Actuator Balancing", counters);
   }

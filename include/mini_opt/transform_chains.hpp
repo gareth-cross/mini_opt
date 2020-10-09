@@ -126,12 +126,21 @@ struct ActuatorLink {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
-// TODO(gareth): comments...
+// Store a chain of links, and compute the position of the effector as well as
+// derivatives.
 struct ActuatorChain {
+ public:
   // Current poses in the chain.
   std::vector<ActuatorLink> links;
 
-  // Poses.
+  // Compute rotation and translation of the effector.
+  math::Vector<double, 3> ComputeEffectorPosition(
+      const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* J = nullptr);
+
+  int TotalActive() const;
+
+ private:
+  // Poses cached from last computation.
   std::vector<Pose> pose_buffer_;
 
   // Buffer of rotations derivatives.
@@ -150,13 +159,6 @@ struct ActuatorChain {
   // Return true if the angles have changed since the last time this was called.
   // Allows us to re-use intermediate values.
   bool ShouldUpdate(const math::Vector<double>& angles) const;
-
- public:
-  // Compute rotation and translation of the effector.
-  math::Vector<double, 3> ComputeEffectorPosition(
-      const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* J = nullptr);
-
-  int TotalActive() const;
 };
 
 }  // namespace mini_opt
