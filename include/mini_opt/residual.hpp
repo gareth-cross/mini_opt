@@ -33,6 +33,9 @@ struct ResidualBase {
   // `J_out` and `b_out` are set to the correct rows of a larger matrix.
   virtual void UpdateJacobian(const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
                               Eigen::VectorBlock<Eigen::VectorXd> b_out) const = 0;
+
+  // Helper for tests for computing L2 error.
+  double QuadraticError(const Eigen::VectorXd& params) const;
 };
 
 // Helper for declaring either vector or array, depending on whether size is known at compile time.
