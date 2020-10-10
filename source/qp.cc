@@ -47,7 +47,7 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
 
   // Order is [slacks (s), equality multipliers(y), inequality multipliers (lambda)]
   dims_.N = p_->G.rows();
-  dims_.M = p_->constraints.size();
+  dims_.M = static_cast<int>(p_->constraints.size());
   dims_.K = p_->A_eq.rows();
 
   // allocate space for primal, slacks, and dual variables

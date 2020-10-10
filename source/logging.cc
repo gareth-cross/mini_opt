@@ -109,7 +109,7 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
 void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
                                      const NLSLogInfo& info) {
   counters_.counts[StatCounters::NUM_NLS_ITERATIONS]++;
-  counters_.counts[StatCounters::NUM_LINE_SEARCH_STEPS] += info.steps.size();
+  counters_.counts[StatCounters::NUM_LINE_SEARCH_STEPS] += static_cast<int>(info.steps.size());
   if (info.termination_state != NLSTerminationState::MAX_LAMBDA &&
       info.termination_state != NLSTerminationState::MAX_ITERATIONS) {
     stream_ << Color(GREEN);

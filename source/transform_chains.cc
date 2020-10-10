@@ -134,7 +134,7 @@ void ActuatorChain::Update(const math::Vector<double>& angles) {
   for (std::size_t i = 0, position = 0; i < links.size(); ++i) {
     const ActuatorLink& link = links[i];
     const int num_active = link.ActiveCount();
-    pose_buffer_[i] = link.Compute(angles, position, &rotation_D_angles_);
+    pose_buffer_[i] = link.Compute(angles, static_cast<int>(position), &rotation_D_angles_);
     position += num_active;
   }
 
