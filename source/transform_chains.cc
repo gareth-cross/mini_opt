@@ -188,9 +188,39 @@ math::Vector<double, 3> ActuatorChain::ComputeEffectorPosition(
   return chain_buffer_.i_t_end.leftCols<1>();
 }
 
+math::Quaternion<double> ActuatorChain::ComputeEffectorRotation(
+    const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* const J) {
+  Update(angles);
+
+  // chain rule
+  if (J) {
+    ASSERT(J->cols() == TotalActive());
+    for (int i = 0, position = 0; i < static_cast<int>(links.size()); ++i) {
+      const ActuatorLink& link = links[i];
+      const int active_count = link.ActiveCount();
+      if (active_count == 0) {
+        continue;
+      }
+      // Chain rule w/ the angle representation.
+      if (IsOnlyZ(link)) {
+        J->middleCols<1>(position) = chain_buffer_.orientation_D_tangent.middleCols<1>(i * 3 + 2);
+      } else {
+        J->middleCols(position, active_count).noalias() =
+            chain_buffer_.orientation_D_tangent.middleCols<3>(i * 3) *
+            rotation_D_angles_.middleCols(position, active_count);
+      }
+      position += active_count;
+    }
+  }
+  return chain_buffer_.i_R_end.front();
+}
+
 int ActuatorChain::TotalActive() const {
   return std::accumulate(links.begin(), links.end(), 0,
                          [](const int t, const ActuatorLink& l) { return t + l.ActiveCount(); });
 }
+
+// TODO(gareth): Assert that this has been filled out?
+const std::vector<Pose>& ActuatorChain::poses() const { return pose_buffer_; }
 
 }  // namespace mini_opt

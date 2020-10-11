@@ -138,11 +138,19 @@ struct ActuatorChain {
   // Current poses in the chain.
   std::vector<ActuatorLink> links;
 
-  // Compute rotation and translation of the effector.
+  // Compute translation of the effector.
   math::Vector<double, 3> ComputeEffectorPosition(
       const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* J = nullptr);
 
+  // Compute rotation of the effector.
+  math::Quaternion<double> ComputeEffectorRotation(
+      const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* J = nullptr);
+
+  // Total number of optimized variables in this chain (ie. angles that we can alter).
   int TotalActive() const;
+
+  // Access cached poses for all the links.
+  const std::vector<Pose>& poses() const;
 
  private:
   // Poses cached from last computation.

@@ -161,4 +161,38 @@ TEST(ActuatorChainTest, TestComputeEffectorPosition) {
   ASSERT_EIGEN_NEAR(J_numerical, J_analytical, tol::kPico);
 }
 
+TEST(ActuatorChainTest, TestComputeEffectorRotation) {
+  // create some links
+  // clang-format off
+  const std::vector<Pose> links = {
+      {math::QuaternionExp(Vector3d{-0.8, 0.7, 0.3}), {1.0, 0.5, 2.2}},
+      {math::QuaternionExp(Vector3d{0.3, 0.2, 1.095}), {0.0, 0.132, -0.7}},
+      {math::QuaternionExp(Vector3d{1.7, -0.3, -0.1}), {0.7, -0.58, -0.2}},
+      {math::QuaternionExp(Vector3d{0.2, -0.5, 0.3}), {0.2, -0.1, 0.2}}
+  };
+  // clang-format on
+
+  int mask_index = 1;
+  ActuatorChain chain{};
+  for (const Pose& pose : links) {
+    std::array<uint8_t, 3> mask;
+    mask.fill(0);
+    mask[mask_index] = true;
+    mask_index = (mask_index + 1) % 3;
+    chain.links.emplace_back(pose, mask);
+  }
+
+  const int total_active = chain.TotalActive();
+  ASSERT_EQ(4, total_active);
+
+  const VectorXd angles = Vector4d(-0.3, 0.2, 0.5, 0.1);
+  Matrix<double, 3, Dynamic> J_analytical;
+  J_analytical.resize(3, angles.size());
+  chain.ComputeEffectorRotation(angles, &J_analytical);
+
+  const auto J_numerical = math::NumericalJacobian(
+      angles, [&](const VectorXd& angles) { return chain.ComputeEffectorRotation(angles); });
+  ASSERT_EIGEN_NEAR(J_numerical, J_analytical, tol::kPico);
+}
+
 }  // namespace mini_opt
