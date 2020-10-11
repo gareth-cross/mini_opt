@@ -39,6 +39,11 @@ struct Pose {
     return Pose(R_inv, R_inv * -translation);
   }
 
+  // Multiply by vector.
+  math::Vector<double, 3> operator*(const math::Vector<double, 3>& v) const {
+    return rotation * v + translation;
+  }
+
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
