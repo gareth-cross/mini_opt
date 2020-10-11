@@ -2,8 +2,6 @@
 #include "mini_opt/nonlinear.hpp"
 
 #include <Eigen/Dense>  //  for inverse()
-#include <iomanip>
-#include <iostream>
 #include <utility>
 
 namespace mini_opt {
