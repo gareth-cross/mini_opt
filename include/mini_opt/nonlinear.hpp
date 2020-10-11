@@ -93,6 +93,9 @@ struct ConstrainedNonlinearLeastSquares {
     // Norm on the equality constraints in the merit function.
     Norm equality_constraint_norm{Norm::L1};
 
+    // Initial value of the equality constraint penalty.
+    double equality_penalty_initial{0};
+
     // Initial lambda value.
     double lambda_initial{0.0};
 

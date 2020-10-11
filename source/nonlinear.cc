@@ -80,7 +80,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 
   // Iterate until max.
   double lambda{params.lambda_initial};
-  double penalty{0};
+  double penalty{params.equality_penalty_initial};
   int num_qp_iters = 0;
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // Fill out the QP and compute current errors.
