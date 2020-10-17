@@ -7,4 +7,12 @@ namespace mini_opt {
 template <typename Scalar>
 Scalar ModPi(Scalar x);
 
+// Convert degrees to radians.
+template <typename Scalar>
+Scalar DegToRad(Scalar deg);
+
+// Convert radians to degrees.
+template <typename Scalar>
+Scalar RadToDeg(Scalar rad);
+
 }  // namespace mini_opt

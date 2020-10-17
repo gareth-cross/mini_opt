@@ -27,4 +27,17 @@ TEST(MathUtilsTest, TestModPi) {
   ASSERT_NEAR(0.0, ModPi(-4 * M_PI), tol::kPico);
 }
 
+TEST(MathUtilsTest, TestRadConversion) {
+  ASSERT_EQ(0.0, RadToDeg(0.));
+  ASSERT_NEAR(45.0, RadToDeg(M_PI / 4), tol::kPico);
+  ASSERT_NEAR(90.0, RadToDeg(M_PI / 2), tol::kPico);
+  ASSERT_NEAR(180.0, RadToDeg(M_PI), tol::kPico);
+  ASSERT_EQ(0.0, DegToRad(0.));
+  ASSERT_NEAR(M_PI / 3, DegToRad(60.), tol::kPico);
+  ASSERT_NEAR(5 * M_PI / 3, DegToRad(5 * 60.), tol::kPico);
+  for (double x = -360.0; x <= 360.0; x += 1.0) {
+    ASSERT_NEAR(x, RadToDeg(DegToRad(x)), tol::kPico);
+  }
+}
+
 }  // namespace mini_opt
