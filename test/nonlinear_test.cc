@@ -793,23 +793,21 @@ class ConstrainedNLSTest : public ::testing::Test {
     // Two actuators can effectuate translation, whereas the last one can only rotate the
     // effector.
     std::unique_ptr<ActuatorChain> chain = std::make_unique<ActuatorChain>();
-    const std::array<uint8_t, 3> mask = {{0, 0, 1}};
+    const std::array<uint8_t, 6> mask = {{0, 0, 1, 0, 0, 0}};
     chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.0, 0.0, 0.0}), mask);
     chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.4, 0.0, 0.0}), mask);
     chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.4, 0.0, 0.0}),
-                              std::array<uint8_t, 3>{{0, 0, 0}} /* turn off for now */);
+                              std::array<uint8_t, 6>{{0, 0, 0, 0, 0, 0}} /* turn off for now */);
 
     // make a cost that we want to achieve a specific point vertically
     Residual<1, Dynamic> y_residual;
     y_residual.index = {0, 1};
     y_residual.function = [&](const VectorXd& params,
                               Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
-      // TODO(gareth): don't evaluate full xyz jacobian here
-      Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
-      const Vector3d effector_xyz =
-          chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
+      chain->Update(params);
+      const Vector3d effector_xyz = chain->translation();
       if (J_out) {
-        *J_out = J_full.middleRows<1>(1);
+        *J_out = chain->translation_D_params().middleRows<1>(1);
       }
       return Matrix<double, 1, 1>{effector_xyz.y() - 0.6};
     };
@@ -820,11 +818,10 @@ class ConstrainedNLSTest : public ::testing::Test {
     x_eq_constraint.function =
         [&](const VectorXd& params,
             Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
-      Matrix<double, 3, Dynamic> J_full(3, chain->TotalActive());
-      const Vector3d effector_xyz =
-          chain->ComputeEffectorPosition(params, J_out ? &J_full : nullptr);
+      chain->Update(params);
+      const Vector3d effector_xyz = chain->translation();
       if (J_out) {
-        *J_out = J_full.topRows<1>();
+        *J_out = chain->translation_D_params().topRows<1>();
       }
       return Matrix<double, 1, 1>{effector_xyz.x() - 0.45};
     };
@@ -885,11 +882,10 @@ class ConstrainedNLSTest : public ::testing::Test {
       nls.SetLoggingCallback(
           [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
             logger.NonlinearSolverCallback(solver, info);
+            chain->Update(solver.variables());
             logger.stream() << "  Effector: "
-                            << chain->ComputeEffectorPosition(solver.variables())
-                                   .head(2)
-                                   .transpose()
-                                   .format(test_utils::kNumPyMatrixFmt)
+                            << chain->translation().head(2).transpose().format(
+                                   test_utils::kNumPyMatrixFmt)
                             << std::endl;
           });
 
@@ -899,8 +895,8 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       // check that we reached the desired position
       const VectorXd& angles_out = nls.variables();
-      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->ComputeEffectorPosition(angles_out).head(2),
-                        5.0e-5)
+      chain->Update(angles_out);
+      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->translation().head(2), 5.0e-5)
           << "Termination: " << outputs.termination_state << "\n"
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
@@ -943,8 +939,8 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       // check that we reached the desired position
       const VectorXd& angles_out = nls.variables();
-      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->ComputeEffectorPosition(angles_out).head(2),
-                        tol::kMilli)
+      chain->Update(angles_out);
+      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->translation().head(2), tol::kMilli)
           << "Termination: " << outputs.termination_state << "\n"
           << "Initial guess: " << guess.transpose().format(test_utils::kNumPyMatrixFmt)
           << "\nSummary:\n"
@@ -959,8 +955,8 @@ class ConstrainedNLSTest : public ::testing::Test {
   // the floor. We apply a soft cost that the moments must sum to zero (ie. the robot
   // is statically stable).
   void TestDualActuatorBalancing() {
-    const std::array<uint8_t, 3> mask = {{0, 0, 1}};
-    const std::array<uint8_t, 3> mask_off = {{0, 0, 0}};
+    const std::array<uint8_t, 6> mask = {{0, 0, 1, 0, 0, 0}};
+    const std::array<uint8_t, 6> mask_off = {{0, 0, 0, 0, 0, 0}};
 
     // front leg
     const Vector3d robot_origin{0, 0.4, 0};
@@ -999,11 +995,10 @@ class ConstrainedNLSTest : public ::testing::Test {
     const double front_foot_y = 0.05;
     const auto rear_foot_expr = [&](const Matrix<double, 3, 1>& angles_rear,
                                     Matrix<double, 1, 3>* const J_out) -> Matrix<double, 1, 1> {
-      Matrix<double, 3, Dynamic> foot_D_angles(3, 3);
-      const Vector3d anchor_t_foot =
-          chain_rear->ComputeEffectorPosition(angles_rear, &foot_D_angles);
+      chain_rear->Update(angles_rear);
+      const Vector3d anchor_t_foot = chain_rear->translation();
       if (J_out) {
-        *J_out = foot_D_angles.middleRows<1>(1);
+        *J_out = chain_rear->translation_D_params().middleRows<1>(1);
       }
       return Matrix<double, 1, 1>{anchor_t_foot.y() - rear_foot_y};
     };
@@ -1013,13 +1008,11 @@ class ConstrainedNLSTest : public ::testing::Test {
     // front foot has to end at y=0 as well
     const auto front_foot_expr = [&](const Matrix<double, 3, 1>& angles_front,
                                      Matrix<double, 1, 3>* const J_out) -> Matrix<double, 1, 1> {
-      Matrix<double, 3, Dynamic> foot_D_angles(3, 3);
-      const Vector3d anchor_t_foot =
-          chain_front->ComputeEffectorPosition(angles_front, &foot_D_angles);
+      chain_front->Update(angles_front);
       if (J_out) {
-        *J_out = foot_D_angles.middleRows<1>(1);
+        *J_out = chain_front->translation_D_params().middleRows<1>(1);
       }
-      return Matrix<double, 1, 1>{anchor_t_foot.y() - front_foot_y};
+      return Matrix<double, 1, 1>{chain_front->translation().y() - front_foot_y};
     };
     problem.equality_constraints.emplace_back(new Residual<1, 3>({{0, 3, 4}}, front_foot_expr));
     TestResidualFunctionDerivative<1, 3>(front_foot_expr, Vector3d{0.4, 0.2221, -.8});
@@ -1032,12 +1025,11 @@ class ConstrainedNLSTest : public ::testing::Test {
     const Vector2d com_wrt_anchor{0.15, 0.0};
     const auto moment_expression = [&](const Matrix<double, 5, 1>& all_angles,
                                        Matrix<double, 1, 5>* J_out) -> Matrix<double, 1, 1> {
-      Matrix<double, 3, Dynamic> rear_foot_D_angles(3, 3);
-      const Vector3d anchor_t_foot_rear =
-          chain_rear->ComputeEffectorPosition(all_angles.head<3>(), &rear_foot_D_angles);
-      Matrix<double, 3, Dynamic> front_foot_D_angles(3, 3);
-      const Vector3d anchor_t_foot_front = chain_front->ComputeEffectorPosition(
-          Vector3d{all_angles[0], all_angles[3], all_angles[4]}, &front_foot_D_angles);
+      chain_rear->Update(all_angles.head<3>());
+      chain_front->Update(Vector3d{all_angles[0], all_angles[3], all_angles[4]});
+
+      const Vector3d anchor_t_foot_rear = chain_rear->translation();
+      const Vector3d anchor_t_foot_front = chain_front->translation();
 
       // sum of moments must equal zero
       const double moments = mu1 * (anchor_t_foot_rear.y() - anchor_t_foot_front.y()) +
@@ -1046,13 +1038,18 @@ class ConstrainedNLSTest : public ::testing::Test {
       if (J_out) {
         J_out->setZero();
         // rear
-        J_out->leftCols<3>() = mu1 * rear_foot_D_angles.middleRows<1>(1);
-        J_out->leftCols<3>() += rear_foot_D_angles.topRows<1>();
+        J_out->leftCols<3>() = mu1 * chain_rear->translation_D_params().middleRows<1>(1);
+        J_out->leftCols<3>() += chain_rear->translation_D_params().topRows<1>();
         // front
-        J_out->leftCols<1>() -= mu1 * front_foot_D_angles.middleRows<1>(1).leftCols<1>();
-        J_out->leftCols<1>() += (mu1 / mu2) * front_foot_D_angles.topRows<1>().leftCols<1>();
-        J_out->rightCols<2>() -= mu1 * front_foot_D_angles.middleRows<1>(1).rightCols<2>();
-        J_out->rightCols<2>() += (mu1 / mu2) * front_foot_D_angles.topRows<1>().rightCols<2>();
+        // TODO(gareth): Gross, add utilities for this.
+        J_out->leftCols<1>() -=
+            mu1 * chain_front->translation_D_params().middleRows<1>(1).leftCols<1>();
+        J_out->leftCols<1>() +=
+            (mu1 / mu2) * chain_front->translation_D_params().topRows<1>().leftCols<1>();
+        J_out->rightCols<2>() -=
+            mu1 * chain_front->translation_D_params().middleRows<1>(1).rightCols<2>();
+        J_out->rightCols<2>() +=
+            (mu1 / mu2) * chain_front->translation_D_params().topRows<1>().rightCols<2>();
       }
       return Matrix<double, 1, 1>{moments};
     };
@@ -1108,23 +1105,21 @@ class ConstrainedNLSTest : public ::testing::Test {
     for (const auto& guess : guesses) {
       Logger logger{true, true};
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-      nls.SetLoggingCallback([&](const ConstrainedNonlinearLeastSquares& solver,
-                                 const NLSLogInfo& info) {
-        logger.NonlinearSolverCallback(solver, info);
-        const auto& vars = solver.variables();
-        logger.stream() << "  Rear: "
-                        << chain_rear->ComputeEffectorPosition(vars.head<3>())
-                               .head(2)
-                               .transpose()
-                               .format(test_utils::kNumPyMatrixFmt)
-                        << std::endl;
-        logger.stream() << "  Front: "
-                        << chain_front->ComputeEffectorPosition(Vector3d{vars[0], vars[3], vars[4]})
-                               .head(2)
-                               .transpose()
-                               .format(test_utils::kNumPyMatrixFmt)
-                        << std::endl;
-      });
+      nls.SetLoggingCallback(
+          [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
+            logger.NonlinearSolverCallback(solver, info);
+            const auto& vars = solver.variables();
+            chain_rear->Update(vars.head<3>());
+            chain_front->Update(Vector3d{vars[0], vars[3], vars[4]});
+            logger.stream() << "  Rear: "
+                            << chain_rear->translation().head(2).transpose().format(
+                                   test_utils::kNumPyMatrixFmt)
+                            << std::endl;
+            logger.stream() << "  Front: "
+                            << chain_front->translation().head(2).transpose().format(
+                                   test_utils::kNumPyMatrixFmt)
+                            << std::endl;
+          });
 
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
       ASSERT_EQ(outputs.termination_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL)

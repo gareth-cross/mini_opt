@@ -67,11 +67,15 @@ using AlignedVector = std::vector<T, Eigen::aligned_allocator<T>>;
 struct ChainComputationBuffer {
   // Derivatives of `root_R_effector` wrt tangent of SO(3).
   // Dimension is [3, N * 3]
-  math::Matrix<double, 3, Eigen::Dynamic> orientation_D_tangent;
+  math::Matrix<double, 3, Eigen::Dynamic> rotation_D_rotation;
 
   // Derivatives of `root_t_effector` wrt tangent of SO(3).
   // Dimension is [3, N * 3]
-  math::Matrix<double, 3, Eigen::Dynamic> translation_D_tangent;
+  math::Matrix<double, 3, Eigen::Dynamic> translation_D_rotation;
+
+  // Derivatives of `root_t_effector` wrt translation vectors.
+  // Dimension is [3, N * 3]
+  math::Matrix<double, 3, Eigen::Dynamic> translation_D_translation;
 
   // Buffer for the end frame wrt all intermediate frames.
   // Dimension is N + 1
@@ -114,19 +118,25 @@ struct ActuatorLink {
   // Translational part.
   math::Vector<double, 3> translation;
 
-  // Mask of angles that are active in the optimization.
-  std::array<uint8_t, 3> active;
+  // Mask of angles and translations that are active in the optimization.
+  std::array<uint8_t, 6> active;
 
-  // Number of active angles, between [0, 3].
+  // Used to output derivative of SO(3) tangent wrt angle representation.
+  using DerivativeBlock =
+      Eigen::Block<math::Matrix<double, 3, Eigen::Dynamic>, 3, Eigen::Dynamic, true>;
+
+  // Number of active parameters, between [0, 6].
   int ActiveCount() const;
 
-  // Construct from Pose and mask.
-  ActuatorLink(const Pose& pose, const std::array<uint8_t, 3>& mask);
+  // Number of active rotational parameters, between [0, 3].
+  int ActiveRotationCount() const;
 
-  // Return pose representing this transform, given the euler angles.
-  // Derivative is only of the rotation part, as translation is constant.
-  Pose Compute(const math::Vector<double>& angles, int position,
-               math::Matrix<double, 3, Eigen::Dynamic>* J_out) const;
+  // Construct from Pose and mask.
+  ActuatorLink(const Pose& pose, const std::array<uint8_t, 6>& mask);
+
+  // Return pose representing this transform, given the parameters.
+  // Derivative is only of the rotation part.
+  Pose Compute(const math::Vector<double>& params, int position, DerivativeBlock J_out) const;
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
@@ -138,16 +148,30 @@ struct ActuatorChain {
   // Current poses in the chain.
   std::vector<ActuatorLink> links;
 
-  // Compute translation of the effector.
-  math::Vector<double, 3> ComputeEffectorPosition(
-      const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* J = nullptr);
-
-  // Compute rotation of the effector.
-  math::Quaternion<double> ComputeEffectorRotation(
-      const math::Vector<double>& angles, math::Matrix<double, 3, Eigen::Dynamic>* J = nullptr);
-
   // Total number of optimized variables in this chain (ie. angles that we can alter).
   int TotalActive() const;
+
+  // Iterate over the chain and compute the effector pose.
+  // Derivatives wrt all the active params are computed and cached locally.
+  void Update(const math::Vector<double>& params);
+
+  // Derivative of effector rotation wrt all parameters.
+  // Update has to be called for this to be valid.
+  const math::Matrix<double, 3, Eigen::Dynamic>& rotation_D_params() const {
+    return rotation_D_params_;
+  }
+
+  // Derivative of effector translation wrt all parameters.
+  // Update has to be called for this to be valid.
+  const math::Matrix<double, 3, Eigen::Dynamic>& translation_D_params() const {
+    return translation_D_params_;
+  }
+
+  // Access the position of the effector.
+  math::Vector<double, 3> translation() const { return chain_buffer_.i_t_end.leftCols<1>(); }
+
+  // Access the rotation of the effector.
+  const math::Quaternion<double>& rotation() const { return chain_buffer_.i_R_end.front(); }
 
   // Access cached poses for all the links.
   const std::vector<Pose>& poses() const;
@@ -156,22 +180,21 @@ struct ActuatorChain {
   // Poses cached from last computation.
   std::vector<Pose> pose_buffer_;
 
-  // Buffer of rotations derivatives.
-  math::Matrix<double, 3, Eigen::Dynamic> rotation_D_angles_;
+  // Cached derivative of effector rotation in SO(3) wrt parameters
+  math::Matrix<double, 3, Eigen::Dynamic> rotation_D_params_;
+
+  // Cached derivative of effector translation in SO(3) wrt parameters.
+  math::Matrix<double, 3, Eigen::Dynamic> translation_D_params_;
 
   // Cached products while doing computations.
   ChainComputationBuffer chain_buffer_;
 
-  // Cached angles
-  math::Vector<double> angles_cached_;
+  // Cached parameters
+  math::Vector<double> params_cached_;
 
-  // Iterate over the chain and compute the effector pose.
-  // Derivatives wrt all the input angles are computed and cached locally.
-  void Update(const math::Vector<double>& angles);
-
-  // Return true if the angles have changed since the last time this was called.
+  // Return true if the parameters have changed since the last time this was called.
   // Allows us to re-use intermediate values.
-  bool ShouldUpdate(const math::Vector<double>& angles) const;
+  bool ShouldUpdate(const math::Vector<double>& params) const;
 };
 
 }  // namespace mini_opt
