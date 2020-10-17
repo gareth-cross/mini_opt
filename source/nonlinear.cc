@@ -147,18 +147,15 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const NLSTerminationState maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, &lambda);
     if (logging_callback_) {
+      // log the eigenvalues of the QP as well
       const auto dx_block = const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension);
-      const NLSLogInfo info{iter,
-                            state_,
-                            old_lambda,
-                            errors_pre,
-                            qp_outputs,
-                            dx_block,
-                            directional_derivative,
-                            penalty,
-                            step_result,
-                            steps_,
-                            maybe_exit};
+      const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(qp_.G);
+      const NLSLogInfo info{iter,       state_,
+                            old_lambda, errors_pre,
+                            qp_outputs, solver.eigenvalues(),
+                            dx_block,   directional_derivative,
+                            penalty,    step_result,
+                            steps_,     maybe_exit};
       logging_callback_(*this, info);
     }
 
@@ -505,11 +502,11 @@ Eigen::Vector2d ConstrainedNonlinearLeastSquares::CubicApproxCoeffs(
   ASSERT(alpha_1 > 0);
   ASSERT(alpha_0 > alpha_1, "This must be satisfied for the system to be solvable");
   // clang-format off
-  const Eigen::Matrix2d A = (Eigen::Matrix2d() << 
+  const Eigen::Matrix2d A = (Eigen::Matrix2d() <<
       alpha_0 * alpha_0 * alpha_0, alpha_0 * alpha_0,
       alpha_1 * alpha_1 * alpha_1, alpha_1 * alpha_1).finished();
     const Eigen::Vector2d b{
-      phi_alpha_0 - phi_0 - phi_prime_0 * alpha_0, 
+      phi_alpha_0 - phi_0 - phi_prime_0 * alpha_0,
       phi_alpha_1 - phi_0 - phi_prime_0 * alpha_1
   };
   // clang-format on

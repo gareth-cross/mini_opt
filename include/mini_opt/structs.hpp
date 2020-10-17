@@ -187,7 +187,8 @@ std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state)
 // Details for the log, the current state of the non-linear optimizer.
 struct NLSLogInfo {
   NLSLogInfo(int iteration, OptimizerState optimizer_state, double lambda,
-             const Errors& errors_initial, const QPSolverOutputs& qp, ConstVectorBlock dx,
+             const Errors& errors_initial, const QPSolverOutputs& qp,
+             const Eigen::VectorXd& qp_eigenvalues, ConstVectorBlock dx,
              const DirectionalDerivatives& directional_derivatives, double penalty,
              const StepSizeSelectionResult& step_result, const std::vector<LineSearchStep>& steps,
              const NLSTerminationState& termination_state)
@@ -196,6 +197,7 @@ struct NLSLogInfo {
         lambda(lambda),
         errors_initial(errors_initial),
         qp_term_state(qp),
+        qp_eigenvalues(qp_eigenvalues),
         dx(std::move(dx)),
         directional_derivatives(directional_derivatives),
         penalty(penalty),
@@ -208,6 +210,7 @@ struct NLSLogInfo {
   double lambda;
   Errors errors_initial;
   QPSolverOutputs qp_term_state;
+  const Eigen::VectorXd& qp_eigenvalues;
   const ConstVectorBlock dx;
   DirectionalDerivatives directional_derivatives;
   double penalty;

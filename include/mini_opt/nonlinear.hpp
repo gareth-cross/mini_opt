@@ -153,6 +153,9 @@ struct ConstrainedNonlinearLeastSquares {
   // Variables at the start of the last iteration.
   const Eigen::VectorXd& previous_variables() const { return prev_variables_; }
 
+  // Evaluate the non-linear error.
+  Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars, const Norm& equality_norm);
+
  private:
   // Update candidate_vars w/ a step size of alpha.
   void RetractCandidateVars(double alpha);
@@ -160,9 +163,6 @@ struct ConstrainedNonlinearLeastSquares {
   // Linearize and fill the QP w/ the problem definition.
   static Errors LinearizeAndFillQP(const Eigen::VectorXd& variables, double lambda,
                                    const Norm& equality_norm, const Problem& problem, QP* qp);
-
-  // Evaluate the non-linear error.
-  Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars, const Norm& equality_norm);
 
   // Based on the outcome of the step selection, update lambda and check if
   // we should exit. Returns NONE if no exit is required.
