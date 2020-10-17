@@ -56,9 +56,13 @@ struct Logger {
     return (counters_.counts.count(v) > 0) ? counters_.counts.at(v) : 0;
   }
 
+  // Enable or disable use of colors
+  void SetUseColors(bool c) { use_colors_ = c; }
+
  private:
   const bool print_qp_variables_;
   const bool print_nonlinear_variables_;
+  bool use_colors_{true};
   std::stringstream stream_;
   StatCounters counters_{};
 };

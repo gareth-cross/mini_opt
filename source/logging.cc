@@ -4,7 +4,6 @@
 #include <iomanip>
 
 #include "mini_opt/nonlinear.hpp"
-#include "mini_opt/qp.hpp"
 
 // TODO(gareth): Would really like to use libfmt for this instead...
 namespace mini_opt {
@@ -16,16 +15,19 @@ static const Eigen::IOFormat kMatrixFmt(Eigen::FullPrecision, 0, ", ", ",\n", "[
 #define NO_COLOR (-1)
 
 struct Color {
-  explicit Color(int code) : code(code) {}
+  Color(int code, bool enabled) : code(code), enabled(enabled) {}
 
   const int code;
+  const int enabled;
 };
 
 std::ostream& operator<<(std::ostream& stream, const Color& c) {
-  if (c.code >= 0) {
-    stream << "\u001b[38;5;" << c.code << "m";
-  } else {
-    stream << "\u001b[0m";
+  if (c.enabled) {
+    if (c.code >= 0) {
+      stream << "\u001b[38;5;" << c.code << "m";
+    } else {
+      stream << "\u001b[0m";
+    }
   }
   return stream;
 }
@@ -112,31 +114,34 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
   counters_.counts[StatCounters::NUM_LINE_SEARCH_STEPS] += static_cast<int>(info.steps.size());
   if (info.termination_state != NLSTerminationState::MAX_LAMBDA &&
       info.termination_state != NLSTerminationState::MAX_ITERATIONS) {
-    stream_ << Color(GREEN);
+    stream_ << Color(GREEN, use_colors_);
   } else {
-    stream_ << Color(RED);
+    stream_ << Color(RED, use_colors_);
   }
   stream_ << "Iteration #" << info.iteration << ", state = " << info.optimizer_state
-          << ", lambda = " << info.lambda;
-  stream_ << ", f(0): " << std::setprecision(std::numeric_limits<double>::max_digits10)
+          << ", lambda = " << info.lambda << "\n";
+  stream_ << "  f(0): " << std::setprecision(std::numeric_limits<double>::max_digits10)
           << info.errors_initial.f << ", c(0): " << info.errors_initial.equality
           << ", total: " << info.errors_initial.Total(info.penalty) << "\n";
+  stream_ << "  min, max eig = " << info.qp_eigenvalues.minCoeff() << ", "
+          << info.qp_eigenvalues.maxCoeff() << "\n";
   stream_ << "  termination = " << info.termination_state << "\n";
   stream_ << "  penalty = " << info.penalty << "\n";
   stream_ << "  QP: " << info.qp_term_state.termination_state << ", "
           << info.qp_term_state.num_iterations << "\n";
   stream_ << "  df/dalpha = " << info.directional_derivatives.d_f
           << ", dc/dalpha = " << info.directional_derivatives.d_equality << "\n";
-  stream_ << Color(NO_COLOR);
+  stream_ << Color(NO_COLOR, use_colors_);
+
   if (info.step_result == StepSizeSelectionResult::SUCCESS) {
-    stream_ << Color(GREEN);
+    stream_ << Color(GREEN, use_colors_);
   } else {
     if (info.step_result != StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED) {
       counters_.counts[StatCounters::NUM_FAILED_LINE_SEARCHES]++;
     }
-    stream_ << Color(RED);
+    stream_ << Color(RED, use_colors_);
   }
-  stream_ << "  Search result: " << info.step_result << "\n" << Color(NO_COLOR);
+  stream_ << "  Search result: " << info.step_result << "\n" << Color(NO_COLOR, use_colors_);
 
   int i = 0;
   for (const LineSearchStep& step : info.steps) {
