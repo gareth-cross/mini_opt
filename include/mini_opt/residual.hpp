@@ -107,21 +107,30 @@ struct Residual : public ResidualBase {
 #pragma warning(disable : 4127)
 #endif  // _MSC_VER
 
-template <int ResidualDim, int NumParams>
-typename Residual<ResidualDim, NumParams>::ParamType
-Residual<ResidualDim, NumParams>::GetParamSlice(const Eigen::VectorXd& params) const {
-  ParamType sliced;
-  if (NumParams == Eigen::Dynamic) {
-    // TODO(gareth): Create cached storage for this?
-    sliced.resize(index.size());
+// Helper to read a sparse set of values out of a larger matrix.
+template <int N>
+void ReadSparseValues(const Eigen::VectorXd& input,
+                      const typename internal::IndexType<N>::type& index,
+                      Eigen::Matrix<double, N, 1>* output) {
+  ASSERT(output != nullptr);
+  if (N == Eigen::Dynamic) {
+    output->resize(index.size());
   }
   for (std::size_t local = 0; local < index.size(); ++local) {
     const int i = index[local];
     ASSERT(i >= 0);
-    ASSERT(i < params.rows(), "Index %i exceeds the # of provided params, which is %i", i,
-           params.rows());
-    sliced[local] = params[i];
+    ASSERT(i < input.rows(), "Index %i exceeds the # of provided params, which is %i", i,
+           input.rows());
+    output->operator[](local) = input[i];
   }
+}
+
+template <int ResidualDim, int NumParams>
+typename Residual<ResidualDim, NumParams>::ParamType
+Residual<ResidualDim, NumParams>::GetParamSlice(const Eigen::VectorXd& params) const {
+  // TODO(gareth): Create cached storage for this.
+  ParamType sliced;
+  ReadSparseValues<NumParams>(params, index, &sliced);
   return sliced;
 }
 

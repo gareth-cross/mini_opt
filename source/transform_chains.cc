@@ -95,29 +95,45 @@ int ActuatorLink::ActiveRotationCount() const {
 }
 
 ActuatorLink::ActuatorLink(const Pose& pose, const std::array<uint8_t, 6>& mask)
-    // Invert here, since this function assumes the order ZYX
-    : rotation_xyz(-math::EulerAnglesFromSO3(pose.rotation.conjugate())),
-      translation(pose.translation),
-      active(mask) {
+    : parent_T_child(pose), active(mask) {
   // Check that decomposition worked to catch issues early.
-  const math::Matrix<double, 3, 3> R_delta =
-      (math::SO3FromEulerAngles(rotation_xyz, math::CompositionOrder::XYZ).q.matrix() -
-       pose.rotation.matrix())
-          .cwiseAbs();
-  ASSERT((R_delta.array() < 1.0e-5).all(), "Euler angle decomposition failed");
+  if (ActiveRotationCount() > 0) {
+    // TODO(gareth): Do something that generalizes better than just plain euler angles.
+    // Invert here, since this function assumes the order ZYX
+    rotation_xyz = -math::EulerAnglesFromSO3(pose.rotation.conjugate());
+
+    const math::Matrix<double, 3, 3> R_delta =
+        (math::SO3FromEulerAngles(rotation_xyz, math::CompositionOrder::XYZ).q.matrix() -
+         pose.rotation.matrix())
+            .cwiseAbs();
+    ASSERT((R_delta.array() < 1.0e-5).all(), "Euler angle decomposition failed");
+  }
 }
 
 // Return pose representing this transform, given the euler angles.
+// TODO(gareth): Not a fan of this logic. It might be cleaner to just create a lambda in the
+// constructor that does the correct logic, and specialize it depending on which set of flags
+// are active? Alternatively, could just use polymorphism on each active link and make them
+// all specialized like that.
 Pose ActuatorLink::Compute(const math::Vector<double>& params, const int position,
                            DerivativeBlock J_out) const {
   ASSERT(J_out.cols() == ActiveRotationCount(), "Wrong number of columns in output jacobian");
+  if (ActiveRotationCount() == 0) {
+    math::Vector<double, 3> translation_xyz = parent_T_child.translation;
+    for (int i = 0, param_index = position; i < 3; ++i) {
+      if (active[static_cast<std::size_t>(i) + 3]) {
+        ASSERT(param_index < params.rows());
+        translation_xyz[i] = params[param_index++];
+      }
+    }
+    return Pose{parent_T_child.rotation, translation_xyz};
+  }
   // Pull out just the angles and translations we care about.
   math::Vector<double, 6> params_updated;
   params_updated.head<3>() = rotation_xyz;
-  params_updated.tail<3>() = translation;
+  params_updated.tail<3>() = parent_T_child.translation;
   for (int i = 0, param_index = position; i < 6; ++i) {
     if (active[i]) {
-      ASSERT(param_index < params.rows());
       params_updated[i] = params[param_index++];
     }
   }
@@ -148,6 +164,9 @@ void ActuatorChain::Update(const math::Vector<double>& params) {
   if (translation_D_params_.size() == 0) {
     // compute total active
     const int total_active = TotalActive();
+    ASSERT(params.rows() == total_active,
+           "Wrong number of params passed. Expected = %i, actual = %i", total_active,
+           params.rows());
     rotation_D_params_.resize(3, total_active);
     rotation_D_params_.setZero();
     translation_D_params_.resize(3, total_active);

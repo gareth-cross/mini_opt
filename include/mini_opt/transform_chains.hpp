@@ -111,15 +111,15 @@ std::vector<Pose> ComputeAllPoses(const ChainComputationBuffer& buffer);
  * can choose the rotation frames so that the singularity is not an issue.
  */
 struct ActuatorLink {
-  // Euler angles from the decomposed rotation.
-  // Factorized w/ order XYZ.
-  math::Vector<double, 3> rotation_xyz;
-
-  // Translational part.
-  math::Vector<double, 3> translation;
+  // The pose of this link, in the original state (no parameter substitutions).
+  Pose parent_T_child;
 
   // Mask of angles and translations that are active in the optimization.
   std::array<uint8_t, 6> active;
+
+  // Euler angles from the decomposed rotation.
+  // Factorized w/ order XYZ, only initialized if a rotation is active.
+  math::Vector<double, 3> rotation_xyz;
 
   // Used to output derivative of SO(3) tangent wrt angle representation.
   using DerivativeBlock =

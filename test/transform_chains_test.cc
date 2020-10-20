@@ -129,6 +129,7 @@ TEST(ActuatorLinkTest, TestComputePose) {
 
   // storage for parameters
   VectorXd input_params_dynamic(10);
+  constexpr int kParamOffset = 3;
 
   for (const auto& mask : possible_masks) {
     ActuatorLink link{pose, mask};
@@ -140,12 +141,15 @@ TEST(ActuatorLinkTest, TestComputePose) {
     // what the result should amount to
     const math::Vector<double, 6> combined_params =
         mask_float * input_params.array() +
-        (1 - mask_float) *
-            (math::Vector<double, 6>() << link.rotation_xyz, link.translation).finished().array();
+        (1 - mask_float) * (math::Vector<double, 6>() << -math::EulerAnglesFromSO3(
+                                link.parent_T_child.rotation.conjugate()),
+                            link.parent_T_child.translation)
+                               .finished()
+                               .array();
 
     // put the input angles in the right space in the buffer
     input_params_dynamic.setConstant(std::numeric_limits<double>::quiet_NaN());
-    for (int i = 0, output_pos = 3; i < 6; ++i) {
+    for (int i = 0, output_pos = kParamOffset; i < 6; ++i) {
       if (mask[i]) {
         input_params_dynamic[output_pos++] = combined_params[i];
       }
@@ -163,7 +167,8 @@ TEST(ActuatorLinkTest, TestComputePose) {
     // derivative should also respect the active flag
     const auto lambda = [&](const VectorXd& params) {
       Eigen::Matrix<double, 3, Dynamic> unused(3, 10);
-      return link.Compute(params, 3, unused.leftCols(link.ActiveRotationCount())).rotation;
+      return link.Compute(params, kParamOffset, unused.leftCols(link.ActiveRotationCount()))
+          .rotation;
     };
     const Matrix<double, 3, Dynamic> J_numerical =
         math::NumericalJacobian(input_params_dynamic, lambda);
