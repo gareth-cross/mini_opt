@@ -887,6 +887,7 @@ class ConstrainedNLSTest : public ::testing::Test {
                             << chain->translation().head(2).transpose().format(
                                    test_utils::kNumPyMatrixFmt)
                             << std::endl;
+            return true;
           });
 
       // solve it
@@ -931,6 +932,7 @@ class ConstrainedNLSTest : public ::testing::Test {
         logger.NonlinearSolverCallback(solver, info);
         logger.stream() << "    dx = " << info.dx.transpose().format(test_utils::kNumPyMatrixFmt)
                         << std::endl;
+        return true;
       });
 
       // solve it
@@ -1119,6 +1121,7 @@ class ConstrainedNLSTest : public ::testing::Test {
                             << chain_front->translation().head(2).transpose().format(
                                    test_utils::kNumPyMatrixFmt)
                             << std::endl;
+            return true;
           });
 
       const NLSSolverOutputs outputs = nls.Solve(p, guess);

@@ -71,6 +71,9 @@ std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state)
     case NLSTerminationState::MAX_LAMBDA:
       stream << "MAX_LAMBDA";
       break;
+    case NLSTerminationState::USER_CALLBACK:
+      stream << "USER_CALLBACK";
+      break;
   }
   return stream;
 }

@@ -108,7 +108,7 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
 #endif
 }
 
-void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
+bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
                                      const NLSLogInfo& info) {
   counters_.counts[StatCounters::NUM_NLS_ITERATIONS]++;
   counters_.counts[StatCounters::NUM_LINE_SEARCH_STEPS] += static_cast<int>(info.steps.size());
@@ -156,6 +156,7 @@ void Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
     stream_ << "    x_old = " << solver.previous_variables().transpose().format(kMatrixFmt) << "\n";
     stream_ << "    x_new = " << solver.variables().transpose().format(kMatrixFmt) << "\n";
   }
+  return true;
 }
 
 std::string Logger::GetString() const { return stream_.str(); }

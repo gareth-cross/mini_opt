@@ -115,7 +115,7 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Signature of custom logger.
   using LoggingCallback =
-      std::function<void(const ConstrainedNonlinearLeastSquares& self, const NLSLogInfo& info)>;
+      std::function<bool(const ConstrainedNonlinearLeastSquares& self, const NLSLogInfo& info)>;
 
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* problem,

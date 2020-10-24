@@ -144,7 +144,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
-    const NLSTerminationState maybe_exit =
+    NLSTerminationState maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, &lambda);
     if (logging_callback_) {
       // log the eigenvalues of the QP as well
@@ -156,7 +156,10 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
                             dx_block,   directional_derivative,
                             penalty,    step_result,
                             steps_,     maybe_exit};
-      logging_callback_(*this, info);
+      const bool should_proceed = logging_callback_(*this, info);
+      if (maybe_exit == NLSTerminationState::NONE && !should_proceed) {
+        maybe_exit = NLSTerminationState::USER_CALLBACK;
+      }
     }
 
     if (maybe_exit != NLSTerminationState::NONE) {

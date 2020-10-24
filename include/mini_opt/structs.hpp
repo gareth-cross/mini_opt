@@ -168,6 +168,8 @@ enum class NLSTerminationState {
   SATISFIED_FIRST_ORDER_TOL,
   // Hit max lambda value while failing to decrease cost.
   MAX_LAMBDA,
+  // User specified callback indicated exit.
+  USER_CALLBACK,
 };
 
 // Outputs from NLS Solve() method.

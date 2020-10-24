@@ -38,8 +38,8 @@ struct Logger {
   void QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
                         const KKTError& kkt_after, const IPIterationOutputs& outputs);
 
-  // Callback for the nonlinear solver.
-  void NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
+  // Callback for the nonlinear solver (returns true).
+  bool NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
                                const NLSLogInfo& info);
 
   // Get the resulting string from the stream.
