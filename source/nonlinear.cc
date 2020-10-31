@@ -126,7 +126,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
           params.equality_constraint_norm,
           const_cast<const QPInteriorPointSolver&>(solver_).y_block(), errors_pre.equality);
       if (new_penalty > penalty) {
-        penalty = new_penalty * 1.01;
+        penalty = new_penalty * params.equality_penalty_scale_factor;
       }
     }
 

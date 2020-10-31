@@ -96,6 +96,10 @@ struct ConstrainedNonlinearLeastSquares {
     // Initial value of the equality constraint penalty.
     double equality_penalty_initial{0};
 
+    // Scale factor when increasing the equality penalty.
+    // The new penalty is set to max(lambda) * scale_factor (must be > 1).
+    double equality_penalty_scale_factor{1.01};
+
     // Initial lambda value.
     double lambda_initial{0.0};
 
