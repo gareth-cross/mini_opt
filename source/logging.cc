@@ -150,6 +150,13 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
             << ", total: " << step.errors.Total(info.penalty) << ", alpha = " << step.alpha << "\n";
     ++i;
   }
+
+  const QPInteriorPointSolver& qp = solver.solver();
+  const auto s_block = qp.s_block();
+  if (s_block.rows() > 0) {
+    stream_ << "  Slack variables: " << s_block.transpose().format(kMatrixFmt) << std::endl;
+  }
+
   // print extra details
   if (print_nonlinear_variables_) {
     stream_ << "  Variables:\n";

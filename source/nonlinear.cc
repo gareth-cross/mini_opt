@@ -108,6 +108,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     // Solve the QP.
     solver_.Setup(&qp_);
     if (has_cached_qp_state) {
+      // Initialize everything from the output of the last iteration, except x (initialize to zero).
       solver_.SetVariables(cached_qp_states_);
       solver_.x_block().setZero();
     }

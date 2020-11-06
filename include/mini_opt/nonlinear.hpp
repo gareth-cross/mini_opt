@@ -160,6 +160,9 @@ struct ConstrainedNonlinearLeastSquares {
   // Evaluate the non-linear error.
   Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars, const Norm& equality_norm);
 
+  // Access the qp.
+  const QPInteriorPointSolver& solver() const { return solver_; }
+
  private:
   // Update candidate_vars w/ a step size of alpha.
   void RetractCandidateVars(double alpha);
