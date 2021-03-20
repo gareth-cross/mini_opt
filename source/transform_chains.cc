@@ -8,6 +8,11 @@
 namespace mini_opt {
 using namespace Eigen;
 
+math::Matrix<double, 4, 4> Pose::ToMatrix() const {
+  return (math::Matrix<double, 4, 4>() << rotation.matrix(), translation, 0, 0, 0, 1)
+      .finished();
+}
+
 Pose ChainComputationBuffer::start_T_end() const {
   ASSERT(!i_R_end.empty() && i_t_end.cols() > 0);
   return Pose{i_R_end.front(), i_t_end.leftCols<1>()};

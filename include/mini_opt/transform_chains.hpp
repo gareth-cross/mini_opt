@@ -44,6 +44,9 @@ struct Pose {
     return rotation * v + translation;
   }
 
+  // Convert to 4x4 transformation matrix.
+  math::Matrix<double, 4, 4> ToMatrix() const;
+
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
