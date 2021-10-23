@@ -133,8 +133,6 @@ TEST(ActuatorLinkTest, TestComputePose) {
 
   for (const auto& mask : possible_masks) {
     ActuatorLink link{pose, mask};
-    const int num_active = link.ActiveCount();
-
     const Array<double, 6, 1> mask_float =
         Eigen::Map<const Eigen::Matrix<uint8_t, 6, 1>>(mask.data()).cast<double>();
 

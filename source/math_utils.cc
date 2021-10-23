@@ -8,7 +8,7 @@ namespace mini_opt {
 
 template <typename Scalar>
 Scalar ModPi(Scalar x) {
-  static_assert(std::is_floating_point_v<Scalar>, "Must be float");
+  static_assert(std::is_floating_point<Scalar>::value, "Must be float");
   constexpr auto pi = static_cast<Scalar>(M_PI);
   if (x < 0) {
     return -ModPi(-x);
@@ -26,7 +26,7 @@ template double ModPi<double>(double x);
 
 template <typename Scalar>
 Scalar DegToRad(Scalar deg) {
-  static_assert(std::is_floating_point_v<Scalar>, "Must be float");
+  static_assert(std::is_floating_point<Scalar>::value, "Must be float");
   constexpr auto pi = static_cast<Scalar>(M_PI);
   return deg * pi / 180;
 }
@@ -36,7 +36,7 @@ template double DegToRad<double>(double x);
 // Convert radians to degrees.
 template <typename Scalar>
 Scalar RadToDeg(Scalar rad) {
-  static_assert(std::is_floating_point_v<Scalar>, "Must be float");
+  static_assert(std::is_floating_point<Scalar>::value, "Must be float");
   constexpr auto pi = static_cast<Scalar>(M_PI);
   return rad * (180 / pi);
 }
