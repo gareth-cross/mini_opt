@@ -1057,7 +1057,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     };
     problem.costs.emplace_back(new Residual<1, 5>({{0, 1, 2, 3, 4}}, moment_expression));
     TestResidualFunctionDerivative<1, 5>(
-        moment_expression, (Matrix<double, 5, 1>() << 0.22, -0.3, 0.45, 0.6, -0.1, 0.2).finished());
+        moment_expression, (Matrix<double, 5, 1>() << 0.22, -0.3, 0.45, 0.6, -0.1).finished());
 
     // inequality constraint on the knee of the rear leg
     problem.inequality_constraints.push_back(Var(2) >= 0.0);
