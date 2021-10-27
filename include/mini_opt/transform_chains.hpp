@@ -6,6 +6,12 @@
 
 // Code for representing and computing chains of transforms, such as you might
 // find in a robotic actuator or skeleton.
+// TODO(gareth): These types are fairly specific to what I was doing with Unreal Engine
+// and maybe belong somewhere else. Pretty particular to one problem formulation. I
+// also expect the optimizer would work better if we eliminated the rotation representation
+// and just used length-constrained vectors in R3 to represent bones. The euler-angle
+// representation is a bit gross, and was chosen since the initial version only optimized
+// one angle per bone.
 namespace mini_opt {
 
 /*
@@ -15,7 +21,8 @@ namespace mini_opt {
  */
 struct Pose {
   // Construct w/ rotation and translation.
-  Pose(const math::Quaternion<double>& q, const math::Vector<double, 3>& t)
+  Pose(const math::Quaternion<double>& q,
+       const math::Vector<double, 3>& t)  // NOLINT(modernize-pass-by-value)
       : rotation(q), translation(t) {}
 
   Pose()
@@ -30,13 +37,13 @@ struct Pose {
 
   // Multiply together.
   Pose operator*(const Pose& other) const {
-    return Pose(rotation * other.rotation, translation + rotation * other.translation);
+    return {rotation * other.rotation, translation + rotation * other.translation};
   }
 
   // Invert the pose. If this is A, returns B such that A*B = Identity
   Pose Inverse() const {
     const math::Quaternion<double> R_inv = rotation.inverse();
-    return Pose(R_inv, R_inv * -translation);
+    return {R_inv, R_inv * -translation};
   }
 
   // Multiply by vector.
