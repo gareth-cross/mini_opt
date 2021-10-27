@@ -80,5 +80,9 @@ target_include_directories(${PROJECT_NAME}
     ${EIGEN_INCLUDE_DIRS}
     )
 
+if (WIN32)
+  configure_file("scripts/make.ps1" "make.ps1" COPYONLY)
+endif ()
+
 # Unit tests
 add_subdirectory(test)
