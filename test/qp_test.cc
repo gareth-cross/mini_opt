@@ -388,6 +388,8 @@ class QPSolverTest : public ::testing::Test {
     // specify x[1]/4 + x[3] == -2.0
     qp.A_eq.resize(2, 4);
     qp.b_eq.resize(2);
+    qp.A_eq.setZero();
+    qp.b_eq.setZero();
     qp.A_eq(0, 0) = 1;
     qp.A_eq(0, 2) = -0.5;
     qp.A_eq(1, 1) = 0.25;
@@ -419,7 +421,7 @@ class QPSolverTest : public ::testing::Test {
     QP qp{};
     BuildQuadratic({Root(1.0, -0.5), Root(1.0, -0.25), Root(1.0, 1.0)}, &qp);
 
-    // lock all the variables to a specific value (nothing to optimized)
+    // lock all the variables to a specific value (nothing to optimize)
     qp.A_eq = Matrix3d::Identity();
     qp.b_eq = -Vector3d{1., 2., 3.};
 
@@ -544,16 +546,16 @@ class QPSolverTest : public ::testing::Test {
       std::vector<uint8_t> constraint_mask;
       const QP qp = GenerateRandomQP(p, kProblemDim, 0.5, &x_solution, &constraint_mask);
 
-      // solve it, use the MPC strategy for these ones
+      // solve it, use the MPC strategy for these problems
       solver.Setup(&qp);
 
       QPInteriorPointSolver::Params params{};
       params.termination_kkt_tol = tol::kPico;
       params.barrier_strategy = BarrierStrategy::COMPLEMENTARITY;
 
-      // Some of the randomly generated problems start close to the barrier, which causes
+      // Some of these randomly generated problems start close to the barrier, which causes
       // them to bounce around a bunch before getting close to the solution. Should implement
-      // a strategy for this, but for now I'm gonna crank this up.
+      // a strategy for this, but for now I'm going to crank this up.
       params.max_iterations = 30;
 
       for (InitialGuessMethod method :
@@ -566,15 +568,13 @@ class QPSolverTest : public ::testing::Test {
         iter_counts[method] += outputs.num_iterations;  //  total up # number of iterations
 
         ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 5.0e-5)
-            << "Term: " << outputs.termination_state << "\n"
-            << "Problem p = " << p << "\nSummary:\n"
-            << logger.GetString();
+            << fmt::format("Termination: {}\nProblem p = {}\nSummary:\n{}",
+                           outputs.termination_state, p, logger.GetString());
 
         // check the variables that are constrained
         ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 5.0e-5)
-            << "Term: " << outputs.termination_state << "\n"
-            << "Problem p = " << p << "\nSummary:\n"
-            << logger.GetString();
+            << fmt::format("Termination: {}\nProblem p = {}\nSummary:\n{}",
+                           outputs.termination_state, p, logger.GetString());
       }
     }
     PRINT(iter_counts[InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED]);
