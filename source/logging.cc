@@ -1,11 +1,12 @@
 // Copyright 2020 Gareth Cross
 #include "mini_opt/logging.hpp"
 
+#include <fmt/ostream.h>
+
 #include <iomanip>
 
 #include "mini_opt/nonlinear.hpp"
 
-// TODO(gareth): Would really like to use libfmt for this instead...
 namespace mini_opt {
 
 static const Eigen::IOFormat kMatrixFmt(Eigen::FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
@@ -24,7 +25,7 @@ struct Color {
 std::ostream& operator<<(std::ostream& stream, const Color& c) {
   if (c.enabled) {
     if (c.code >= 0) {
-      stream << "\u001b[38;5;" << c.code << "m";
+      stream << fmt::format("\u001b[38;5;{}m", c.code);
     } else {
       stream << "\u001b[0m";
     }
@@ -66,43 +67,49 @@ std::ostream& operator<<(std::ostream& s, const StatCounters::Stats& val) {
 void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
                               const KKTError& kkt_after, const IPIterationOutputs& outputs) {
   counters_.counts[StatCounters::NUM_QP_ITERATIONS]++;
-  stream_ << "Iteration summary: ";
-  stream_ << "||kkt|| max: " << kkt_prev.Max() << " --> " << kkt_after.Max()
-          << ", mu = " << outputs.mu << ", a_p = " << outputs.alpha.primal
-          << ", a_d = " << outputs.alpha.dual << "\n";
+  stream_ << fmt::format(
+      "Iteration summary: "
+      "||kkt|| max: {} --> {}, mu = {}, a_p = {}, a_d = {}\n",
+      kkt_prev.Max(), kkt_after.Max(), outputs.mu, outputs.alpha.primal, outputs.alpha.dual);
 
   if (!std::isnan(outputs.mu_affine)) {
     // print only if filled...
-    stream_ << " Probe alphas: a_p = " << outputs.alpha_probe.primal
-            << ", a_d = " << outputs.alpha_probe.dual << ", mu_affine = " << outputs.mu_affine
-            << "\n";
+    stream_ << fmt::format(" Probe alphas: a_p = {}, a_d = {}, mu_affine = {}\n",
+                           outputs.alpha_probe.primal, outputs.alpha_probe.dual, outputs.mu_affine);
   }
 
   // dump progress of individual KKT conditions
-  stream_ << " KKT errors, L2:\n";
-  stream_ << "  r_dual = " << kkt_prev.r_dual << " --> " << kkt_after.r_dual << "\n";
-  stream_ << "  r_comp = " << kkt_prev.r_comp << " --> " << kkt_after.r_comp << "\n";
-  stream_ << "  r_p_eq = " << kkt_prev.r_primal_eq << " --> " << kkt_after.r_primal_eq << "\n";
-  stream_ << "  r_p_ineq = " << kkt_prev.r_primal_ineq << " --> " << kkt_after.r_primal_ineq
-          << "\n";
+  stream_ << fmt::format(
+      " KKT errors, L2:\n"
+      " r_dual = {} --> {}\n"
+      " r_comp = {} --> {}\n"
+      " r_p_eq = {} --> {}\n"
+      " r_p_ineq = {} --> {}\n",
+      kkt_prev.r_dual, kkt_after.r_dual, kkt_prev.r_comp, kkt_after.r_comp, kkt_prev.r_primal_eq,
+      kkt_after.r_primal_eq, kkt_prev.r_primal_ineq, kkt_after.r_primal_ineq);
 
   if (print_qp_variables_) {
     // dump the state with labels
-    stream_ << " Variables post-update:\n";
-    stream_ << "  x = " << solver.x_block().transpose().format(kMatrixFmt) << "\n";
-    stream_ << "  s = " << solver.s_block().transpose().format(kMatrixFmt) << "\n";
-    stream_ << "  y = " << solver.y_block().transpose().format(kMatrixFmt) << "\n";
-    stream_ << "  z = " << solver.z_block().transpose().format(kMatrixFmt) << "\n";
+    stream_ << fmt::format(
+        " Variables post-update:\n"
+        "  x = {}\n"
+        "  s = {}\n"
+        "  y = {}\n"
+        "  z = {}\n",
+        solver.x_block().transpose().format(kMatrixFmt),
+        solver.s_block().transpose().format(kMatrixFmt),
+        solver.y_block().transpose().format(kMatrixFmt),
+        solver.z_block().transpose().format(kMatrixFmt));
   }
   // summarize where the inequality constraints are
 #if 0
   stream_ << " Constraints:\n";
-  std::size_t i = 0;
+  int i = 0;
   for (const LinearInequalityConstraint& c : solver.problem().constraints) {
-    stream_ << "  Constraint " << i << ": ax[" << c.variable
-            << "] + b - s == " << c.a * solver.x_block()[c.variable] + c.b - solver.s_block()[i]
-            << "  (" << c.a << " * " << solver.x_block()[c.variable] << " + " << c.b << " - "
-            << solver.s_block()[i] << ")\n";
+    stream_ << fmt::format(
+        "  Constraint {}: a * x[{}] + b - s = {} = ({} * {:.6f} + {:.6f} - {:.6f})\n", i,
+        c.variable, c.a * solver.x_block()[c.variable] + c.b - solver.s_block()[i], c.a,
+        solver.x_block()[c.variable], c.b, solver.s_block()[i]);
     ++i;
   }
 #endif
@@ -118,19 +125,18 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
   } else {
     stream_ << Color(RED, use_colors_);
   }
-  stream_ << "Iteration #" << info.iteration << ", state = " << info.optimizer_state
-          << ", lambda = " << info.lambda << "\n";
-  stream_ << "  f(0): " << std::setprecision(std::numeric_limits<double>::max_digits10)
-          << info.errors_initial.f << ", c(0): " << info.errors_initial.equality
-          << ", total: " << info.errors_initial.Total(info.penalty) << "\n";
-  stream_ << "  min, max eig = " << info.qp_eigenvalues.minCoeff() << ", "
-          << info.qp_eigenvalues.maxCoeff() << "\n";
-  stream_ << "  termination = " << info.termination_state << "\n";
-  stream_ << "  penalty = " << info.penalty << "\n";
-  stream_ << "  QP: " << info.qp_term_state.termination_state << ", "
-          << info.qp_term_state.num_iterations << "\n";
-  stream_ << "  df/dalpha = " << info.directional_derivatives.d_f
-          << ", dc/dalpha = " << info.directional_derivatives.d_equality << "\n";
+  stream_ << fmt::format("Iteration # {}, state = {}, lambda = {}\n", info.iteration,
+                         info.optimizer_state, info.lambda);
+  stream_ << fmt::format("  f(0): {:.16e}, c(0): {:.16e}, total: {:.16e}\n", info.errors_initial.f,
+                         info.errors_initial.equality, info.errors_initial.Total(info.penalty));
+  stream_ << fmt::format("  min, max eig = {:.16e}, {:.16e}\n", info.qp_eigenvalues.minCoeff(),
+                         info.qp_eigenvalues.maxCoeff());
+  stream_ << fmt::format("  termination = {}\n", info.termination_state);
+  stream_ << fmt::format("  penalty = {:.16f}\n", info.penalty);
+  stream_ << fmt::format("  QP: {}, {}\n", info.qp_term_state.termination_state,
+                         info.qp_term_state.num_iterations);
+  stream_ << fmt::format("  df/dalpha = {}, dc/dalpha = {}\n", info.directional_derivatives.d_f,
+                         info.directional_derivatives.d_equality);
   stream_ << Color(NO_COLOR, use_colors_);
 
   if (info.step_result == StepSizeSelectionResult::SUCCESS) {
@@ -141,27 +147,30 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
     }
     stream_ << Color(RED, use_colors_);
   }
-  stream_ << "  Search result: " << info.step_result << "\n" << Color(NO_COLOR, use_colors_);
+  stream_ << fmt::format("  Search result: {}\n", info.step_result) << Color(NO_COLOR, use_colors_);
 
   int i = 0;
   for (const LineSearchStep& step : info.steps) {
-    stream_ << "  f(" << i << "): " << std::setprecision(std::numeric_limits<double>::max_digits10)
-            << step.errors.f << ", c(" << i << "): " << step.errors.equality
-            << ", total: " << step.errors.Total(info.penalty) << ", alpha = " << step.alpha << "\n";
+    stream_ << fmt::format("  f({}): {:.16e}, c({}): {:.16e}, total: {:.16e}, alpha = {:.10f}\n", i,
+                           step.errors.f, i, step.errors.equality, step.errors.Total(info.penalty),
+                           step.alpha);
     ++i;
   }
 
   const QPInteriorPointSolver& qp = solver.solver();
   const auto s_block = qp.s_block();
   if (s_block.rows() > 0) {
-    stream_ << "  Slack variables: " << s_block.transpose().format(kMatrixFmt) << std::endl;
+    stream_ << fmt::format("  Slack variables: {}\n", s_block.transpose().format(kMatrixFmt));
   }
 
   // print extra details
   if (print_nonlinear_variables_) {
-    stream_ << "  Variables:\n";
-    stream_ << "    x_old = " << solver.previous_variables().transpose().format(kMatrixFmt) << "\n";
-    stream_ << "    x_new = " << solver.variables().transpose().format(kMatrixFmt) << "\n";
+    stream_ << fmt::format(
+        "  Variables:\n"
+        "    x_old = {}\n"
+        "    x_new = {}\n",
+        solver.previous_variables().transpose().format(kMatrixFmt),
+        solver.variables().transpose().format(kMatrixFmt));
   }
   return true;
 }
