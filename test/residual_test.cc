@@ -1,4 +1,4 @@
-// Copyright 2020 Gareth Cross
+// Copyright 2021 Gareth Cross
 #include "mini_opt/residual.hpp"
 
 #include "test_utils.hpp"
@@ -15,7 +15,7 @@ static Eigen::Vector2d DummyFunction(const Matrix<double, 3, 1>& p, Matrix<doubl
   const double x = p.x();
   const double y = p.y();
   const double z = p.z();
-  const Vector2d f{
+  Vector2d f{
       x * x + x * y - z * z * y,
       x * y * y - z * y * y + z * z * x,
   };
@@ -34,7 +34,7 @@ static Eigen::MatrixXd CreateRemapMatrix(const std::array<int, N>& index, const 
   Eigen::MatrixXd small_D_large(N, full_size);
   small_D_large.setZero();
   for (int row = 0; row < static_cast<int>(N); ++row) {
-    ASSERT(index[row] < full_size);
+    ASSERT_LESS(index[row], full_size);
     small_D_large(row, index[row]) = 1;
   }
   return small_D_large;

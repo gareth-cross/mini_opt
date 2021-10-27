@@ -1,4 +1,4 @@
-// Copyright 2020 Gareth Cross
+// Copyright 2021 Gareth Cross
 #pragma once
 #include "mini_opt/qp.hpp"
 #include "mini_opt/residual.hpp"

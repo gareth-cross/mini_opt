@@ -1,4 +1,4 @@
-// Copyright 2020 Gareth Cross
+// Copyright 2021 Gareth Cross
 #include "mini_opt/transform_chains.hpp"
 
 #include <numeric>
@@ -13,7 +13,8 @@ math::Matrix<double, 4, 4> Pose::ToMatrix() const {
 }
 
 Pose ChainComputationBuffer::start_T_end() const {
-  ASSERT(!i_R_end.empty() && i_t_end.cols() > 0);
+  ASSERT(!i_R_end.empty());
+  ASSERT_GREATER(i_t_end.cols(), 0);
   return Pose{i_R_end.front(), i_t_end.leftCols<1>()};
 }
 
@@ -121,12 +122,12 @@ ActuatorLink::ActuatorLink(const Pose& pose, const std::array<uint8_t, 6>& mask)
 // all specialized like that.
 Pose ActuatorLink::Compute(const math::Vector<double>& params, const int position,
                            DerivativeBlock J_out) const {
-  ASSERT(J_out.cols() == ActiveRotationCount(), "Wrong number of columns in output jacobian");
+  ASSERT_EQUAL(J_out.cols(), ActiveRotationCount(), "Wrong number of columns in output jacobian");
   if (ActiveRotationCount() == 0) {
     math::Vector<double, 3> translation_xyz = parent_T_child.translation;
     for (int i = 0, param_index = position; i < 3; ++i) {
       if (active[static_cast<std::size_t>(i) + 3]) {
-        ASSERT(param_index < params.rows());
+        ASSERT_LESS(param_index, params.rows());
         translation_xyz[i] = params[param_index++];
       }
     }
@@ -168,9 +169,9 @@ void ActuatorChain::Update(const math::Vector<double>& params) {
   if (translation_D_params_.size() == 0) {
     // compute total active
     const int total_active = TotalActive();
-    ASSERT(params.rows() == total_active,
-           "Wrong number of params passed. Expected = {}, actual = {}", total_active,
-           params.rows());
+    ASSERT_EQUAL(params.rows(), total_active,
+                 "Wrong number of params passed. Expected = {}, actual = {}", total_active,
+                 params.rows());
     rotation_D_params_.resize(3, total_active);
     rotation_D_params_.setZero();
     translation_D_params_.resize(3, total_active);
@@ -178,9 +179,7 @@ void ActuatorChain::Update(const math::Vector<double>& params) {
   }
 
   // Dimensions cannot change after first call.
-  ASSERT(params.rows() == rotation_D_params_.cols(),
-         "Mismatch between # params. params.rows() = %i, expected = %i", params.rows(),
-         rotation_D_params_.cols());
+  ASSERT_EQUAL(params.rows(), rotation_D_params_.cols(), "Mismatch between # params");
 
   // Compute poses and rotational derivatives.
   pose_buffer_.resize(links.size());
@@ -196,7 +195,7 @@ void ActuatorChain::Update(const math::Vector<double>& params) {
   // Evaluate the full chain, include derivatives wrt intermediate poses.
   ComputeChain(pose_buffer_, &chain_buffer_);
 
-  // Chain rule to get params wrt just the active set of parameters.
+  // Chain-rule to get params wrt just the active set of parameters.
   for (int i = 0, position = 0; i < static_cast<int>(links.size()); ++i) {
     const ActuatorLink& link = links[i];
     const int active_count = link.ActiveCount();
@@ -210,7 +209,7 @@ void ActuatorChain::Update(const math::Vector<double>& params) {
     // The right half of rot_D_rot will be zero, but this is likely ok on the grounds that
     // translation parameters should be less common than rotational ones, so the wasted space
     // and work is not that bad.
-    ASSERT(position + active_count <= rotation_D_params_.cols());
+    ASSERT_LESS_OR_EQ(position + active_count, rotation_D_params_.cols());
 
     auto rot_D_angles = rotation_D_params_.middleCols(
         position, num_rotation_active);  //  wrt just the rotation part

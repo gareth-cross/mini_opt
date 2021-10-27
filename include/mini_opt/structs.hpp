@@ -1,4 +1,4 @@
-// Copyright 2020 Gareth Cross
+// Copyright 2021 Gareth Cross
 #pragma once
 #include <Eigen/Core>
 #include <limits>
@@ -93,6 +93,9 @@ enum class LineSearchStrategy {
   // Approximate cost function as a polynomial and compute the minimum.
   POLYNOMIAL_APPROXIMATION = 1,
 };
+
+// ostream for LineSearchStrategy
+std::ostream& operator<<(std::ostream& stream, const LineSearchStrategy& strategy);
 
 // State of the nonlinear optimizer.
 enum class OptimizerState {

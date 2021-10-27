@@ -21,6 +21,18 @@ std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) 
   return stream;
 }
 
+std::ostream& operator<<(std::ostream& stream, const LineSearchStrategy& strategy) {
+  switch (strategy) {
+    case LineSearchStrategy::ARMIJO_BACKTRACK:
+      stream << "ARMIJO_BACKTRACK";
+      break;
+    case LineSearchStrategy::POLYNOMIAL_APPROXIMATION:
+      stream << "POLYNOMIAL_APPROXIMATION";
+      break;
+  }
+  return stream;
+}
+
 std::ostream& operator<<(std::ostream& stream, const OptimizerState& v) {
   switch (v) {
     case OptimizerState::NOMINAL:

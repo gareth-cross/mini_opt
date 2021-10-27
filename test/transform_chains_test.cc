@@ -1,4 +1,4 @@
-// Copyright 2020 Gareth Cross
+// Copyright 2021 Gareth Cross
 #include "mini_opt/transform_chains.hpp"
 
 #include "geometry_utils/numerical_derivative.hpp"

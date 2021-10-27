@@ -1,4 +1,4 @@
-// Copyright 2020 Gareth Cross
+// Copyright 2021 Gareth Cross
 #include "mini_opt/residual.hpp"
 
 namespace mini_opt {

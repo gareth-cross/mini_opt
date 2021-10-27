@@ -1,4 +1,4 @@
-// Copyright 2020 Gareth Cross
+// Copyright 2021 Gareth Cross
 #include "mini_opt/qp.hpp"
 
 #include <Eigen/Dense>
@@ -15,7 +15,7 @@ bool LinearInequalityConstraint::IsFeasible(double x) const {
 }
 
 double LinearInequalityConstraint::ClampX(double x) const {
-  ASSERT(a != 0, "a cannot be zero");
+  ASSERT_NOT_EQUAL(a, 0, "a cannot be zero");
   // a * x + b >= 0
   // a * x >= -b
   if (a < 0) {
@@ -33,16 +33,16 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
   ASSERT(problem != nullptr, "Must pass a non-null problem");
 
   p_ = problem;
-  ASSERT(p_->G.rows() == p_->G.cols(), "G must be square");
-  ASSERT(p_->G.rows() == p_->c.rows(), "Dims of G and c must match");
-  ASSERT(p_->A_eq.rows() == p_->b_eq.rows(), "Rows of A_e and b_e must match");
+  ASSERT_EQUAL(p_->G.rows(), p_->G.cols(), "G must be square");
+  ASSERT_EQUAL(p_->G.rows(), p_->c.rows(), "Dims of G and c must match");
+  ASSERT_EQUAL(p_->A_eq.rows(), p_->b_eq.rows(), "Rows of A_e and b_e must match");
 
   // If equality constraints were specified, we must be able to multiply A*x
   if (p_->A_eq.size() > 0) {
-    ASSERT(p_->A_eq.cols() == p_->G.rows());
+    ASSERT_EQUAL(p_->A_eq.cols(), p_->G.rows());
   } else {
-    ASSERT(p_->A_eq.rows() == 0);
-    ASSERT(p_->b_eq.rows() == 0);
+    ASSERT_EQUAL(p_->A_eq.rows(), 0);
+    ASSERT_EQUAL(p_->b_eq.rows(), 0);
   }
 
   // Order is [slacks (s), equality multipliers(y), inequality multipliers (lambda)]
@@ -54,7 +54,7 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
   variables_.resize(dims_.N + dims_.M * 2 + dims_.K);
 
   // Allocate space for solving
-  const std::size_t reduced_system_size = dims_.N + dims_.K;
+  const int reduced_system_size = static_cast<int>(dims_.N + dims_.K);
   H_.resize(reduced_system_size, reduced_system_size);
   H_.setZero();
   H_inv_.resizeLike(H_);
@@ -80,17 +80,17 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
 
   // check indices up front
   for (const LinearInequalityConstraint& c : p_->constraints) {
-    ASSERT(c.variable < static_cast<int>(dims_.N), "Constraint index is out of bounds");
+    ASSERT_LESS(c.variable, static_cast<int>(dims_.N), "Constraint index is out of bounds");
   }
 }
 
 // Assert params are in valid range.
 static void CheckParams(const QPInteriorPointSolver::Params& params) {
-  ASSERT(params.initial_mu > 0);
-  ASSERT(params.sigma > 0);
-  ASSERT(params.sigma <= 1.0);
-  ASSERT(params.termination_kkt_tol > 0);
-  ASSERT(params.max_iterations > 0);
+  ASSERT_GREATER(params.initial_mu, 0);
+  ASSERT_GREATER(params.sigma, 0);
+  ASSERT_LESS_OR_EQ(params.sigma, 1.0);
+  ASSERT_GREATER(params.termination_kkt_tol, 0);
+  ASSERT_GREATER(params.max_iterations, 0);
 }
 
 /*
@@ -142,7 +142,7 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
     if (kkt_after.Max() < params.termination_kkt_tol &&
         ComputeMu() < params.termination_complementarity_tol) {
       // error is low enough, stop
-      return QPSolverOutputs(QPTerminationState::SATISFIED_KKT_TOL, iter + 1);
+      return {QPTerminationState::SATISFIED_KKT_TOL, iter + 1};
     }
 
     // adjust the barrier parameter
@@ -154,7 +154,7 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
       }
     }
   }
-  return QPSolverOutputs(QPTerminationState::MAX_ITERATIONS, params.max_iterations);
+  return {QPTerminationState::MAX_ITERATIONS, params.max_iterations};
 }
 
 IPIterationOutputs QPInteriorPointSolver::Iterate(const double mu_input,
@@ -504,8 +504,9 @@ void QPInteriorPointSolver::ComputeAlpha(AlphaValues* const output, const double
 
 double QPInteriorPointSolver::ComputeAlpha(const ConstVectorBlock& val,
                                            const ConstVectorBlock& d_val, const double tau) {
-  ASSERT(val.rows() == d_val.rows());
-  ASSERT(tau > 0 && tau <= 1);
+  ASSERT_EQUAL(val.rows(), d_val.rows());
+  ASSERT_GREATER(tau, 0);
+  ASSERT_LESS_OR_EQ(tau, 1);
   double alpha = 1.0;
   for (int i = 0; i < val.rows(); ++i) {
     const double updated_val = val[i] + d_val[i];

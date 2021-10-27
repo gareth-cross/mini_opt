@@ -1,4 +1,4 @@
-// Copyright 2020 Gareth Cross
+// Copyright 2021 Gareth Cross
 #pragma once
 #include <Eigen/Core>
 
@@ -44,7 +44,7 @@ struct LinearInequalityConstraint {
 
   // Version of shift that takes vector.
   LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
-    ASSERT(variable < x.rows());
+    ASSERT_LESS(variable, x.rows());
     return ShiftTo(x[variable]);
   }
 
