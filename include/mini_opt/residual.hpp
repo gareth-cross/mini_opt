@@ -119,7 +119,7 @@ void ReadSparseValues(const Eigen::VectorXd& input,
   for (std::size_t local = 0; local < index.size(); ++local) {
     const int i = index[local];
     ASSERT(i >= 0);
-    ASSERT(i < input.rows(), "Index %i exceeds the # of provided params, which is %i", i,
+    ASSERT(i < input.rows(), "Index {} exceeds the # of provided params, which is {}", i,
            input.rows());
     output->operator[](local) = input[i];
   }
@@ -169,7 +169,7 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
   for (int row_local = 0; row_local < N; ++row_local) {
     // get index mapping into the full system
     const int row_global = index[row_local];
-    ASSERT(row_global < H->rows(), "Index %i exceeds the bounds of the hessian (rows = %i)",
+    ASSERT(row_global < H->rows(), "Index {} exceeds the bounds of the hessian (rows = {})",
            row_global, H->rows());
     for (int col_local = 0; col_local <= row_local; ++col_local) {
       // because col_local <= row_local, we already checked this global index
@@ -183,13 +183,13 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
         H->operator()(col_global, row_global) += JtT;
       }
     }
-    // Also update the right hand side vector `b`.
+    // Also update the right-hand side vector `b`.
     b->operator()(row_global) += J.col(row_local).dot(r);
   }
   return 0.5 * r.squaredNorm();
 }
 
-// This version takes blocks so we can write directly into A_eq.
+// This version takes blocks, so we can write directly into A_eq.
 template <int ResidualDim, int NumParams>
 void Residual<ResidualDim, NumParams>::UpdateJacobian(
     const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
@@ -208,7 +208,7 @@ void Residual<ResidualDim, NumParams>::UpdateJacobian(
 
   for (int col_local = 0; col_local < static_cast<int>(index.size()); ++col_local) {
     const int col_global = index[col_local];
-    ASSERT(col_global < J_out.cols(), "Index %i exceeds the size of the Jacobian (cols = %i)",
+    ASSERT(col_global < J_out.cols(), "Index {} exceeds the size of the Jacobian (cols = {})",
            col_global);
     J_out.col(col_global).noalias() = J.col(col_local);
   }

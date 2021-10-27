@@ -2,15 +2,17 @@
 #pragma once
 #define ASSERTS_ENABLED
 
-// Disable warning about no variadic arguments.
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
-#endif
+#include <fmt/ostream.h>
 
-// Geneates an exception w/ a formatted string.
+// Generates an exception w/ a formatted string.
+template <typename... Ts>
 void RaiseAssert(const char* const condition, const char* const file, const int line,
-                 const char* const fmt = 0, ...);
+                 const char* const reason_fmt = nullptr, Ts&&... args) {
+  const std::string reason = reason_fmt ? fmt::format(reason_fmt, std::forward<Ts>(args)...) : "";
+  const std::string err = fmt::format("Assertion failed: {}\nFile: {}\nLine: {}\nReason: {}\n",
+                                      condition, file, line, reason);
+  throw std::runtime_error(err);
+}
 
 // Assertion macros.
 // Based on: http://cnicholson.net/2009/02/stupid-c-tricks-adventures-in-assert
@@ -30,7 +32,3 @@ void RaiseAssert(const char* const condition, const char* const file, const int 
 
 // Macro to use when defining an assertion.
 #define ASSERT(cond, ...) ASSERT_IMPL(cond, __FILE__, __LINE__, ##__VA_ARGS__)
-
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif

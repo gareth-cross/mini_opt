@@ -364,7 +364,7 @@ double ConstrainedNonlinearLeastSquares::ComputeAlphaPolynomialApproximation(
     const double new_alpha =
         QuadraticApproxMinimum(errors_pre.Total(penalty), derivatives.Total(penalty),
                                prev_step.alpha, prev_step.errors.Total(penalty));
-    ASSERT(new_alpha < prev_step.alpha, "Alpha must decrease, alpha = %f, prev_alpha = %f", alpha,
+    ASSERT(new_alpha < prev_step.alpha, "Alpha must decrease, alpha = {}, prev_alpha = {}", alpha,
            prev_step.alpha);
     return new_alpha;
   }
@@ -381,7 +381,7 @@ double ConstrainedNonlinearLeastSquares::ComputeAlphaPolynomialApproximation(
   // Solve.
   const double new_alpha = CubicApproxMinimum(derivatives.Total(penalty), ab);
   ASSERT(new_alpha < last_step.alpha,
-         "Alpha must decrease in the line search, alpha = %f, prev_alpha = %f", alpha,
+         "Alpha must decrease in the line search, alpha = {}, prev_alpha = {}", alpha,
          last_step.alpha);
   return new_alpha;
 }
@@ -492,7 +492,7 @@ double ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(const double phi
   ASSERT(alpha_0 > 0);
   ASSERT(phi_prime_0 < 0);
   const double numerator = 2 * (phi_alpha_0 - phi_0 - phi_prime_0 * alpha_0);
-  ASSERT(numerator > 0, "phi_alpha_0=%f, phi_0=%f, alpha_0=%f", phi_alpha_0, phi_0, alpha_0);
+  ASSERT(numerator > 0, "phi_alpha_0={}, phi_0={}, alpha_0={}", phi_alpha_0, phi_0, alpha_0);
   return -phi_prime_0 * alpha_0 * alpha_0 / numerator;
 }
 
@@ -522,7 +522,7 @@ double ConstrainedNonlinearLeastSquares::CubicApproxMinimum(const double phi_pri
   ASSERT(std::abs(ab[0]) > 0, "Coefficient a cannot be zero");
   const double arg_sqrt = ab[1] * ab[1] - 3 * ab[0] * phi_prime_0;
   constexpr double kNegativeTol = -1.0e-12;
-  ASSERT(arg_sqrt >= kNegativeTol, "This term must be positive: a=%f, b=%f, phi_prime_0=%f", ab[0],
+  ASSERT(arg_sqrt >= kNegativeTol, "This term must be positive: a={}, b={}, phi_prime_0={}", ab[0],
          ab[1], phi_prime_0);
   return (std::sqrt(std::max(arg_sqrt, 0.)) - ab[1]) / (3 * ab[0]);
 }

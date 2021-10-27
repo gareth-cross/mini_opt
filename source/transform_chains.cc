@@ -9,8 +9,7 @@ namespace mini_opt {
 using namespace Eigen;
 
 math::Matrix<double, 4, 4> Pose::ToMatrix() const {
-  return (math::Matrix<double, 4, 4>() << rotation.matrix(), translation, 0, 0, 0, 1)
-      .finished();
+  return (math::Matrix<double, 4, 4>() << rotation.matrix(), translation, 0, 0, 0, 1).finished();
 }
 
 Pose ChainComputationBuffer::start_T_end() const {
@@ -170,7 +169,7 @@ void ActuatorChain::Update(const math::Vector<double>& params) {
     // compute total active
     const int total_active = TotalActive();
     ASSERT(params.rows() == total_active,
-           "Wrong number of params passed. Expected = %i, actual = %i", total_active,
+           "Wrong number of params passed. Expected = {}, actual = {}", total_active,
            params.rows());
     rotation_D_params_.resize(3, total_active);
     rotation_D_params_.setZero();
