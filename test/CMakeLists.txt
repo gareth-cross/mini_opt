@@ -37,7 +37,7 @@ foreach (test_file ${${PROJECT_NAME}_TEST_SOURCES})
     # turn on maximum warnings
     if (MSVC)
         # USE_MATH_DEFINES is required for M_PI
-        target_compile_options(${test_name} PRIVATE /W4 /WX /D_USE_MATH_DEFINES /wd4244)
+        target_compile_options(${test_name} PRIVATE /W4 /WX /D_USE_MATH_DEFINES /bigobj /wd4244)
     else ()
         target_compile_options(${test_name} PRIVATE
                 -Wall -Wextra -pedantic -Werror -Wno-sign-compare)
