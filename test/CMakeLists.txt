@@ -9,7 +9,10 @@ FetchContent_Declare(
 FetchContent_GetProperties(googletest)
 if (NOT googletest_POPULATED)
     FetchContent_Populate(googletest)
-    add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
+    # Disable gmock and install of gtest
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif ()
 
 # Build testing helper library.
