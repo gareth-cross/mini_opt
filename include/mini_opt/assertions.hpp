@@ -2,7 +2,16 @@
 #pragma once
 #define ASSERTS_ENABLED
 
+#ifdef _MSC_VER
+// Silence some warnings that libfmt can trigger w/ Microsoft compiler.
+#pragma warning(push)
+#pragma warning(disable : 4583)
+#pragma warning(disable : 4582)
+#endif  // _MSC_VER
 #include <fmt/ostream.h>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif  // _MSC_VER
 
 // Generates an exception w/ a formatted string.
 template <typename... Ts>
