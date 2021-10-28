@@ -3,8 +3,6 @@
 
 #include <fmt/ostream.h>
 
-#include <iomanip>
-
 #include "mini_opt/nonlinear.hpp"
 
 namespace mini_opt {
