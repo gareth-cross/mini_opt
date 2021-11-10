@@ -6,6 +6,7 @@ While I have endeavored to produce well-commented and unit-tested code, the solv
 
 To build and run:
 ```
+git submodule update --init
 mkdir build
 cd build
 cmake ..

@@ -38,22 +38,8 @@ if (NOT libfmt_POPULATED)
   endif ()
 endif ()
 
-# Check if user specified the path. If not, clone it from github.
-if (NOT DEFINED ${GEOMETRY_UTILS_DIRECTORY})
-  FetchContent_Declare(
-      geometry_utils
-      GIT_REPOSITORY https://github.com/gareth-cross/geometry_utils
-  )
-  FetchContent_GetProperties(geometry_utils)
-  if (NOT geometry_utils_POPULATED)
-    FetchContent_Populate(geometry_utils)
-    add_subdirectory(${geometry_utils_SOURCE_DIR} ${geometry_utils_BINARY_DIR})
-  endif ()
-else ()
-  # If they did specify the path, just include that directory directly.
-  # It will get build as a dependency of this project.
-  add_subdirectory(${GEOMETRY_UTILS_DIRECTORY})
-endif ()
+# Add dependencies directory.
+add_subdirectory(dependencies)
 
 # Find all the source files.
 FILE(GLOB ${PROJECT_NAME}_SOURCES "source/*.cc")

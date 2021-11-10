@@ -1,0 +1,3 @@
+[submodule "dependencies/geometry_utils"]
+	path = dependencies/geometry_utils
+	url = https://github.com/gareth-cross/geometry_utils.git
