@@ -12,9 +12,13 @@ set(CMAKE_MODULE_PATH
     )
 
 # Find the eigen package.
-find_package(Eigen REQUIRED)
-if (${Eigen_FOUND})
-  MESSAGE("Eigen Includes: ${EIGEN_INCLUDE_DIRS}")
+if (NOT TARGET eigen)
+  find_package(Eigen REQUIRED)
+  if (${EIGEN_FOUND})
+    message("Eigen Includes: ${EIGEN_INCLUDE_DIRS}")
+  else ()
+    message(FATAL_ERROR "Failed to find Eigen")
+  endif ()
 endif ()
 
 option(INSTALL_LIBFMT "Include libfmt in installation" OFF)
@@ -48,9 +52,9 @@ FILE(GLOB ${PROJECT_NAME}_SOURCES "source/*.cc")
 add_library(${PROJECT_NAME} STATIC ${${PROJECT_NAME}_SOURCES})
 
 # Link to geometry utils
-add_dependencies(${PROJECT_NAME} geometry_utils fmt Eigen::Eigen)
+add_dependencies(${PROJECT_NAME} geometry_utils fmt eigen)
 target_link_libraries(${PROJECT_NAME} geometry_utils fmt)
-target_link_libraries(${PROJECT_NAME} Eigen::Eigen)
+target_link_libraries(${PROJECT_NAME} eigen)
 
 # Turn on C++14
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_14)

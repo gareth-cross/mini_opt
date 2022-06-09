@@ -35,10 +35,10 @@ set(EIGEN_INCLUDE_DIRS ${EIGEN_INCLUDE_DIR})
 # Create a target for eigen w/ the correct interface include directories.
 # See https://pabloariasal.github.io/2018/02/19/its-time-to-do-cmake-right/
 if (${EIGEN_FOUND})
-  if (NOT TARGET Eigen::Eigen)
-    message(STATUS "Creating target for Eigen: Eigen::Eigen")
-    add_library(Eigen::Eigen INTERFACE IMPORTED)
-    set_target_properties(Eigen::Eigen PROPERTIES
+  if (NOT TARGET eigen)
+    message(STATUS "Creating target for Eigen: eigen")
+    add_library(eigen INTERFACE IMPORTED)
+    set_target_properties(eigen PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${EIGEN_INCLUDE_DIRS}"
         )
   endif ()
