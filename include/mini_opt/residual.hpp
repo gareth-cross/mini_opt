@@ -15,7 +15,7 @@ struct ResidualBase {
   using unique_ptr = std::unique_ptr<ResidualBase>;
 
   // We will be storing these through pointer to the base class.
-  virtual ~ResidualBase();
+  virtual ~ResidualBase() = default;
 
   // Dimension of the residual vector.
   virtual int Dimension() const = 0;

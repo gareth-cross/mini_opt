@@ -2,7 +2,6 @@
 #include "mini_opt/qp.hpp"
 
 #include <Eigen/Dense>
-#include <iostream>
 
 using namespace Eigen;
 namespace mini_opt {
