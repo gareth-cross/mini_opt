@@ -1,3 +1,12 @@
 [submodule "dependencies/geometry_utils"]
 	path = dependencies/geometry_utils
 	url = https://github.com/gareth-cross/geometry_utils.git
+[submodule "dependencies/eigen"]
+	path = dependencies/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+[submodule "dependencies/googletest"]
+	path = dependencies/googletest
+	url = https://github.com/google/googletest.git
+[submodule "dependencies/fmt"]
+	path = dependencies/fmt
+	url = https://github.com/fmtlib/fmt.git
