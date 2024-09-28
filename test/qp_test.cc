@@ -4,6 +4,7 @@
 #include <random>
 
 #include <fmt/ostream.h>
+#include <Eigen/Dense>
 
 #include "mini_opt/logging.hpp"
 #include "test_utils.hpp"
