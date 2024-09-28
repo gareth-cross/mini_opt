@@ -44,7 +44,7 @@ struct LinearInequalityConstraint {
 
   // Version of shift that takes vector.
   LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
-    ASSERT_LESS(variable, x.rows());
+    F_ASSERT_LT(variable, x.rows());
     return ShiftTo(x[variable]);
   }
 

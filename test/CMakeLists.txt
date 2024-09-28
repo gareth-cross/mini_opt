@@ -1,54 +1,28 @@
-include(FetchContent)
-
-# Download google test.
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG release-1.10.0
-)
-FetchContent_GetProperties(googletest)
-if (NOT googletest_POPULATED)
-    FetchContent_Populate(googletest)
-    # Disable gmock and install of gtest
-    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
-    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR} EXCLUDE_FROM_ALL)
-endif ()
-
 # Build testing helper library.
-add_library(${PROJECT_NAME}_test_utils test_utils.cc)
+set(TEST_LIBRARY_NAME ${PROJECT_NAME}_test_utils)
+add_library(
+  ${TEST_LIBRARY_NAME} STATIC test_utils.cc test_utils.hpp transform_chains.cc
+                              transform_chains.hpp)
+target_compile_options(${TEST_LIBRARY_NAME} PRIVATE ${COMPILATION_FLAGS})
+target_link_libraries(
+  ${TEST_LIBRARY_NAME} PUBLIC ${LIBRARY_NAME} eigen gtest fmt::fmt-header-only
+                              geometry_utils)
 
-# Depend on gtest.
-add_dependencies(${PROJECT_NAME}_test_utils gtest)
-target_link_libraries(${PROJECT_NAME}_test_utils PUBLIC ${PROJECT_NAME} gtest)
+# Function to add a unit test.
+function(add_cpp_test NAME)
+  set(options "")
+  set(oneValueArgs "")
+  set(multiValueArgs SOURCE_FILES)
+  cmake_parse_arguments(ARGS "${options}" "${oneValueArgs}" "${multiValueArgs}"
+                        ${ARGN})
+  # add executable for the test:
+  add_executable(${NAME} ${ARGS_SOURCE_FILES})
+  target_link_libraries(${NAME} ${TEST_LIBRARY_NAME} gtest_main)
+  target_compile_options(${NAME} PRIVATE ${COMPILATION_FLAGS})
+  add_test(${NAME} ${NAME})
+endfunction()
 
-# Find all the test files.
-FILE(GLOB ${PROJECT_NAME}_TEST_SOURCES "*_test.cc")
-
-foreach (test_file ${${PROJECT_NAME}_TEST_SOURCES})
-    # get just the filename w/o extension
-    get_filename_component(test_name ${test_file} NAME_WE)
-
-    # add test executable for every file
-    message(STATUS "Discovered test: ${test_name}")
-    add_executable(${test_name} ${test_file})
-
-    # make sure it depends on the test utils
-    add_dependencies(${test_name} ${PROJECT_NAME} ${PROJECT_NAME}_test_utils)
-    target_link_libraries(${test_name} ${PROJECT_NAME}_test_utils gtest_main)
-
-    # turn on maximum warnings
-    if (MSVC)
-        # USE_MATH_DEFINES is required for M_PI
-        target_compile_options(${test_name} PRIVATE /W4 /WX /D_USE_MATH_DEFINES /bigobj /wd4244)
-    else ()
-        target_compile_options(${test_name} PRIVATE
-                -Wall -Wextra -pedantic -Werror -Wno-sign-compare)
-    endif ()
-
-    if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_compile_definitions(${test_name} PUBLIC EIGEN_NO_DEBUG)
-    endif ()
-
-    add_test(${test_name} ${test_name})
-endforeach (test_file)
+add_cpp_test(nonlinear_test SOURCE_FILES nonlinear_test.cc)
+add_cpp_test(qp_test SOURCE_FILES qp_test.cc)
+add_cpp_test(residual_test SOURCE_FILES residual_test.cc)
+add_cpp_test(transform_chains_test SOURCE_FILES transform_chains_test.cc)

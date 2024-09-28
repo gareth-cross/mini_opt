@@ -1,8 +1,10 @@
 // Copyright 2021 Gareth Cross
-#include "mini_opt/transform_chains.hpp"
+#include <Eigen/Core>
 
 #include "geometry_utils/numerical_derivative.hpp"
+
 #include "test_utils.hpp"
+#include "transform_chains.hpp"
 
 namespace mini_opt {
 using namespace Eigen;
@@ -11,7 +13,7 @@ TEST(ChainComputationBufferTest, TestComputeChain) {
   // create some links
   // clang-format off
   const std::vector<Pose> links = {
-    {math::QuaternionExp(Vector3d{-0.5, 0.5, 0.3}), {1.0, 0.5, 2.0}}, 
+    {math::QuaternionExp(Vector3d{-0.5, 0.5, 0.3}), {1.0, 0.5, 2.0}},
     {math::QuaternionExp(Vector3d{0.8, 0.5, 1.2}), {0.5, 0.75, -0.5}},
     {math::QuaternionExp(Vector3d{1.5, -0.2, 0.0}), {1.2, -0.5, 0.1}},
     {math::QuaternionExp(Vector3d{0.2, -0.1, 0.3}), {0.1, -0.1, 0.2}}

@@ -1,8 +1,10 @@
 // Copyright 2021 Gareth Cross
 #include "mini_opt/qp.hpp"
 
-#include <numeric>
 #include <random>
+
+#include <fmt/ostream.h>
+#include <Eigen/Dense>
 
 #include "mini_opt/logging.hpp"
 #include "test_utils.hpp"
@@ -569,12 +571,12 @@ class QPSolverTest : public ::testing::Test {
 
         ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 5.0e-5)
             << fmt::format("Termination: {}\nProblem p = {}\nSummary:\n{}",
-                           outputs.termination_state, p, logger.GetString());
+                           fmt::streamed(outputs.termination_state), p, logger.GetString());
 
         // check the variables that are constrained
         ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 5.0e-5)
             << fmt::format("Termination: {}\nProblem p = {}\nSummary:\n{}",
-                           outputs.termination_state, p, logger.GetString());
+                           fmt::streamed(outputs.termination_state), p, logger.GetString());
       }
     }
     PRINT(iter_counts[InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED]);

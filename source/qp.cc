@@ -2,7 +2,6 @@
 #include "mini_opt/qp.hpp"
 
 #include <Eigen/Dense>
-#include <iostream>
 
 using namespace Eigen;
 namespace mini_opt {
@@ -15,7 +14,7 @@ bool LinearInequalityConstraint::IsFeasible(double x) const {
 }
 
 double LinearInequalityConstraint::ClampX(double x) const {
-  ASSERT_NOT_EQUAL(a, 0, "a cannot be zero");
+  F_ASSERT_NE(a, 0, "a cannot be zero");
   // a * x + b >= 0
   // a * x >= -b
   if (a < 0) {
@@ -30,25 +29,25 @@ double LinearInequalityConstraint::ClampX(double x) const {
 QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem) { Setup(problem); }
 
 void QPInteriorPointSolver::Setup(const QP* const problem) {
-  ASSERT(problem != nullptr, "Must pass a non-null problem");
+  F_ASSERT(problem != nullptr, "Must pass a non-null problem");
 
   p_ = problem;
-  ASSERT_EQUAL(p_->G.rows(), p_->G.cols(), "G must be square");
-  ASSERT_EQUAL(p_->G.rows(), p_->c.rows(), "Dims of G and c must match");
-  ASSERT_EQUAL(p_->A_eq.rows(), p_->b_eq.rows(), "Rows of A_e and b_e must match");
+  F_ASSERT_EQ(p_->G.rows(), p_->G.cols(), "G must be square");
+  F_ASSERT_EQ(p_->G.rows(), p_->c.rows(), "Dims of G and c must match");
+  F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows(), "Rows of A_e and b_e must match");
 
   // If equality constraints were specified, we must be able to multiply A*x
   if (p_->A_eq.size() > 0) {
-    ASSERT_EQUAL(p_->A_eq.cols(), p_->G.rows());
+    F_ASSERT_EQ(p_->A_eq.cols(), p_->G.rows());
   } else {
-    ASSERT_EQUAL(p_->A_eq.rows(), 0);
-    ASSERT_EQUAL(p_->b_eq.rows(), 0);
+    F_ASSERT_EQ(p_->A_eq.rows(), 0);
+    F_ASSERT_EQ(p_->b_eq.rows(), 0);
   }
 
   // Order is [slacks (s), equality multipliers(y), inequality multipliers (lambda)]
-  dims_.N = p_->G.rows();
+  dims_.N = static_cast<int>(p_->G.rows());
   dims_.M = static_cast<int>(p_->constraints.size());
-  dims_.K = p_->A_eq.rows();
+  dims_.K = static_cast<int>(p_->A_eq.rows());
 
   // allocate space for primal, slacks, and dual variables
   variables_.resize(dims_.N + dims_.M * 2 + dims_.K);
@@ -80,17 +79,17 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
 
   // check indices up front
   for (const LinearInequalityConstraint& c : p_->constraints) {
-    ASSERT_LESS(c.variable, static_cast<int>(dims_.N), "Constraint index is out of bounds");
+    F_ASSERT_LT(c.variable, static_cast<int>(dims_.N), "Constraint index is out of bounds");
   }
 }
 
 // Assert params are in valid range.
 static void CheckParams(const QPInteriorPointSolver::Params& params) {
-  ASSERT_GREATER(params.initial_mu, 0);
-  ASSERT_GREATER(params.sigma, 0);
-  ASSERT_LESS_OR_EQ(params.sigma, 1.0);
-  ASSERT_GREATER(params.termination_kkt_tol, 0);
-  ASSERT_GREATER(params.max_iterations, 0);
+  F_ASSERT_GT(params.initial_mu, 0);
+  F_ASSERT_GT(params.sigma, 0);
+  F_ASSERT_LE(params.sigma, 1.0);
+  F_ASSERT_GT(params.termination_kkt_tol, 0);
+  F_ASSERT_GT(params.max_iterations, 0);
 }
 
 /*
@@ -110,7 +109,7 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
  * may be an implementation issue.
  */
 QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params& params) {
-  ASSERT(p_, "Must have a valid problem");
+  F_ASSERT(p_, "Must have a valid problem");
   CheckParams(params);
 
   // compute initial guess
@@ -230,7 +229,7 @@ const Eigen::VectorXd& QPInteriorPointSolver::variables() const { return variabl
 void QPInteriorPointSolver::SetVariables(const Eigen::VectorXd& v) { variables_ = v; }
 
 const QP& QPInteriorPointSolver::problem() const {
-  ASSERT(p_, "Cannot call unless initialized");
+  F_ASSERT(p_, "Cannot call unless initialized");
   return *p_;
 }
 
@@ -464,7 +463,7 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
     // we can sometimes guess zero for `x`. This is fairly simple, but I keep it around
     // to compare to.
   } else {
-    ASSERT(params.initial_guess_method == InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
+    F_ASSERT(params.initial_guess_method == InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
     // Formulate the problem without inequalities.
     ComputeLDLT(false);
     EvaluateKKTConditions(false);
@@ -497,16 +496,16 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
 
 // Formula 19.9
 void QPInteriorPointSolver::ComputeAlpha(AlphaValues* const output, const double tau) const {
-  ASSERT(output != nullptr);
+  F_ASSERT(output != nullptr);
   output->primal = ComputeAlpha(ConstSBlock(dims_, variables_), ConstSBlock(dims_, delta_), tau);
   output->dual = ComputeAlpha(ConstZBlock(dims_, variables_), ConstZBlock(dims_, delta_), tau);
 }
 
 double QPInteriorPointSolver::ComputeAlpha(const ConstVectorBlock& val,
                                            const ConstVectorBlock& d_val, const double tau) {
-  ASSERT_EQUAL(val.rows(), d_val.rows());
-  ASSERT_GREATER(tau, 0);
-  ASSERT_LESS_OR_EQ(tau, 1);
+  F_ASSERT_EQ(val.rows(), d_val.rows());
+  F_ASSERT_GT(tau, 0);
+  F_ASSERT_LE(tau, 1);
   double alpha = 1.0;
   for (int i = 0; i < val.rows(); ++i) {
     const double updated_val = val[i] + d_val[i];
@@ -599,8 +598,8 @@ VectorBlock QPInteriorPointSolver::ZBlock(const ProblemDims& dims, Eigen::Vector
  */
 void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
                                             Eigen::VectorXd* const r) const {
-  ASSERT(H != nullptr);
-  ASSERT(r != nullptr);
+  F_ASSERT(H != nullptr);
+  F_ASSERT(r != nullptr);
   const int N = dims_.N;
   const int M = dims_.M;
   const int K = dims_.K;

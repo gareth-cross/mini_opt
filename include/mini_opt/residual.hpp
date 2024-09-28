@@ -15,7 +15,7 @@ struct ResidualBase {
   using unique_ptr = std::unique_ptr<ResidualBase>;
 
   // We will be storing these through pointer to the base class.
-  virtual ~ResidualBase();
+  virtual ~ResidualBase() = default;
 
   // Dimension of the residual vector.
   virtual int Dimension() const = 0;
@@ -112,14 +112,14 @@ template <int N>
 void ReadSparseValues(const Eigen::VectorXd& input,
                       const typename internal::IndexType<N>::type& index,
                       Eigen::Matrix<double, N, 1>* output) {
-  ASSERT(output != nullptr);
+  F_ASSERT(output != nullptr);
   if (N == Eigen::Dynamic) {
     output->resize(index.size());
   }
   for (std::size_t local = 0; local < index.size(); ++local) {
     const int i = index[local];
-    ASSERT_GREATER_OR_EQ(i, 0);
-    ASSERT_LESS(i, input.rows(), "Index exceeds the number of params");
+    F_ASSERT_GE(i, 0);
+    F_ASSERT_LT(i, input.rows(), "Index exceeds the number of params");
     output->operator[](local) = input[i];
   }
 }
@@ -136,7 +136,7 @@ Residual<ResidualDim, NumParams>::GetParamSlice(const Eigen::VectorXd& params) c
 template <int ResidualDim, int NumParams>
 void Residual<ResidualDim, NumParams>::ErrorVector(
     const Eigen::VectorXd& params, Eigen::VectorBlock<Eigen::VectorXd> b_out) const {
-  ASSERT_EQUAL(b_out.rows(), Dimension(), "Output vector is wrong dimension");
+  F_ASSERT_EQ(b_out.rows(), Dimension(), "Output vector is wrong dimension");
   const ParamType relevant_params = GetParamSlice(params);
   b_out = function(relevant_params, nullptr);
 }
@@ -148,10 +148,10 @@ template <int ResidualDim, int NumParams>
 double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& params,
                                                        Eigen::MatrixXd* const H,
                                                        Eigen::VectorXd* const b) const {
-  ASSERT(H != nullptr);
-  ASSERT(b != nullptr);
-  ASSERT_EQUAL(H->rows(), H->cols());
-  ASSERT_EQUAL(b->rows(), H->rows());
+  F_ASSERT(H != nullptr);
+  F_ASSERT(b != nullptr);
+  F_ASSERT_EQ(H->rows(), H->cols());
+  F_ASSERT_EQ(b->rows(), H->rows());
 
   // Collect params.
   const ParamType relevant_params = GetParamSlice(params);
@@ -168,7 +168,7 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
   for (int row_local = 0; row_local < N; ++row_local) {
     // get index mapping into the full system
     const int row_global = index[row_local];
-    ASSERT_LESS(row_global, H->rows(), "Index exceeds bounds of hessian");
+    F_ASSERT_LT(row_global, H->rows(), "Index exceeds bounds of hessian");
     for (int col_local = 0; col_local <= row_local; ++col_local) {
       // because col_local <= row_local, we already checked this global index
       const int col_global = index[col_local];
@@ -192,8 +192,8 @@ template <int ResidualDim, int NumParams>
 void Residual<ResidualDim, NumParams>::UpdateJacobian(
     const Eigen::VectorXd& params, Eigen::Block<Eigen::MatrixXd> J_out,
     Eigen::VectorBlock<Eigen::VectorXd> b_out) const {
-  ASSERT_EQUAL(ResidualDim, b_out.rows());
-  ASSERT_EQUAL(ResidualDim, J_out.rows());
+  F_ASSERT_EQ(ResidualDim, b_out.rows());
+  F_ASSERT_EQ(ResidualDim, J_out.rows());
   // Collect params.
   const ParamType relevant_params = GetParamSlice(params);
 
@@ -206,7 +206,7 @@ void Residual<ResidualDim, NumParams>::UpdateJacobian(
 
   for (int col_local = 0; col_local < static_cast<int>(index.size()); ++col_local) {
     const int col_global = index[col_local];
-    ASSERT_LESS(col_global, J_out.cols(), "Index exceeds the size of the Jacobian");
+    F_ASSERT_LT(col_global, J_out.cols(), "Index exceeds the size of the Jacobian");
     J_out.col(col_global).noalias() = J.col(col_local);
   }
 }
