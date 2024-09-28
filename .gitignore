@@ -18,8 +18,12 @@
 *.lib
 
 # BUILD FOLDERS
-build/
-build/*
+build*/
+build*/*
+build_*/
+tmp/
+build_linux/*
+target/
 
 # QTCREATOR PROJECT
 *.includes
@@ -33,13 +37,16 @@ build/*
 
 # JETBRAINS
 *.idea
-cmake-build-debug/
-cmake-build-release/
-
-# SUBLIME TEXT
-*.sublime-project
-*.sublime-workspace
+cmake-build-*/
+cmake-*/
 
 # VSCODE
 .vscode/
+.cache/
 
+# PYTHON
+virtualenv/
+__pycache__/
+
+# RUST
+target/

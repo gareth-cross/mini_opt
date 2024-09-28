@@ -94,10 +94,10 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
         "  s = {}\n"
         "  y = {}\n"
         "  z = {}\n",
-        solver.x_block().transpose().format(kMatrixFmt),
-        solver.s_block().transpose().format(kMatrixFmt),
-        solver.y_block().transpose().format(kMatrixFmt),
-        solver.z_block().transpose().format(kMatrixFmt));
+        fmt::streamed(solver.x_block().transpose().format(kMatrixFmt)),
+        fmt::streamed(solver.s_block().transpose().format(kMatrixFmt)),
+        fmt::streamed(solver.y_block().transpose().format(kMatrixFmt)),
+        fmt::streamed(solver.z_block().transpose().format(kMatrixFmt)));
   }
   // summarize where the inequality constraints are
 #if 0
@@ -124,14 +124,14 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
     stream_ << Color(RED, use_colors_);
   }
   stream_ << fmt::format("Iteration # {}, state = {}, lambda = {}\n", info.iteration,
-                         info.optimizer_state, info.lambda);
+                         fmt::streamed(info.optimizer_state), info.lambda);
   stream_ << fmt::format("  f(0): {:.16e}, c(0): {:.16e}, total: {:.16e}\n", info.errors_initial.f,
                          info.errors_initial.equality, info.errors_initial.Total(info.penalty));
   stream_ << fmt::format("  min, max eig = {:.16e}, {:.16e}\n", info.qp_eigenvalues.minCoeff(),
                          info.qp_eigenvalues.maxCoeff());
-  stream_ << fmt::format("  termination = {}\n", info.termination_state);
+  stream_ << fmt::format("  termination = {}\n", fmt::streamed(info.termination_state));
   stream_ << fmt::format("  penalty = {:.16f}\n", info.penalty);
-  stream_ << fmt::format("  QP: {}, {}\n", info.qp_term_state.termination_state,
+  stream_ << fmt::format("  QP: {}, {}\n", fmt::streamed(info.qp_term_state.termination_state),
                          info.qp_term_state.num_iterations);
   stream_ << fmt::format("  df/dalpha = {}, dc/dalpha = {}\n", info.directional_derivatives.d_f,
                          info.directional_derivatives.d_equality);
@@ -145,7 +145,8 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
     }
     stream_ << Color(RED, use_colors_);
   }
-  stream_ << fmt::format("  Search result: {}\n", info.step_result) << Color(NO_COLOR, use_colors_);
+  stream_ << fmt::format("  Search result: {}\n", fmt::streamed(info.step_result))
+          << Color(NO_COLOR, use_colors_);
 
   int i = 0;
   for (const LineSearchStep& step : info.steps) {
@@ -158,7 +159,8 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
   const QPInteriorPointSolver& qp = solver.solver();
   const auto s_block = qp.s_block();
   if (s_block.rows() > 0) {
-    stream_ << fmt::format("  Slack variables: {}\n", s_block.transpose().format(kMatrixFmt));
+    stream_ << fmt::format("  Slack variables: {}\n",
+                           fmt::streamed(s_block.transpose().format(kMatrixFmt)));
   }
 
   // print extra details
@@ -167,8 +169,8 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
         "  Variables:\n"
         "    x_old = {}\n"
         "    x_new = {}\n",
-        solver.previous_variables().transpose().format(kMatrixFmt),
-        solver.variables().transpose().format(kMatrixFmt));
+        fmt::streamed(solver.previous_variables().transpose().format(kMatrixFmt)),
+        fmt::streamed(solver.variables().transpose().format(kMatrixFmt)));
   }
   return true;
 }

@@ -1,5 +1,3 @@
-add_subdirectory(geometry_utils)
-
 function(add_libfmt)
   set(FMT_TEST
       OFF
@@ -17,10 +15,7 @@ function(add_gtest)
       CACHE BOOL "" FORCE)
   add_subdirectory(googletest)
 endfunction()
-
-if(WF_BUILD_EXTRAS)
-  add_gtest()
-endif()
+add_gtest()
 
 # Create a target for eigen.
 function(add_eigen)
@@ -32,3 +27,11 @@ function(add_eigen)
   endif()
 endfunction()
 add_eigen()
+
+function(add_geometry_utils)
+  set(GEO_UTILS_BUILD_TESTING
+      OFF
+      CACHE BOOL "" FORCE)
+  add_subdirectory(geometry_utils)
+endfunction()
+add_geometry_utils()

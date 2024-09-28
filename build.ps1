@@ -1,6 +1,6 @@
 param (
-    [Parameter(Mandatory)]$install_prefix, 
-    [string]$eigen_directory, 
+    [Parameter(Mandatory)]$install_prefix,
+    [string]$eigen_directory,
     [switch]$clean,
     [string]$build_type='Release',
     [switch]$install_third_party

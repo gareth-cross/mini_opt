@@ -282,7 +282,7 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
       *lambda = std::max(params.lambda_failure_init, *lambda);
       state_ = OptimizerState::ATTEMPTING_RESTORE_LM;
     } else {
-      ASSERT_EQUAL(state_, OptimizerState::ATTEMPTING_RESTORE_LM);
+      ASSERT(state_ == OptimizerState::ATTEMPTING_RESTORE_LM);
       // We are already attempting to recover and failing, ramp up lambda.
       *lambda *= 10;
     }
@@ -318,7 +318,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     if (strategy == LineSearchStrategy::POLYNOMIAL_APPROXIMATION) {
       alpha = ComputeAlphaPolynomialApproximation(iter, alpha, errors_pre, derivatives, penalty);
     } else {
-      ASSERT_EQUAL(strategy, LineSearchStrategy::ARMIJO_BACKTRACK);
+      ASSERT(strategy == LineSearchStrategy::ARMIJO_BACKTRACK);
       if (iter > 0) {
         alpha = alpha * backtrack_search_tau;
       }

@@ -3,13 +3,15 @@
 
 #include <numeric>
 
+#include "geometry_utils/so3.hpp"
+
 #include "mini_opt/assertions.hpp"
 
 namespace mini_opt {
 using namespace Eigen;
 
-math::Matrix<double, 4, 4> Pose::ToMatrix() const {
-  return (math::Matrix<double, 4, 4>() << rotation.matrix(), translation, 0, 0, 0, 1).finished();
+Eigen::Matrix<double, 4, 4> Pose::ToMatrix() const {
+  return (Eigen::Matrix<double, 4, 4>() << rotation.matrix(), translation, 0, 0, 0, 1).finished();
 }
 
 Pose ChainComputationBuffer::start_T_end() const {
@@ -107,7 +109,7 @@ ActuatorLink::ActuatorLink(const Pose& pose, const std::array<uint8_t, 6>& mask)
     // Invert here, since this function assumes the order ZYX
     rotation_xyz = -math::EulerAnglesFromSO3(pose.rotation.conjugate());
 
-    const math::Matrix<double, 3, 3> R_delta =
+    const Eigen::Matrix<double, 3, 3> R_delta =
         (math::SO3FromEulerAngles(rotation_xyz, math::CompositionOrder::XYZ).q.matrix() -
          pose.rotation.matrix())
             .cwiseAbs();
@@ -120,11 +122,11 @@ ActuatorLink::ActuatorLink(const Pose& pose, const std::array<uint8_t, 6>& mask)
 // constructor that does the correct logic, and specialize it depending on which set of flags
 // are active? Alternatively, could just use polymorphism on each active link and make them
 // all specialized like that.
-Pose ActuatorLink::Compute(const math::Vector<double>& params, const int position,
+Pose ActuatorLink::Compute(const Eigen::VectorXd& params, const int position,
                            DerivativeBlock J_out) const {
   ASSERT_EQUAL(J_out.cols(), ActiveRotationCount(), "Wrong number of columns in output jacobian");
   if (ActiveRotationCount() == 0) {
-    math::Vector<double, 3> translation_xyz = parent_T_child.translation;
+    Eigen::Vector<double, 3> translation_xyz = parent_T_child.translation;
     for (int i = 0, param_index = position; i < 3; ++i) {
       if (active[static_cast<std::size_t>(i) + 3]) {
         ASSERT_LESS(param_index, params.rows());
@@ -134,7 +136,7 @@ Pose ActuatorLink::Compute(const math::Vector<double>& params, const int positio
     return Pose{parent_T_child.rotation, translation_xyz};
   }
   // Pull out just the angles and translations we care about.
-  math::Vector<double, 6> params_updated;
+  Eigen::Vector<double, 6> params_updated;
   params_updated.head<3>() = rotation_xyz;
   params_updated.tail<3>() = parent_T_child.translation;
   for (int i = 0, param_index = position; i < 6; ++i) {
@@ -160,7 +162,7 @@ Pose ActuatorLink::Compute(const math::Vector<double>& params, const int positio
 // it by multiplying on the left with effector_rot_R_link_rot.
 // TODO(gareth): Not the biggest fan of all the indexing involved in having the `active` set
 // of params. Would like something cleaner for that.
-void ActuatorChain::Update(const math::Vector<double>& params) {
+void ActuatorChain::Update(const Eigen::VectorXd& params) {
   if (!ShouldUpdate(params)) {
     return;
   }
@@ -243,7 +245,7 @@ void ActuatorChain::Update(const math::Vector<double>& params) {
 
 // Return true if the parameters have changed since the last time this was called.
 // Allows us to re-use intermediate values.
-bool ActuatorChain::ShouldUpdate(const math::Vector<double>& params) const {
+bool ActuatorChain::ShouldUpdate(const Eigen::VectorXd& params) const {
   if (params_cached_.rows() != params.rows()) {
     return true;
   }
