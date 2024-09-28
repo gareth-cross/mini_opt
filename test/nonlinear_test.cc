@@ -5,10 +5,10 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
+#include "geometry_utils/angle_utils.hpp"
 #include "geometry_utils/numerical_derivative.hpp"
 
 #include "mini_opt/logging.hpp"
-#include "mini_opt/math_utils.hpp"
 #include "mini_opt/nonlinear.hpp"
 
 #include "test_utils.hpp"
@@ -840,7 +840,7 @@ class ConstrainedNLSTest : public ::testing::Test {
         &problem, [](Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha) {
           for (int i = 0; i < x->rows(); ++i) {
             // These are angles, so clamp them in range of [-pi, pi]
-            x->operator[](i) = ModPi(x->operator[](i) + dx[i] * alpha);
+            x->operator[](i) = math::ModPi(x->operator[](i) + dx[i] * alpha);
           }
         });
 
@@ -1069,7 +1069,7 @@ class ConstrainedNLSTest : public ::testing::Test {
         &problem, [](Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha) {
           for (int i = 0; i < x->rows(); ++i) {
             // These are angles, so clamp them in range of [-pi, pi]
-            x->operator[](i) = ModPi(x->operator[](i) + dx[i] * alpha);
+            x->operator[](i) = math::ModPi(x->operator[](i) + dx[i] * alpha);
           }
         });
 

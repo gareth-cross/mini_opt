@@ -6,7 +6,7 @@ include(GNUInstallDirs)
 add_subdirectory(dependencies)
 
 if(MSVC)
-  set(COMPILATION_FLAGS /W4 /WX /bigobj /D_USE_MATH_DEFINES /wd4244)
+  set(COMPILATION_FLAGS /W4 /WX /bigobj /D_USE_MATH_DEFINES)
 else()
   set(COMPILATION_FLAGS -Wall -Wextra -pedantic -Werror -Wno-sign-compare)
 endif()
@@ -14,22 +14,14 @@ endif()
 # Main project library
 set(LIBRARY_NAME ${PROJECT_NAME})
 set(LIBRARY_HEADERS
-    include/mini_opt/assertions.hpp
-    include/mini_opt/logging.hpp
-    include/mini_opt/math_utils.hpp
-    include/mini_opt/nonlinear.hpp
-    include/mini_opt/qp.hpp
-    include/mini_opt/residual.hpp
-    include/mini_opt/structs.hpp)
+    include/mini_opt/assertions.hpp include/mini_opt/logging.hpp
+    include/mini_opt/nonlinear.hpp include/mini_opt/qp.hpp
+    include/mini_opt/residual.hpp include/mini_opt/structs.hpp)
+
 add_library(
   ${LIBRARY_NAME} STATIC
-  source/logging.cc
-  source/math_utils.cc
-  source/nonlinear.cc
-  source/qp.cc
-  source/residual.cc
-  source/structs.cc
-  ${LIBRARY_HEADERS})
+  source/logging.cc source/nonlinear.cc source/qp.cc source/residual.cc
+  source/structs.cc ${LIBRARY_HEADERS})
 target_link_libraries(${LIBRARY_NAME} fmt::fmt-header-only eigen geometry_utils)
 target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_17)
 target_compile_options(${LIBRARY_NAME} PRIVATE ${COMPILATION_FLAGS})
@@ -42,9 +34,6 @@ target_include_directories(
   PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
          "$<INSTALL_INTERFACE:include>")
 
-# Specify public headers.
-set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER
-                                                 ${LIBRARY_HEADERS})
 install(
   TARGETS ${LIBRARY_NAME}
   EXPORT ${LIBRARY_NAME}
