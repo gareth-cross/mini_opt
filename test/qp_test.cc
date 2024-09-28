@@ -1,8 +1,9 @@
 // Copyright 2021 Gareth Cross
 #include "mini_opt/qp.hpp"
 
-#include <numeric>
 #include <random>
+
+#include <fmt/ostream.h>
 
 #include "mini_opt/logging.hpp"
 #include "test_utils.hpp"

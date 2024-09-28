@@ -9,8 +9,8 @@ namespace mini_opt {
 ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem* const problem,
                                                                    Retraction retraction)
     : p_(problem), custom_retraction_(std::move(retraction)) {
-  ASSERT(p_ != nullptr);
-  ASSERT_GREATER(p_->dimension, 0, "Need at least one variable");
+  F_ASSERT(p_ != nullptr);
+  F_ASSERT_GT(p_->dimension, 0, "Need at least one variable");
 
   // allocate space
   qp_.G.resize(p_->dimension, p_->dimension);
@@ -44,26 +44,26 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
 }
 
 static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) {
-  ASSERT_GREATER_OR_EQ(params.max_iterations, 0);
-  ASSERT_GREATER_OR_EQ(params.max_qp_iterations, 1);
-  ASSERT_GREATER(params.termination_kkt_tolerance, 0);
-  ASSERT_GREATER(params.absolute_exit_tol, 0);
-  ASSERT_GREATER_OR_EQ(params.max_line_search_iterations, 0);
-  ASSERT_GREATER_OR_EQ(params.relative_exit_tol, 0);
-  ASSERT_LESS_OR_EQ(params.relative_exit_tol, 1);
-  ASSERT_GREATER_OR_EQ(params.absolute_first_derivative_tol, 0);
-  ASSERT_GREATER_OR_EQ(params.max_lambda, 0);
-  ASSERT_LESS_OR_EQ(params.min_lambda, params.max_lambda);
-  ASSERT_GREATER_OR_EQ(params.lambda_initial, params.min_lambda);
-  ASSERT_LESS_OR_EQ(params.lambda_initial, params.max_lambda);
-  ASSERT_GREATER_OR_EQ(params.lambda_failure_init, 0);
-  ASSERT(params.equality_constraint_norm == Norm::L1 ||
+  F_ASSERT_GE(params.max_iterations, 0);
+  F_ASSERT_GE(params.max_qp_iterations, 1);
+  F_ASSERT_GT(params.termination_kkt_tolerance, 0);
+  F_ASSERT_GT(params.absolute_exit_tol, 0);
+  F_ASSERT_GE(params.max_line_search_iterations, 0);
+  F_ASSERT_GE(params.relative_exit_tol, 0);
+  F_ASSERT_LE(params.relative_exit_tol, 1);
+  F_ASSERT_GE(params.absolute_first_derivative_tol, 0);
+  F_ASSERT_GE(params.max_lambda, 0);
+  F_ASSERT_LE(params.min_lambda, params.max_lambda);
+  F_ASSERT_GE(params.lambda_initial, params.min_lambda);
+  F_ASSERT_LE(params.lambda_initial, params.max_lambda);
+  F_ASSERT_GE(params.lambda_failure_init, 0);
+  F_ASSERT(params.equality_constraint_norm == Norm::L1 ||
          params.equality_constraint_norm == Norm::QUADRATIC);
 }
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
                                                          const Eigen::VectorXd& variables) {
-  ASSERT(p_ != nullptr, "Must have a valid problem");
+  F_ASSERT(p_ != nullptr, "Must have a valid problem");
   CheckParams(params);
   variables_ = variables;
   prev_variables_ = variables;
@@ -184,11 +184,11 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
                                                             const double lambda,
                                                             const Norm& equality_norm,
                                                             const Problem& problem, QP* const qp) {
-  ASSERT(qp != nullptr);
-  ASSERT_EQUAL(qp->G.rows(), problem.dimension);
-  ASSERT_EQUAL(qp->G.cols(), problem.dimension);
-  ASSERT_EQUAL(qp->c.rows(), problem.dimension);
-  ASSERT_EQUAL(qp->A_eq.rows(), qp->b_eq.rows());
+  F_ASSERT(qp != nullptr);
+  F_ASSERT_EQ(qp->G.rows(), problem.dimension);
+  F_ASSERT_EQ(qp->G.cols(), problem.dimension);
+  F_ASSERT_EQ(qp->c.rows(), problem.dimension);
+  F_ASSERT_EQ(qp->A_eq.rows(), qp->b_eq.rows());
   Errors output_errors{};
 
   // zero out the linear system before adding all the costs to it
@@ -207,7 +207,7 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   int row = 0;
   for (const ResidualBase::unique_ptr& eq : problem.equality_constraints) {
     const int dim = eq->Dimension();
-    ASSERT(row + dim <= qp->A_eq.rows());
+    F_ASSERT(row + dim <= qp->A_eq.rows());
     // block we write the error into
     auto b_seg = qp->b_eq.segment(row, dim);
     eq->UpdateJacobian(variables, qp->A_eq.middleRows(row, dim), b_seg);
@@ -253,10 +253,10 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
 NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitConditions(
     const Params& params, const StepSizeSelectionResult& step_result, const Errors& initial_errors,
     const double penalty, double* const lambda) {
-  ASSERT(lambda != nullptr);
+  F_ASSERT(lambda != nullptr);
 
   if (step_result == StepSizeSelectionResult::SUCCESS) {
-    ASSERT(!steps_.empty(), "Must have logged a step");
+    F_ASSERT(!steps_.empty(), "Must have logged a step");
     // Update the state, and decrease lambda.
     prev_variables_.swap(variables_);  //  save the current variables
     variables_.swap(candidate_vars_);  //  replace w/ the candidate variables
@@ -282,7 +282,7 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
       *lambda = std::max(params.lambda_failure_init, *lambda);
       state_ = OptimizerState::ATTEMPTING_RESTORE_LM;
     } else {
-      ASSERT(state_ == OptimizerState::ATTEMPTING_RESTORE_LM);
+      F_ASSERT(state_ == OptimizerState::ATTEMPTING_RESTORE_LM);
       // We are already attempting to recover and failing, ramp up lambda.
       *lambda *= 10;
     }
@@ -318,7 +318,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     if (strategy == LineSearchStrategy::POLYNOMIAL_APPROXIMATION) {
       alpha = ComputeAlphaPolynomialApproximation(iter, alpha, errors_pre, derivatives, penalty);
     } else {
-      ASSERT(strategy == LineSearchStrategy::ARMIJO_BACKTRACK);
+      F_ASSERT(strategy == LineSearchStrategy::ARMIJO_BACKTRACK);
       if (iter > 0) {
         alpha = alpha * backtrack_search_tau;
       }
@@ -353,22 +353,22 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
 double ConstrainedNonlinearLeastSquares::ComputeAlphaPolynomialApproximation(
     const int iteration, const double alpha, const Errors& errors_pre,
     const DirectionalDerivatives& derivatives, const double penalty) const {
-  ASSERT_GREATER_OR_EQ(iteration, 0);
+  F_ASSERT_GE(iteration, 0);
   if (iteration == 0) {
     return alpha;
   } else if (iteration == 1) {
-    ASSERT_EQUAL(steps_.size(), 1);
+    F_ASSERT_EQ(steps_.size(), 1);
     // Pick a new alpha by approximating cost as a quadratic.
     // steps_.back() here is the "full step" error.
     const LineSearchStep& prev_step = steps_.back();
     const double new_alpha =
         QuadraticApproxMinimum(errors_pre.Total(penalty), derivatives.Total(penalty),
                                prev_step.alpha, prev_step.errors.Total(penalty));
-    ASSERT_LESS(new_alpha, prev_step.alpha, "Alpha must decrease, alpha = {}, prev_alpha = {}",
+    F_ASSERT_LT(new_alpha, prev_step.alpha, "Alpha must decrease, alpha = {}, prev_alpha = {}",
                 alpha, prev_step.alpha);
     return new_alpha;
   }
-  ASSERT_GREATER_OR_EQ(steps_.size(), 2);
+  F_ASSERT_GE(steps_.size(), 2);
   // Try the cubic approximation.
   const LineSearchStep& second_last_step = steps_[steps_.size() - 2];
   const LineSearchStep& last_step = steps_.back();
@@ -380,7 +380,7 @@ double ConstrainedNonlinearLeastSquares::ComputeAlphaPolynomialApproximation(
 
   // Solve.
   const double new_alpha = CubicApproxMinimum(derivatives.Total(penalty), ab);
-  ASSERT_LESS(new_alpha, last_step.alpha,
+  F_ASSERT_LT(new_alpha, last_step.alpha,
               "Alpha must decrease in the line search, alpha = {}, prev_alpha = {}", alpha,
               last_step.alpha);
   return new_alpha;
@@ -407,8 +407,8 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
   //
   //  For the quadratic part, this is just: c^T * dx, since c = J(x)^T * f(x)
   //  For the equality constraint, we compute J(x)^T * f(x) here explicitly.
-  ASSERT_EQUAL(qp.c.rows(), dx.rows(), "Mismatch between dx and c");
-  ASSERT_EQUAL(qp.A_eq.cols(), dx.rows(), "Mismatch between dx and A_eq");
+  F_ASSERT_EQ(qp.c.rows(), dx.rows(), "Mismatch between dx and c");
+  F_ASSERT_EQ(qp.A_eq.cols(), dx.rows(), "Mismatch between dx and A_eq");
   DirectionalDerivatives out{};
   out.d_f = qp.c.dot(dx);
 
@@ -464,8 +464,8 @@ double ConstrainedNonlinearLeastSquares::SelectPenalty(const Norm& norm_type,
 // approximation does not play nice with the quadratic approximation line search, in that it
 // produces large penalties as |c(x)| -> 0, resulting in tiny step sizes and very slow convergence.
 double ConstrainedNonlinearLeastSquares::ComputeEqualityPenalty(double d_f, double c, double rho) {
-  ASSERT_LESS(rho, 1);
-  ASSERT_GREATER_OR_EQ(rho, 0);
+  F_ASSERT_LT(rho, 1);
+  F_ASSERT_GE(rho, 0);
   if (c == 0) {
     return 0;
   }
@@ -489,10 +489,10 @@ double ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(const double phi
                                                                 const double phi_prime_0,
                                                                 const double alpha_0,
                                                                 const double phi_alpha_0) {
-  ASSERT_GREATER(alpha_0, 0);
-  ASSERT_LESS(phi_prime_0, 0);
+  F_ASSERT_GT(alpha_0, 0);
+  F_ASSERT_LT(phi_prime_0, 0);
   const double numerator = 2 * (phi_alpha_0 - phi_0 - phi_prime_0 * alpha_0);
-  ASSERT_GREATER(numerator, 0, "phi_alpha_0={}, phi_0={}, alpha_0={}", phi_alpha_0, phi_0, alpha_0);
+  F_ASSERT_GT(numerator, 0, "phi_alpha_0={}, phi_0={}, alpha_0={}", phi_alpha_0, phi_0, alpha_0);
   return -phi_prime_0 * alpha_0 * alpha_0 / numerator;
 }
 
@@ -503,8 +503,8 @@ double ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(const double phi
 Eigen::Vector2d ConstrainedNonlinearLeastSquares::CubicApproxCoeffs(
     const double phi_0, const double phi_prime_0, const double alpha_0, const double phi_alpha_0,
     const double alpha_1, const double phi_alpha_1) {
-  ASSERT_GREATER(alpha_1, 0);
-  ASSERT_GREATER(alpha_0, alpha_1, "This must be satisfied for the system to be solvable");
+  F_ASSERT_GT(alpha_1, 0);
+  F_ASSERT_GT(alpha_0, alpha_1, "This must be satisfied for the system to be solvable");
   // clang-format off
   const Eigen::Matrix2d A = (Eigen::Matrix2d() <<
       alpha_0 * alpha_0 * alpha_0, alpha_0 * alpha_0,
@@ -519,10 +519,10 @@ Eigen::Vector2d ConstrainedNonlinearLeastSquares::CubicApproxCoeffs(
 
 double ConstrainedNonlinearLeastSquares::CubicApproxMinimum(const double phi_prime_0,
                                                             const Eigen::Vector2d& ab) {
-  ASSERT_GREATER(std::abs(ab[0]), 0, "Coefficient a cannot be zero");
+  F_ASSERT_GT(std::abs(ab[0]), 0, "Coefficient a cannot be zero");
   const double arg_sqrt = ab[1] * ab[1] - 3 * ab[0] * phi_prime_0;
   constexpr double kNegativeTol = -1.0e-12;
-  ASSERT_GREATER_OR_EQ(arg_sqrt, kNegativeTol,
+  F_ASSERT_GE(arg_sqrt, kNegativeTol,
                        "This term must be positive: a={}, b={}, phi_prime_0={}", ab[0], ab[1],
                        phi_prime_0);
   return (std::sqrt(std::max(arg_sqrt, 0.)) - ab[1]) / (3 * ab[0]);
@@ -533,15 +533,15 @@ void ConstrainedNonlinearLeastSquares::ComputeSecondOrderCorrection(
     const Eigen::VectorXd& updated_x,
     const std::vector<ResidualBase::unique_ptr>& equality_constraints, QP* qp,
     Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver, Eigen::VectorXd* dx_out) {
-  ASSERT(qp);
-  ASSERT(solver);
-  ASSERT(dx_out);
+  F_ASSERT(qp);
+  F_ASSERT(solver);
+  F_ASSERT(dx_out);
 
   // we use the QP `b` vector as storage for this operation
   int row = 0;
   for (const ResidualBase::unique_ptr& eq : equality_constraints) {
     const int dim = eq->Dimension();
-    ASSERT_LESS_OR_EQ(row + dim, qp->b_eq.rows(), "Insufficient rows in vector b");
+    F_ASSERT_LE(row + dim, qp->b_eq.rows(), "Insufficient rows in vector b");
     eq->ErrorVector(updated_x, qp->b_eq.segment(row, dim));
     row += dim;
   }

@@ -15,8 +15,8 @@ Eigen::Matrix<double, 4, 4> Pose::ToMatrix() const {
 }
 
 Pose ChainComputationBuffer::start_T_end() const {
-  ASSERT(!i_R_end.empty());
-  ASSERT_GREATER(i_t_end.cols(), 0);
+  F_ASSERT(!i_R_end.empty());
+  F_ASSERT_GT(i_t_end.cols(), 0);
   return Pose{i_R_end.front(), i_t_end.leftCols<1>()};
 }
 
@@ -113,7 +113,7 @@ ActuatorLink::ActuatorLink(const Pose& pose, const std::array<uint8_t, 6>& mask)
         (math::SO3FromEulerAngles(rotation_xyz, math::CompositionOrder::XYZ).q.matrix() -
          pose.rotation.matrix())
             .cwiseAbs();
-    ASSERT((R_delta.array() < 1.0e-5).all(), "Euler angle decomposition failed");
+    F_ASSERT((R_delta.array() < 1.0e-5).all(), "Euler angle decomposition failed");
   }
 }
 
@@ -124,12 +124,12 @@ ActuatorLink::ActuatorLink(const Pose& pose, const std::array<uint8_t, 6>& mask)
 // all specialized like that.
 Pose ActuatorLink::Compute(const Eigen::VectorXd& params, const int position,
                            DerivativeBlock J_out) const {
-  ASSERT_EQUAL(J_out.cols(), ActiveRotationCount(), "Wrong number of columns in output jacobian");
+  F_ASSERT_EQ(J_out.cols(), ActiveRotationCount(), "Wrong number of columns in output jacobian");
   if (ActiveRotationCount() == 0) {
     Eigen::Vector<double, 3> translation_xyz = parent_T_child.translation;
     for (int i = 0, param_index = position; i < 3; ++i) {
       if (active[static_cast<std::size_t>(i) + 3]) {
-        ASSERT_LESS(param_index, params.rows());
+        F_ASSERT_LT(param_index, params.rows());
         translation_xyz[i] = params[param_index++];
       }
     }
@@ -171,7 +171,7 @@ void ActuatorChain::Update(const Eigen::VectorXd& params) {
   if (translation_D_params_.size() == 0) {
     // compute total active
     const int total_active = TotalActive();
-    ASSERT_EQUAL(params.rows(), total_active,
+    F_ASSERT_EQ(params.rows(), total_active,
                  "Wrong number of params passed. Expected = {}, actual = {}", total_active,
                  params.rows());
     rotation_D_params_.resize(3, total_active);
@@ -181,7 +181,7 @@ void ActuatorChain::Update(const Eigen::VectorXd& params) {
   }
 
   // Dimensions cannot change after first call.
-  ASSERT_EQUAL(params.rows(), rotation_D_params_.cols(), "Mismatch between # params");
+  F_ASSERT_EQ(params.rows(), rotation_D_params_.cols(), "Mismatch between # params");
 
   // Compute poses and rotational derivatives.
   pose_buffer_.resize(links.size());
@@ -211,7 +211,7 @@ void ActuatorChain::Update(const Eigen::VectorXd& params) {
     // The right half of rot_D_rot will be zero, but this is likely ok on the grounds that
     // translation parameters should be less common than rotational ones, so the wasted space
     // and work is not that bad.
-    ASSERT_LESS_OR_EQ(position + active_count, rotation_D_params_.cols());
+    F_ASSERT_LE(position + active_count, rotation_D_params_.cols());
 
     auto rot_D_angles = rotation_D_params_.middleCols(
         position, num_rotation_active);  //  wrt just the rotation part
