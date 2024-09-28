@@ -1,10 +1,10 @@
 // Copyright 2021 Gareth Cross
-#include <Eigen/Dense>
-
-#include "mini_opt/transform_chains.hpp"
+#include <Eigen/Core>
 
 #include "geometry_utils/numerical_derivative.hpp"
+
 #include "test_utils.hpp"
+#include "transform_chains.hpp"
 
 namespace mini_opt {
 using namespace Eigen;

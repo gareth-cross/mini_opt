@@ -1,5 +1,5 @@
 // Copyright 2021 Gareth Cross
-#include "mini_opt/transform_chains.hpp"
+#include "transform_chains.hpp"
 
 #include <numeric>
 
@@ -172,8 +172,8 @@ void ActuatorChain::Update(const Eigen::VectorXd& params) {
     // compute total active
     const int total_active = TotalActive();
     F_ASSERT_EQ(params.rows(), total_active,
-                 "Wrong number of params passed. Expected = {}, actual = {}", total_active,
-                 params.rows());
+                "Wrong number of params passed. Expected = {}, actual = {}", total_active,
+                params.rows());
     rotation_D_params_.resize(3, total_active);
     rotation_D_params_.setZero();
     translation_D_params_.resize(3, total_active);

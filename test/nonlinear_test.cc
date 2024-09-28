@@ -10,8 +10,9 @@
 #include "mini_opt/logging.hpp"
 #include "mini_opt/math_utils.hpp"
 #include "mini_opt/nonlinear.hpp"
-#include "mini_opt/transform_chains.hpp"
+
 #include "test_utils.hpp"
+#include "transform_chains.hpp"
 
 // TODO(gareth): Split up this file a bit.
 namespace mini_opt {

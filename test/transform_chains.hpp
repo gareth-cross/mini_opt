@@ -8,7 +8,7 @@
 // Code for representing and computing chains of transforms, such as you might
 // find in a robotic actuator or skeleton.
 // TODO(gareth): These types are fairly specific to what I was doing with Unreal Engine
-// and maybe belong somewhere else. Pretty particular to one problem formulation. I
+// and maybe belong somewhere else. They are pretty particular to one problem formulation. I
 // also expect the optimizer would work better if we eliminated the rotation representation
 // and just used length-constrained vectors in R3 to represent bones. The euler-angle
 // representation is a bit gross, and was chosen since the initial version only optimized

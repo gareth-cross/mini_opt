@@ -5,6 +5,12 @@ include(GNUInstallDirs)
 
 add_subdirectory(dependencies)
 
+if(MSVC)
+  set(COMPILATION_FLAGS /W4 /WX /bigobj /D_USE_MATH_DEFINES /wd4244)
+else()
+  set(COMPILATION_FLAGS -Wall -Wextra -pedantic -Werror -Wno-sign-compare)
+endif()
+
 # Main project library
 set(LIBRARY_NAME ${PROJECT_NAME})
 set(LIBRARY_HEADERS
@@ -23,20 +29,10 @@ add_library(
   source/qp.cc
   source/residual.cc
   source/structs.cc
-  source/transform_chains.cc
   ${LIBRARY_HEADERS})
 target_link_libraries(${LIBRARY_NAME} fmt::fmt-header-only eigen geometry_utils)
 target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_17)
-
-if(MSVC)
-  # USE_MATH_DEFINES is required for M_PI
-  target_compile_options(${LIBRARY_NAME} PRIVATE /W4 /WX /D_USE_MATH_DEFINES
-                                                 /wd4244)
-else()
-  target_compile_options(${LIBRARY_NAME} PRIVATE -Wall -Wextra -pedantic
-                                                 -Werror -Wno-sign-compare)
-endif()
-
+target_compile_options(${LIBRARY_NAME} PRIVATE ${COMPILATION_FLAGS})
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   target_compile_definitions(${LIBRARY_NAME} PUBLIC EIGEN_NO_DEBUG)
 endif()
