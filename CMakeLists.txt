@@ -13,15 +13,19 @@ endif()
 
 # Main project library
 set(LIBRARY_NAME ${PROJECT_NAME})
-set(LIBRARY_HEADERS
-    include/mini_opt/assertions.hpp include/mini_opt/logging.hpp
-    include/mini_opt/nonlinear.hpp include/mini_opt/qp.hpp
-    include/mini_opt/residual.hpp include/mini_opt/structs.hpp)
-
 add_library(
   ${LIBRARY_NAME} STATIC
-  source/logging.cc source/nonlinear.cc source/qp.cc source/residual.cc
-  source/structs.cc ${LIBRARY_HEADERS})
+  include/mini_opt/assertions.hpp
+  include/mini_opt/logging.hpp
+  include/mini_opt/nonlinear.hpp
+  include/mini_opt/qp.hpp
+  include/mini_opt/residual.hpp
+  include/mini_opt/structs.hpp
+  source/logging.cc
+  source/nonlinear.cc
+  source/qp.cc
+  source/residual.cc
+  source/structs.cc)
 target_link_libraries(${LIBRARY_NAME} fmt::fmt-header-only eigen geometry_utils)
 target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_17)
 target_compile_options(${LIBRARY_NAME} PRIVATE ${COMPILATION_FLAGS})

@@ -101,19 +101,13 @@ struct Residual : public ResidualBase {
 // Template implementations.
 //
 
-// Turn off warnings about constant if statements.
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4127)
-#endif  // _MSC_VER
-
 // Helper to read a sparse set of values out of a larger matrix.
 template <int N>
 void ReadSparseValues(const Eigen::VectorXd& input,
                       const typename internal::IndexType<N>::type& index,
                       Eigen::Matrix<double, N, 1>* output) {
   F_ASSERT(output != nullptr);
-  if (N == Eigen::Dynamic) {
+  if constexpr (N == Eigen::Dynamic) {
     output->resize(index.size());
   }
   for (std::size_t local = 0; local < index.size(); ++local) {
@@ -158,7 +152,7 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
 
   // Evaluate the function and its derivative.
   JacobianType J;
-  if (NumParams == Eigen::Dynamic) {
+  if constexpr (NumParams == Eigen::Dynamic) {
     J.resize(ResidualDim, index.size());
   }
   const ResidualType r = function(relevant_params, &J);
@@ -199,7 +193,7 @@ void Residual<ResidualDim, NumParams>::UpdateJacobian(
 
   // Evaluate, and copy jacobian back using indices.
   JacobianType J;
-  if (NumParams == Eigen::Dynamic) {
+  if constexpr (NumParams == Eigen::Dynamic) {
     J.resize(ResidualDim, index.size());
   }
   b_out.noalias() = function(relevant_params, &J);
@@ -210,9 +204,5 @@ void Residual<ResidualDim, NumParams>::UpdateJacobian(
     J_out.col(col_global).noalias() = J.col(col_local);
   }
 }
-
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif  // _MSC_VER
 
 }  // namespace mini_opt
