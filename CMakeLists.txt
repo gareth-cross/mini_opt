@@ -8,7 +8,7 @@ add_subdirectory(dependencies)
 if(MSVC)
   set(COMPILATION_FLAGS /W4 /WX /bigobj /D_USE_MATH_DEFINES)
 else()
-  set(COMPILATION_FLAGS -Wall -Wextra -pedantic -Werror -Wno-sign-compare)
+  set(COMPILATION_FLAGS -Wall -Wextra -pedantic -Werror)
 endif()
 
 # Main project library
