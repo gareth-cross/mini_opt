@@ -26,7 +26,7 @@ add_library(
   source/qp.cc
   source/residual.cc
   source/structs.cc)
-target_link_libraries(${LIBRARY_NAME} fmt::fmt-header-only eigen geometry_utils)
+target_link_libraries(${LIBRARY_NAME} PUBLIC fmt::fmt-header-only eigen)
 target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_17)
 target_compile_options(${LIBRARY_NAME} PRIVATE ${COMPILATION_FLAGS})
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
