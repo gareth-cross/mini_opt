@@ -929,9 +929,13 @@ class ConstrainedNLSTest : public ::testing::Test {
       nls.SetLoggingCallback(
           [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
             logger.NonlinearSolverCallback(solver, info);
+        // TODO: Get `dx` values from elsewhere, it's strange to access them directly in this
+        // callback.
+#if 0
             logger.stream() << fmt::format(
                 "    dx = {}\n",
                 fmt::streamed(info.dx.transpose().format(test_utils::kNumPyMatrixFmt)));
+#endif
             return true;
           });
 

@@ -127,8 +127,9 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares&,
                          fmt::streamed(info.optimizer_state), info.lambda);
   stream_ << fmt::format("  f(0): {:.16e}, c(0): {:.16e}, total: {:.16e}\n", info.errors_initial.f,
                          info.errors_initial.equality, info.errors_initial.Total(info.penalty));
-  stream_ << fmt::format("  min, max eig = {:.16e}, {:.16e}\n", info.qp_eigenvalues.minCoeff(),
-                         info.qp_eigenvalues.maxCoeff());
+  stream_ << fmt::format("  min, max, |min| eig = {:.16e}, {:.16e}, {:.16e}\n",
+                         info.qp_eigenvalues.min, info.qp_eigenvalues.max,
+                         info.qp_eigenvalues.abs_min);
   stream_ << fmt::format("  termination = {}\n", fmt::streamed(info.termination_state));
   stream_ << fmt::format("  penalty = {:.16f}\n", info.penalty);
   stream_ << fmt::format("  QP: {}, {}\n", fmt::streamed(info.qp_term_state.termination_state),

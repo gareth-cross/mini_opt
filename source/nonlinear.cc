@@ -147,14 +147,21 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, lambda);
     if (logging_callback_) {
       // log the eigenvalues of the QP as well
-      const auto dx_block = const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension);
       const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(qp_.G);
-      const NLSLogInfo info{iter,       state_,
-                            old_lambda, errors_pre,
-                            qp_outputs, solver.eigenvalues(),
-                            dx_block,   directional_derivative,
-                            penalty,    step_result,
-                            steps_,     maybe_exit};
+      const QPEigenvalues eigenvalues{solver.eigenvalues().minCoeff(),
+                                      solver.eigenvalues().maxCoeff(),
+                                      solver.eigenvalues().cwiseAbs().minCoeff()};
+      const NLSLogInfo info{iter,
+                            state_,
+                            old_lambda,
+                            errors_pre,
+                            qp_outputs,
+                            eigenvalues,
+                            directional_derivative,
+                            penalty,
+                            step_result,
+                            steps_,
+                            maybe_exit};
       const bool should_proceed = logging_callback_(*this, info);
       if (maybe_exit == NLSTerminationState::NONE && !should_proceed) {
         maybe_exit = NLSTerminationState::USER_CALLBACK;
@@ -205,7 +212,8 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   int row = 0;
   for (const ResidualBase::unique_ptr& eq : problem.equality_constraints) {
     const int dim = eq->Dimension();
-    F_ASSERT(row + dim <= qp->A_eq.rows());
+    F_ASSERT_LE(row + dim, qp->A_eq.rows());
+
     // block we write the error into
     auto b_seg = qp->b_eq.segment(row, dim);
     eq->UpdateJacobian(variables, qp->A_eq.middleRows(row, dim), b_seg);
