@@ -58,7 +58,7 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   F_ASSERT_LE(params.lambda_initial, params.max_lambda);
   F_ASSERT_GE(params.lambda_failure_init, 0);
   F_ASSERT(params.equality_constraint_norm == Norm::L1 ||
-         params.equality_constraint_norm == Norm::QUADRATIC);
+           params.equality_constraint_norm == Norm::QUADRATIC);
 }
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
@@ -314,7 +314,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
   // iterate to find a viable alpha, or give up
   double alpha{1};
   for (int iter = 0; iter <= max_iterations; ++iter) {
-    // compute nwe alpha value
+    // compute new alpha value
     if (strategy == LineSearchStrategy::POLYNOMIAL_APPROXIMATION) {
       alpha = ComputeAlphaPolynomialApproximation(iter, alpha, errors_pre, derivatives, penalty);
     } else {
@@ -509,7 +509,7 @@ Eigen::Vector2d ConstrainedNonlinearLeastSquares::CubicApproxCoeffs(
   const Eigen::Matrix2d A = (Eigen::Matrix2d() <<
       alpha_0 * alpha_0 * alpha_0, alpha_0 * alpha_0,
       alpha_1 * alpha_1 * alpha_1, alpha_1 * alpha_1).finished();
-    const Eigen::Vector2d b{
+  const Eigen::Vector2d b{
       phi_alpha_0 - phi_0 - phi_prime_0 * alpha_0,
       phi_alpha_1 - phi_0 - phi_prime_0 * alpha_1
   };
@@ -522,9 +522,8 @@ double ConstrainedNonlinearLeastSquares::CubicApproxMinimum(const double phi_pri
   F_ASSERT_GT(std::abs(ab[0]), 0, "Coefficient a cannot be zero");
   const double arg_sqrt = ab[1] * ab[1] - 3 * ab[0] * phi_prime_0;
   constexpr double kNegativeTol = -1.0e-12;
-  F_ASSERT_GE(arg_sqrt, kNegativeTol,
-                       "This term must be positive: a={}, b={}, phi_prime_0={}", ab[0], ab[1],
-                       phi_prime_0);
+  F_ASSERT_GE(arg_sqrt, kNegativeTol, "This term must be positive: a={}, b={}, phi_prime_0={}",
+              ab[0], ab[1], phi_prime_0);
   return (std::sqrt(std::max(arg_sqrt, 0.)) - ab[1]) / (3 * ab[0]);
 }
 

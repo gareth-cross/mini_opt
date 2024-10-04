@@ -2,7 +2,7 @@
 #pragma once
 #include <Eigen/Core>
 
-#include "mini_opt/residual.hpp"
+#include "mini_opt/assertions.hpp"
 #include "mini_opt/structs.hpp"
 
 /*

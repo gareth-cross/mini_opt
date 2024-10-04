@@ -1,6 +1,7 @@
 // Copyright 2021 Gareth Cross
 #include "mini_opt/qp.hpp"
 
+#include <fmt/ostream.h>
 #include <Eigen/Dense>
 
 using namespace Eigen;
@@ -292,9 +293,8 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   // shouldn't happen due to selection of alpha, but double check
   const bool any_non_positive_s = (s.array() <= 0.0).any();
   if (include_inequalities && any_non_positive_s) {
-    std::stringstream ss;
-    ss << "Some slack variables s <= 0: " << s.transpose().format(kMatrixFmt);
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(fmt::format("Some slack variables s <= 0: {}",
+                                         fmt::streamed(s.transpose().format(kMatrixFmt))));
   }
 
   // build the left-hand side (we only need lower triangular)
@@ -312,11 +312,9 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   // factorize, TODO(gareth): preallocate ldlt...
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
-    std::stringstream ss;
-    ss << "Failed to solve self-adjoint (lower) system:\n"
-       << H_.format(kMatrixFmt) << "\n"
-       << "The hessian may not be positive semi-definite.";
-    throw FailedFactorization(ss.str());
+    throw FailedFactorization(fmt::format(
+        "Failed to solve self-adjoint (lower) system:\n{}\nThe hessian may not be semi-definite.",
+        fmt::streamed(H_.format(kMatrixFmt))));
   }
 
   // compute H^-1

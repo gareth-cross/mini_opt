@@ -7,6 +7,7 @@
 #include <Eigen/Dense>
 
 #include "mini_opt/logging.hpp"
+#include "mini_opt/residual.hpp"
 #include "test_utils.hpp"
 
 #ifdef _MSC_VER
