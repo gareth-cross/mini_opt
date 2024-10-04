@@ -168,9 +168,9 @@ struct ConstrainedNonlinearLeastSquares {
   // Based on the outcome of the step selection, update lambda and check if
   // we should exit. Returns NONE if no exit is required.
   NLSTerminationState UpdateLambdaAndCheckExitConditions(const Params& params,
-                                                         const StepSizeSelectionResult& step_result,
+                                                         StepSizeSelectionResult step_result,
                                                          const Errors& initial_errors,
-                                                         double penalty, double* lambda);
+                                                         double penalty, double& lambda);
 
   // Execute a back-tracking search until the cost decreases, or we hit
   // a max number of iterations

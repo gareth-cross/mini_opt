@@ -144,7 +144,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
     NLSTerminationState maybe_exit =
-        UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, &lambda);
+        UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, lambda);
     if (logging_callback_) {
       // log the eigenvalues of the QP as well
       const auto dx_block = const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension);
@@ -249,16 +249,14 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
 
 // TODO(gareth): Investigate an approach like algorithm 11.5?
 NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitConditions(
-    const Params& params, const StepSizeSelectionResult& step_result, const Errors& initial_errors,
-    const double penalty, double* const lambda) {
-  F_ASSERT(lambda != nullptr);
-
+    const Params& params, const StepSizeSelectionResult step_result, const Errors& initial_errors,
+    const double penalty, double& lambda) {
   if (step_result == StepSizeSelectionResult::SUCCESS) {
     F_ASSERT(!steps_.empty(), "Must have logged a step");
     // Update the state, and decrease lambda.
     variables_.swap(candidate_vars_);  //  replace w/ the candidate variables
     state_ = OptimizerState::NOMINAL;
-    *lambda = std::max(*lambda * 0.1, params.min_lambda);
+    lambda = std::max(lambda * 0.1, params.min_lambda);
 
     // Check termination criteria.
     const LineSearchStep& final_step = steps_.back();
@@ -276,14 +274,14 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
              step_result == StepSizeSelectionResult::FAILURE_POSITIVE_DERIVATIVE) {
     if (state_ == OptimizerState::NOMINAL) {
       // Things were going well, but we failed - initialize lambda to attempt restore.
-      *lambda = std::max(params.lambda_failure_init, *lambda);
+      lambda = std::max(params.lambda_failure_init, lambda);
       state_ = OptimizerState::ATTEMPTING_RESTORE_LM;
     } else {
       F_ASSERT(state_ == OptimizerState::ATTEMPTING_RESTORE_LM);
       // We are already attempting to recover and failing, ramp up lambda.
-      *lambda *= 10;
+      lambda *= 10;
     }
-    if (*lambda > params.max_lambda) {
+    if (lambda > params.max_lambda) {
       // failed
       return NLSTerminationState::MAX_LAMBDA;
     }
