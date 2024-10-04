@@ -66,7 +66,6 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   CheckParams(params);
   variables_ = variables;
   state_ = OptimizerState::NOMINAL;
-  bool has_cached_qp_state{false};
 
   // Set up params, TODO(gareth): Tune this better.
   QPInteriorPointSolver::Params qp_params{};
@@ -75,6 +74,14 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   qp_params.initial_mu = 1.0;
   qp_params.sigma = 0.1;
   qp_params.initialize_mu_with_complementarity = false;
+
+  // If there are equality constraints, try initializing by just solving the
+  // equality constrained quadratic problem.
+  if (!p_->equality_constraints.empty()) {
+    qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
+  } else {
+    qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
+  }
 
   // Iterate until max.
   double lambda{params.lambda_initial};
@@ -85,31 +92,9 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const Errors errors_pre =
         LinearizeAndFillQP(variables_, lambda, params.equality_constraint_norm, *p_, &qp_);
 
-    if (iter == 0 || !has_cached_qp_state) {
-      // If there are inequality constraints, try initializing by just solving the
-      // equality constrained quadratic problem.
-      if (!qp_.constraints.empty()) {
-        qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
-      } else {
-        qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
-      }
-    } else {
-      // We'll use our initial guess from the previous iteration.
-      // This seems to produce a 2-3x reduction in # of QP iterations.
-      qp_params.initial_guess_method = InitialGuessMethod::USER_PROVIDED;
-      qp_params.initialize_mu_with_complementarity = true;
-      // Reduce the barrier more aggressively. This seems to make a small reduction in
-      // number of iterations, but needs more testing.
-      qp_params.sigma = 0.05;
-    }
-
     // Solve the QP.
     solver_.Setup(&qp_);
-    if (has_cached_qp_state) {
-      // Initialize everything from the output of the last iteration, except x (initialize to zero).
-      solver_.SetVariables(cached_qp_states_);
-      solver_.x_block().setZero();
-    }
+
     const QPSolverOutputs qp_outputs = solver_.Solve(qp_params);
     num_qp_iters += qp_outputs.num_iterations;
 
@@ -134,12 +119,6 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
         params.max_line_search_iterations, params.absolute_first_derivative_tol, errors_pre,
         directional_derivative, penalty, 1.0e-4 /* todo: add param */, params.line_search_strategy,
         params.armijo_search_tau, params.equality_constraint_norm);
-
-    if (step_result == StepSizeSelectionResult::SUCCESS) {
-      // save the states of slacks, multipliers, etc...
-      cached_qp_states_ = solver_.variables();
-      has_cached_qp_state = true;
-    }
 
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;

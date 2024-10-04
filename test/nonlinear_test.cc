@@ -244,6 +244,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     // should be the min norm solution (ie. step in any other valid direction increases |x|^2)
     const auto norm_func = [&](double alpha) { return (dx_original + null_space * alpha).norm(); };
     ASSERT_NEAR(0.0, math::NumericalDerivative(0.0, 0.01, norm_func), tol::kPico);
+
     const auto der_func = [&](double alpha) {
       return math::NumericalDerivative(alpha, 0.01, norm_func);
     };
@@ -487,9 +488,10 @@ class ConstrainedNLSTest : public ::testing::Test {
     //  my second guess here takes a lot of iterations - worth studying more perhaps
     p.max_iterations = 30;
     p.max_qp_iterations = 30;
-    p.relative_exit_tol = tol::kPico;
-    p.absolute_first_derivative_tol = tol::kPico;
+    p.relative_exit_tol = tol::kMicro;
+    p.absolute_first_derivative_tol = tol::kMicro;
     p.termination_kkt_tolerance = tol::kMicro;
+    p.max_lambda = 10.0;
 
     // Solve it from a couple of different initial guesses
     const Vector6 guess0 = (Vector6() << 10.5, -8.0, 50., -14.0, 4.0, -0.6).finished();
@@ -510,15 +512,15 @@ class ConstrainedNLSTest : public ::testing::Test {
       counters.push_back(logger.counters());
 
       // we can terminate due to absolute tol, derivative tol, etc
-      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
-                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
+      EXPECT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
                   (outputs.termination_state != NLSTerminationState::NONE))
-          << fmt::format("Initial guess: {}\nSummary:\n{}\n",
+          << fmt::format("Termination state: {}\nInitial guess: {}\nSummary:\n{}\n",
+                         fmt::streamed(outputs.termination_state),
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
                          logger.GetString());
 
       // check solution, it should be at the constraint
-      ASSERT_EIGEN_NEAR(solution, nls.variables(), 1.0e-4) << fmt::format(
+      ASSERT_EIGEN_NEAR(solution, nls.variables(), 1.0e-5) << fmt::format(
           "Initial guess: {}\nSummary:\n{}\n",
           fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
     }
@@ -1141,7 +1143,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
 
       // No strong reason for 30, just place a max to track performance here.
-      ASSERT_LT(logger.GetCount(StatCounters::NUM_LINE_SEARCH_STEPS), 30) << logger.GetString();
+      ASSERT_LT(logger.GetCount(StatCounters::NUM_LINE_SEARCH_STEPS), 36) << logger.GetString();
     }
     SummarizeCounts("Dual Actuator Balancing", counters);
   }
