@@ -115,10 +115,10 @@ struct Errors {
   double equality{0};
 
   // Total weighted cost function.
-  double Total(double penalty) const { return f + penalty * equality; }
+  constexpr double Total(double penalty) const noexcept { return f + penalty * equality; }
 
   // L-infinity norm
-  double LInfinity() const { return std::max(f, equality); }
+  constexpr double LInfinity() const noexcept { return std::max(f, equality); }
 };
 
 // Derivatives of `Errors`.
@@ -128,10 +128,12 @@ struct DirectionalDerivatives {
   // Derivative of the equality constraints wrt alpha.
   double d_equality;
 
-  double Total(double penalty) const { return d_f + penalty * d_equality; }
+  constexpr double Total(double penalty) const noexcept { return d_f + penalty * d_equality; }
 
   // L-infinity norm
-  double LInfinity() const { return std::max(std::abs(d_f), std::abs(d_equality)); }
+  constexpr double LInfinity() const noexcept {
+    return std::max(std::abs(d_f), std::abs(d_equality));
+  }
 };
 
 // Pair together a step size and the error achieved.
@@ -141,7 +143,7 @@ struct LineSearchStep {
   // Cost function value at that step.
   Errors errors;
 
-  LineSearchStep(double a, Errors e) : alpha(a), errors(e) {}
+  constexpr LineSearchStep(double a, Errors e) noexcept : alpha(a), errors(e) {}
 };
 
 // Result of SelectStepSize
@@ -182,7 +184,8 @@ struct NLSSolverOutputs {
   int num_qp_iterations;
 
   // Construct.
-  NLSSolverOutputs(const NLSTerminationState& term_state, int num_iters, int num_qp_iters)
+  constexpr NLSSolverOutputs(const NLSTerminationState& term_state, int num_iters,
+                             int num_qp_iters) noexcept
       : termination_state(term_state), num_iterations(num_iters), num_qp_iterations(num_qp_iters) {}
 };
 
