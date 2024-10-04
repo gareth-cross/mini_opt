@@ -28,30 +28,45 @@ namespace mini_opt {
 struct LinearInequalityConstraint {
   // Index of the variable this refers to.
   int variable;
+
   // Constraint coefficients.
   double a;
   double b;
 
   // True if x is feasible.
-  bool IsFeasible(double x) const;
+  constexpr bool IsFeasible(double x) const noexcept {
+    // There might be an argument to be made we should tolerate some epsilon > 0 here?
+    return a * x + b >= 0.0;
+  }
 
   // Clamp a variable x to satisfy the inequality constraint.
-  double ClampX(double x) const;
+  constexpr double ClampX(double x) const {
+    F_ASSERT_NE(a, 0, "`a` cannot be zero");
+    // a * x + b >= 0 ---> a * x >= -b
+    if (a < 0) {
+      // x <= b/a
+      return std::min(x, b / -a);
+    } else {
+      // x >= -b/a
+      return std::max(x, -b / a);
+    }
+  }
 
   // Shift to a new linearization point.
   // a*(x + dx) + b >= 0  -->  a*dx + (ax + b) >= 0
-  LinearInequalityConstraint ShiftTo(double x) const { return {variable, a, a * x + b}; }
+  constexpr LinearInequalityConstraint ShiftTo(double x) const noexcept {
+    return {variable, a, a * x + b};
+  }
 
   // Version of shift that takes vector.
-  LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
+  constexpr LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
     F_ASSERT_LT(variable, x.rows());
     return ShiftTo(x[variable]);
   }
 
   // Construct with index and coefficients.
-  LinearInequalityConstraint(int variable, double a, double b) : variable(variable), a(a), b(b) {}
-
-  LinearInequalityConstraint() = default;
+  constexpr LinearInequalityConstraint(int variable, double a, double b) noexcept
+      : variable(variable), a(a), b(b) {}
 };
 
 /*
@@ -60,19 +75,20 @@ struct LinearInequalityConstraint {
  * Allows you to write Var(index) >= alpha to specify the appropriate LinearInequalityConstraint.
  */
 struct Var {
-  explicit Var(int variable) : variable_(variable) {}
+  explicit constexpr Var(int variable) noexcept : variable_(variable) {}
 
   // Specify constraint as <=
-  LinearInequalityConstraint operator<=(double value) const {
+  constexpr LinearInequalityConstraint operator<=(double value) const noexcept {
     return LinearInequalityConstraint(variable_, -1.0, value);
   }
 
   // Specify constraint as >=
-  LinearInequalityConstraint operator>=(double value) const {
+  constexpr LinearInequalityConstraint operator>=(double value) const noexcept {
     return LinearInequalityConstraint(variable_, 1.0, -value);
   }
 
-  const int variable_;
+ private:
+  int variable_;
 };
 
 /*

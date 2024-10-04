@@ -9,24 +9,6 @@ namespace mini_opt {
 
 static const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
 
-bool LinearInequalityConstraint::IsFeasible(double x) const {
-  // There might be an argument to be made we should tolerate some epsilon > 0 here?
-  return a * x + b >= 0.0;
-}
-
-double LinearInequalityConstraint::ClampX(double x) const {
-  F_ASSERT_NE(a, 0, "a cannot be zero");
-  // a * x + b >= 0
-  // a * x >= -b
-  if (a < 0) {
-    // x <= b/a
-    return std::min(x, b / -a);
-  } else {
-    // x >= -b/a
-    return std::max(x, -b / a);
-  }
-}
-
 QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem) { Setup(problem); }
 
 void QPInteriorPointSolver::Setup(const QP* const problem) {
