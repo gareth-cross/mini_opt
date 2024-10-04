@@ -113,7 +113,7 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
 #endif
 }
 
-bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
+bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares&,
                                      const NLSLogInfo& info) {
   counters_.counts[StatCounters::NUM_NLS_ITERATIONS]++;
   counters_.counts[StatCounters::NUM_LINE_SEARCH_STEPS] += static_cast<int>(info.steps.size());
@@ -156,6 +156,8 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
     ++i;
   }
 
+// TODO: Get rid of this and log such values in a smarter way.
+#if 0
   const QPInteriorPointSolver& qp = solver.solver();
   const auto s_block = qp.s_block();
   if (s_block.rows() > 0) {
@@ -172,6 +174,7 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
         fmt::streamed(solver.previous_variables().transpose().format(kMatrixFmt)),
         fmt::streamed(solver.variables().transpose().format(kMatrixFmt)));
   }
+#endif
   return true;
 }
 

@@ -32,7 +32,6 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   // leave uninitialized, we'll fill this in later
   variables_.resize(p_->dimension);
   candidate_vars_.resizeLike(variables_);
-  prev_variables_.resizeLike(variables_);
   dx_.resizeLike(variables_);
   dx_.setZero();
 
@@ -66,7 +65,6 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   F_ASSERT(p_ != nullptr, "Must have a valid problem");
   CheckParams(params);
   variables_ = variables;
-  prev_variables_ = variables;
   state_ = OptimizerState::NOMINAL;
   bool has_cached_qp_state{false};
 
@@ -258,7 +256,6 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
   if (step_result == StepSizeSelectionResult::SUCCESS) {
     F_ASSERT(!steps_.empty(), "Must have logged a step");
     // Update the state, and decrease lambda.
-    prev_variables_.swap(variables_);  //  save the current variables
     variables_.swap(candidate_vars_);  //  replace w/ the candidate variables
     state_ = OptimizerState::NOMINAL;
     *lambda = std::max(*lambda * 0.1, params.min_lambda);
