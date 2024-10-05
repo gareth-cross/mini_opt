@@ -587,6 +587,143 @@ class QPSolverTest : public ::testing::Test {
     ASSERT_LT(iter_counts[InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED] * 4,
               iter_counts[InitialGuessMethod::NAIVE]);
   }
+
+  void TestNullSpaceSolver1() {
+    // simple quadratic residual: f(x) = ||(A * [x0; x1] - b)||^2
+    const Eigen::Matrix2d A = (Eigen::Matrix2d() << -2.0, 1.4, 2.2, -3.5).finished();
+    const Eigen::Vector2d b{-0.8, 1.3};
+
+    Residual<2, 2> cost;
+    cost.index = {{0, 1}};
+    cost.function = [&](const Eigen::Vector2d& x,
+                        Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+      if (J) {
+        *J = A;
+      }
+      return A * x - b;
+    };
+
+    constexpr double x1_pinned_value = 0.3;
+    Residual<1, 1> eq_constraint;
+    eq_constraint.index = {{1}};
+    eq_constraint.function =
+        [&](const Eigen::Matrix<double, 1, 1>& x,
+            Eigen::Matrix<double, 1, 1>* const J) -> Eigen::Matrix<double, 1, 1> {
+      if (J) {
+        J->setIdentity();
+      }
+      return Eigen::Matrix<double, 1, 1>{x[0] - x1_pinned_value};
+    };
+
+    // "linearize" at x=0
+    const VectorXd initial_values = VectorXd::Zero(2);
+
+    QP qp{2};
+    qp.A_eq.resize(1, 2);
+    qp.b_eq.resize(1, 1);
+    cost.UpdateHessian(initial_values, &qp.G, &qp.c);
+    eq_constraint.UpdateJacobian(initial_values,
+                                 qp.A_eq.block(0, 0, qp.A_eq.rows(), qp.A_eq.cols()),
+                                 qp.b_eq.segment(0, qp.b_eq.rows()));
+
+    QPNullSpaceSolver solver{};
+    solver.Setup(&qp);
+    solver.Solve();
+
+    const Eigen::VectorXd x = solver.variables();
+
+    // Was the quality constrained applied?
+    ASSERT_NEAR(x1_pinned_value, x[1], 1.0e-12);
+
+    // Minimum computed symbolically:
+    ASSERT_NEAR(0.860859728506787, x[0], 1.0e-12);
+
+    // Crude check to make sure we found the minimum:
+    const double cost_at_minimum = (A * x - b).squaredNorm();
+    const Eigen::Vector2d dx = Eigen::Vector2d::UnitX() * 1.0e-5;
+    ASSERT_GT((A * (x + dx) - b).squaredNorm(), cost_at_minimum);
+    ASSERT_GT((A * (x - dx) - b).squaredNorm(), cost_at_minimum);
+  }
+
+  // A little problem with three quadratic costs and one equality constraint over two variables.
+  void TestNullSpaceSolver2() {
+    Residual<2, 2> cost_1;
+    cost_1.index = {{0, 1}};
+    cost_1.function = [&](const Eigen::Vector2d& x,
+                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+      const Eigen::Matrix2d A0 = (Eigen::Matrix2d() << 1.7, -0.2, 2.3, 1.2).finished();
+      const Eigen::Vector2d b0{5.4, -3.4};
+      if (J) {
+        *J = A0;
+      }
+      return A0 * x - b0;
+    };
+
+    Residual<2, 2> cost_2;
+    cost_2.index = {{1, 2}};
+    cost_2.function = [&](const Eigen::Vector2d& x,
+                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+      const Eigen::Matrix2d A1 = (Eigen::Matrix2d() << -5.0, 3.3, 9.1, 1.9).finished();
+      const Eigen::Vector2d b1{-3.3, 4.4};
+      if (J) {
+        *J = A1;
+      }
+      return A1 * x - b1;
+    };
+
+    Residual<2, 2> cost_3;
+    cost_3.index = {{0, 3}};
+    cost_3.function = [&](const Eigen::Vector2d& x,
+                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+      const Eigen::Matrix2d A2 = (Eigen::Matrix2d() << 0.2, -0.5, 1.1, -3.1).finished();
+      const Eigen::Vector2d b2{0.5, 0.0};
+      if (J) {
+        *J = A2;
+      }
+      return A2 * x - b2;
+    };
+
+    Residual<2, 2> eq_constraint;
+    eq_constraint.index = {{1, 3}};
+    eq_constraint.function =
+        [&](const Eigen::Matrix<double, 2, 1>& x,
+            Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Matrix<double, 2, 1> {
+      const Eigen::Matrix2d A_eq = (Eigen::Matrix2d() << 1.1, -1.1, 0.3, 0.6).finished();
+      const Eigen::Vector2d b_eq = (Eigen::Vector2d() << 1.3, -4.0).finished();
+      if (J) {
+        *J = A_eq;
+      }
+      return A_eq * x - b_eq;
+    };
+
+    const Eigen::VectorXd initial_values = Eigen::VectorXd::Zero(4);
+
+    QP qp{4};
+    qp.A_eq = Eigen::Matrix<double, 2, 4>::Zero();
+    qp.b_eq = Eigen::Matrix<double, 2, 1>::Zero();
+    cost_1.UpdateHessian(initial_values, &qp.G, &qp.c);
+    cost_2.UpdateHessian(initial_values, &qp.G, &qp.c);
+    cost_3.UpdateHessian(initial_values, &qp.G, &qp.c);
+    eq_constraint.UpdateJacobian(initial_values,
+                                 qp.A_eq.block(0, 0, qp.A_eq.rows(), qp.A_eq.cols()),
+                                 qp.b_eq.segment(0, qp.b_eq.rows()));
+
+    QPNullSpaceSolver solver{};
+    solver.Setup(&qp);
+    solver.Solve();
+
+    const Eigen::VectorXd x = solver.variables();
+    static const Eigen::IOFormat kMatrixFmt(Eigen::FullPrecision, 0, ", ", ",\n", "[", "]", "[",
+                                            "]");
+
+    // The solution to the equality constraint:
+    ASSERT_NEAR(-3.656565656565657, x[1], 1.0e-15);
+    ASSERT_NEAR(-4.838383838383838, x[3], 1.0e-15);
+
+    // Minima for the remaining variables:
+    ASSERT_NEAR(-0.707724112814252, x[0], 1.0e-14);
+    ASSERT_NEAR(0.0247370254266801, x[2], 1.0e-14);
+  }
 };
 
 TEST_FIXTURE(QPSolverTest, TestEliminationNoConstraints)
@@ -601,6 +738,8 @@ TEST_FIXTURE(QPSolverTest, TestWithEqualitiesOnly)
 TEST_FIXTURE(QPSolverTest, TestWithFullyConstrainedEqualities)
 TEST_FIXTURE(QPSolverTest, TestWithInequalitiesAndEqualities)
 TEST_FIXTURE(QPSolverTest, TestGeneratedProblems)
+TEST_FIXTURE(QPSolverTest, TestNullSpaceSolver1)
+TEST_FIXTURE(QPSolverTest, TestNullSpaceSolver2)
 
 }  // namespace mini_opt
 

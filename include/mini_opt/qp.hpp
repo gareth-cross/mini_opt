@@ -182,8 +182,8 @@ struct QPInteriorPointSolver {
 
   // Set the logger callback to a function pointer, lambda, etc.
   template <typename T>
-  void SetLoggerCallback(T cb) {
-    logger_callback_ = cb;
+  void SetLoggerCallback(T&& cb) {
+    logger_callback_ = std::forward<T>(cb);
   }
 
   // Const block accessors for state.
@@ -199,7 +199,7 @@ struct QPInteriorPointSolver {
   VectorBlock z_block();
 
   // Access all variables.
-  const Eigen::VectorXd& variables() const;
+  constexpr const Eigen::VectorXd& variables() const noexcept { return variables_; }
 
   // Set variables.
   void SetVariables(const Eigen::VectorXd& v);
@@ -242,7 +242,7 @@ struct QPInteriorPointSolver {
   LoggingCallback logger_callback_;
 
   // Return true if there are any inequality constraints.
-  bool HasInequalityConstraints() const { return dims_.M > 0; }
+  constexpr bool HasInequalityConstraints() const noexcept { return dims_.M > 0; }
 
   // Take a single step.
   // Computes mu, solves for the update, and takes the longest step we can while satisfying
@@ -300,6 +300,36 @@ struct QPInteriorPointSolver {
 
   friend class QPSolverTest;
   friend class ConstrainedNLSTest;
+};
+
+/*
+ * Solver for equality-constrained quadratic problem.
+ *
+ * minimize (1/2) x^T * G * x + x^T * c
+ *
+ *  st. A_e * x + b_e == 0
+ */
+class QPNullSpaceSolver {
+ public:
+  // Setup with a problem. We allow setting a new problem so storage can be re-used.
+  void Setup(const QP* problem);
+
+  // Solve the QP using the null-space method.
+  void Solve();
+
+  // Access all variables.
+  constexpr const Eigen::VectorXd& variables() const noexcept { return x_; }
+
+ private:
+  // Current problem, initialized by `Setup`.
+  const QP* p_{nullptr};
+
+  Eigen::MatrixXd Q_;
+  Eigen::MatrixXd G_reduced_;
+  Eigen::VectorXd permuted_rhs_;
+  Eigen::VectorXd u_;
+  Eigen::VectorXd y_;
+  Eigen::VectorXd x_;
 };
 
 /*
