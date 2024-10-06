@@ -62,8 +62,6 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   F_ASSERT_GE(params.lambda_initial, params.min_lambda);
   F_ASSERT_LE(params.lambda_initial, params.max_lambda);
   F_ASSERT_GE(params.lambda_failure_init, 0);
-  F_ASSERT(params.equality_constraint_norm == Norm::L1 ||
-           params.equality_constraint_norm == Norm::QUADRATIC);
 }
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
@@ -85,8 +83,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   int num_qp_iters = 0;
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // Fill out the QP and compute current errors.
-    const Errors errors_pre =
-        LinearizeAndFillQP(variables_, lambda, params.equality_constraint_norm, *p_, &qp_);
+    const Errors errors_pre = LinearizeAndFillQP(variables_, lambda, *p_, &qp_);
 
     // Compute the descent direction, `dx`.
     const auto [qp_outputs, lagrange_multipliers] = ComputeStepDirection(params);
@@ -94,24 +91,22 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
-    const DirectionalDerivatives directional_derivative =
-        ComputeQPCostDerivative(qp_, dx_, params.equality_constraint_norm);
+    const DirectionalDerivatives directional_derivative = ComputeQPCostDerivative(qp_, dx_);
 
     // Raise the penalty parameter if necessary.
     if (!p_->equality_constraints.empty()) {
       const double new_penalty =
-          SelectPenalty(params.equality_constraint_norm, qp_, dx_, lagrange_multipliers,
-                        errors_pre.equality, params.equality_penalty_rho);
+          SelectPenalty(qp_, dx_, lagrange_multipliers, params.equality_penalty_rho);
       if (new_penalty > penalty) {
         penalty = new_penalty * params.equality_penalty_scale_factor;
       }
     }
 
     // Do line search.
-    const StepSizeSelectionResult step_result = SelectStepSize(
-        params.max_line_search_iterations, params.absolute_first_derivative_tol, errors_pre,
-        directional_derivative, penalty, 1.0e-4 /* todo: add param */, params.line_search_strategy,
-        params.armijo_search_tau, params.equality_constraint_norm);
+    const StepSizeSelectionResult step_result =
+        SelectStepSize(params.max_line_search_iterations, params.absolute_first_derivative_tol,
+                       errors_pre, directional_derivative, penalty, 1.0e-4 /* todo: add param */,
+                       params.line_search_strategy, params.armijo_search_tau);
 
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
@@ -161,7 +156,6 @@ void ConstrainedNonlinearLeastSquares::RetractCandidateVars(const double alpha) 
 
 Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorXd& variables,
                                                             const double lambda,
-                                                            const Norm& equality_norm,
                                                             const Problem& problem, QP* const qp) {
   F_ASSERT(qp != nullptr);
   F_ASSERT_EQ(qp->G.rows(), problem.dimension);
@@ -193,11 +187,7 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
     eq->UpdateJacobian(variables, qp->A_eq.middleRows(row, dim), b_seg);
 
     // total L1 norm in the equality constraints
-    if (equality_norm == Norm::L1) {
-      output_errors.equality += b_seg.lpNorm<1>();
-    } else if (equality_norm == Norm::QUADRATIC) {
-      output_errors.equality += 0.5 * b_seg.squaredNorm();
-    }
+    output_errors.equality += b_seg.lpNorm<1>();
     row += dim;
   }
 
@@ -257,8 +247,7 @@ ConstrainedNonlinearLeastSquares::ComputeStepDirection(const Params& params) {
   return std::make_tuple(qp_outputs, std::optional<QPLagrangeMultipliers>{std::nullopt});
 }
 
-Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars,
-                                                                 const Norm& equality_norm) {
+Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars) {
   Errors output_errors{};
   for (const ResidualBase::unique_ptr& cost : p_->costs) {
     const auto err_out = error_buffer_.head(cost->Dimension());
@@ -268,11 +257,7 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
   for (const ResidualBase::unique_ptr& eq : p_->equality_constraints) {
     const auto err_out = error_buffer_.head(eq->Dimension());
     eq->ErrorVector(vars, err_out);
-    if (equality_norm == Norm::L1) {
-      output_errors.equality += err_out.lpNorm<1>();
-    } else if (equality_norm == Norm::QUADRATIC) {
-      output_errors.equality += 0.5 * err_out.squaredNorm();
-    }
+    output_errors.equality += err_out.lpNorm<1>();
   }
   return output_errors;
 }
@@ -329,8 +314,7 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
 StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     const int max_iterations, const double abs_first_derivative_tol, const Errors& errors_pre,
     const DirectionalDerivatives& derivatives, const double penalty, const double armijo_c1,
-    const LineSearchStrategy& strategy, const double backtrack_search_tau,
-    const Norm& equality_norm) {
+    const LineSearchStrategy strategy, const double backtrack_search_tau) {
   F_ASSERT_GT(penalty, 0.0);
   steps_.clear();
 
@@ -354,7 +338,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     RetractCandidateVars(alpha);
 
     // Compute errors.
-    const Errors errors_step = EvaluateNonlinearErrors(candidate_vars_, equality_norm);
+    const Errors errors_step = EvaluateNonlinearErrors(candidate_vars_);
     steps_.emplace_back(alpha, errors_step);
 
     if (derivatives.LInfinity() < abs_first_derivative_tol) {
@@ -426,7 +410,7 @@ static T Sign(T x) {
 }
 
 DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(
-    const QP& qp, const Eigen::VectorXd& dx, const Norm& equality_norm) {
+    const QP& qp, const Eigen::VectorXd& dx) {
   // We want the first derivative of the cost function, evaluated at the current linearization
   // point.
   //  d( 0.5 * h(x + dx * alpha)^T * h(x + dx * alpha) ) =
@@ -443,42 +427,21 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
   // Now we do the equality constraints, which for now have an L1 norm:
   //    d|c(x + alpha * dx)|/dalpha = d|v|/dv * dc(x)/dx * dx
   // Where d|v|/dv evaluates to the sign of each element.
-  if (equality_norm == Norm::L1) {
-    for (int i = 0; i < qp.A_eq.rows(); ++i) {
-      const double sign_ci = Sign(qp.b_eq[i]);
-      out.d_equality += sign_ci * qp.A_eq.row(i).dot(dx);
-    }
-  } else if (equality_norm == Norm::QUADRATIC) {
-    // Simple L2 squared cost.
-    for (int i = 0; i < qp.A_eq.rows(); ++i) {
-      out.d_equality += qp.b_eq[i] * qp.A_eq.row(i).dot(dx);
-    }
+  // TODO: This should just be equal to b_eq, so we can simplify this.
+  for (int i = 0; i < qp.A_eq.rows(); ++i) {
+    const double sign_ci = Sign(qp.b_eq[i]);
+    out.d_equality += sign_ci * qp.A_eq.row(i).dot(dx);
   }
   return out;
 }
 
 double ConstrainedNonlinearLeastSquares::SelectPenalty(
-    const Norm& norm_type, const QP& qp, const Eigen::VectorXd& dx,
-    const std::optional<QPLagrangeMultipliers>& lagrange_multipliers, const double equality_cost,
-    const double rho) {
+    const QP& qp, const Eigen::VectorXd& dx,
+    const std::optional<QPLagrangeMultipliers>& lagrange_multipliers, const double rho) {
   if (lagrange_multipliers) {
-    if (norm_type == Norm::L1) {
-      // Equation 18.32. Note that this is not the recommended algorithm in the book, instead
-      // they suggest 18.33. But this seems to work better for me.
-      return lagrange_multipliers->l_infinity;
-    } else {
-      // TODO: This link is dead (and this merits a better reference anyways). I am thinking about
-      //  removing this code path anyways, since L1 works better.
-      // norm_type == Norm::QUADRATIC
-      // See: http://www.numerical.rl.ac.uk/people/nimg/oumsc/lectures/part5.2.pdf
-      const double l2_eq = std::sqrt(equality_cost);
-      if (l2_eq == 0) {
-        // If the cost is zero, the penalty will be multiplied by zero.
-        return 0;
-      }
-      // Ratio of the two L2 norms (non-quadratic).
-      return lagrange_multipliers->l2 / l2_eq;
-    }
+    // Equation 18.32. Note that this is not the recommended algorithm in the book, instead
+    // they suggest 18.33. But this seems to work better for me.
+    return lagrange_multipliers->l_infinity;
   } else {
     // This code-path occurs when the null-space solver is in use.
     // We don't have lagrange multipliers in this context, but we still need to update the penalty.

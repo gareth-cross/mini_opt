@@ -89,8 +89,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     const VectorXd dx = (Vector5() << 0.1, 0.25, -0.87, 1.1, -0.02).finished();
 
     // The penalty on the equality constraint
-    const double penalty = 0.334;
-    (void)penalty;
+    constexpr double penalty = 0.334;
 
     // set up a problem
     Problem problem{};
@@ -99,58 +98,32 @@ class ConstrainedNLSTest : public ::testing::Test {
     problem.equality_constraints.emplace_back(new Residual<2, 3>(eq));
 
     // test with L1
-    {
-      // compute the derivative of the sum cost function
-      const Matrix<double, 1, 1> J_numerical =
-          math::NumericalJacobian(0.0, [&](const double alpha) {
-            Eigen::VectorXd cost_out(3);
-            Eigen::VectorXd equality_out(2);
-            cost.ErrorVector(params + dx * alpha, cost_out.head(3));
-            eq.ErrorVector(params + dx * alpha, equality_out.head(2));
-            return 0.5 * cost_out.squaredNorm() + penalty * equality_out.lpNorm<1>();
-          });
+    // compute the derivative of the sum cost function
+    const Matrix<double, 1, 1> J_numerical = math::NumericalJacobian(0.0, [&](const double alpha) {
+      Eigen::VectorXd cost_out(3);
+      Eigen::VectorXd equality_out(2);
+      cost.ErrorVector(params + dx * alpha, cost_out.head(3));
+      eq.ErrorVector(params + dx * alpha, equality_out.head(2));
+      return 0.5 * cost_out.squaredNorm() + penalty * equality_out.lpNorm<1>();
+    });
 
-      // compute analytically as well
-      QP qp{static_cast<Index>(problem.dimension)};
-      qp.A_eq.resize(2, 5);
-      qp.b_eq.resize(2);
-      ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(params, 0.0, Norm::L1, problem, &qp);
+    // compute analytically as well
+    QP qp{static_cast<Index>(problem.dimension)};
+    qp.A_eq.resize(2, 5);
+    qp.b_eq.resize(2);
+    ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(params, 0.0, problem, &qp);
 
-      const DirectionalDerivatives J_analytical =
-          ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(qp, dx.head(5), Norm::L1);
-      ASSERT_NEAR(J_numerical[0], J_analytical.Total(penalty), tol::kPico);
-    }
-
-    // test with Quadratic
-    {
-      const Matrix<double, 1, 1> J_numerical =
-          math::NumericalJacobian(0.0, [&](const double alpha) {
-            Eigen::VectorXd cost_out(3);
-            Eigen::VectorXd equality_out(2);
-            cost.ErrorVector(params + dx * alpha, cost_out.head(3));
-            eq.ErrorVector(params + dx * alpha, equality_out.head(2));
-            return 0.5 * cost_out.squaredNorm() + penalty * 0.5 * equality_out.squaredNorm();
-          });
-
-      // compute analytically as well
-      QP qp{static_cast<Index>(problem.dimension)};
-      qp.A_eq.resize(2, 5);
-      qp.b_eq.resize(2);
-      ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(params, 0.0, Norm::L1, problem, &qp);
-
-      const DirectionalDerivatives J_analytical =
-          ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(qp, dx.head(5),
-                                                                    Norm::QUADRATIC);
-      ASSERT_NEAR(J_numerical[0], J_analytical.Total(penalty), tol::kPico);
-    }
+    const DirectionalDerivatives J_analytical =
+        ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(qp, dx.head(5));
+    ASSERT_NEAR(J_numerical[0], J_analytical.Total(penalty), tol::kPico);
   }
 
   void TestQuadraticApproxMinimum() {
     // make up some values
-    const double alpha_0 = 0.8;
-    const double phi_0 = 2.0;
-    const double phi_prime_0 = -1.2;
-    const double phi_alpha_0 = 2.2;
+    constexpr double alpha_0 = 0.8;
+    constexpr double phi_0 = 2.0;
+    constexpr double phi_prime_0 = -1.2;
+    constexpr double phi_alpha_0 = 2.2;
 
     // compute via form 1
     const double solution = ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(
@@ -163,13 +136,13 @@ class ConstrainedNLSTest : public ::testing::Test {
 
   // Check that close form cubic approximation is correct.
   void TestCubicApproxCoeffs() {
-    const double alpha_0 = 0.8;
-    const double alpha_1 = 0.4;
-    const double phi_0 = 1.44;
-    const double phi_prime_0 = -1.23;
+    constexpr double alpha_0 = 0.8;
+    constexpr double alpha_1 = 0.4;
+    constexpr double phi_0 = 1.44;
+    constexpr double phi_prime_0 = -1.23;
 
-    const double phi_alpha_0 = 2.2;  //  cost did not decrease
-    const double phi_alpha_1 = 1.6;  //  still did not decrease
+    constexpr double phi_alpha_0 = 2.2;  //  cost did not decrease
+    constexpr double phi_alpha_1 = 1.6;  //  still did not decrease
 
     // fit the cubic
     const Vector2d ab = ConstrainedNonlinearLeastSquares::CubicApproxCoeffs(
@@ -224,7 +197,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     Problem problem{};
     problem.dimension = 3;
     problem.equality_constraints.emplace_back(new Residual<2, 3>(eq));
-    ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(x_lin, 0.0, Norm::L1, problem, &qp);
+    ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(x_lin, 0.0, problem, &qp);
 
     // find a solution that satisfies the linearized problem
     CompleteOrthogonalDecomposition<MatrixXd> decomposition(qp.A_eq);
@@ -572,7 +545,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     valid_solutions.emplace_back(-3.779310, -3.283186);
     valid_solutions.emplace_back(3.584428, -1.848126);
     for (const Vector2d& sol : valid_solutions) {
-      ASSERT_NEAR(0.0, nls.EvaluateNonlinearErrors(sol, Norm::L1).Total(1.), tol::kMicro);
+      ASSERT_NEAR(0.0, nls.EvaluateNonlinearErrors(sol).Total(1.), tol::kMicro);
     }
 
     ConstrainedNonlinearLeastSquares::Params p{};
@@ -861,7 +834,6 @@ class ConstrainedNLSTest : public ::testing::Test {
     // The polynomial approximation does very poorly on this problem near the minimum. Perhaps
     // the quadratic approximation is just really unsuitable?
     p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
-    p.equality_constraint_norm = Norm::L1;
     p.lambda_failure_init = 0.001;
     p.armijo_search_tau = 0.5;  //  backtrack more aggressively
 
@@ -1090,7 +1062,6 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.termination_kkt_tolerance = tol::kMicro;
     p.max_line_search_iterations = 5;
     p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
-    p.equality_constraint_norm = Norm::L1;
     p.lambda_failure_init = 0.01;
     p.armijo_search_tau = 0.5;  //  backtrack more aggressively
 

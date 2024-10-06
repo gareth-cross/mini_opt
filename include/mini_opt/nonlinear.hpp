@@ -46,14 +46,6 @@ struct Problem {
   std::vector<ResidualBase::unique_ptr> equality_constraints;
 };
 
-// Norms that we can place on the equality constraint.
-enum class Norm {
-  // L1 norm/absolute value: |c(x)|
-  L1 = 0,
-  // L2 squared: (1/2) * c(x)^T * c(x)
-  QUADRATIC = 1
-};
-
 /*
  * Solve constrained non-linear least squares problems using SQP.
  *
@@ -92,9 +84,6 @@ struct ConstrainedNonlinearLeastSquares {
 
     // Value by which to decrease alpha for the backtracking line search.
     double armijo_search_tau{0.8};
-
-    // Norm on the equality constraints in the merit function.
-    Norm equality_constraint_norm{Norm::L1};
 
     // Initial value of the equality constraint penalty.
     double equality_penalty_initial{0.01};
@@ -166,7 +155,7 @@ struct ConstrainedNonlinearLeastSquares {
   constexpr const Eigen::VectorXd& variables() const noexcept { return variables_; }
 
   // Evaluate the non-linear error.
-  Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars, const Norm& equality_norm);
+  Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars);
 
  private:
   // Update candidate_vars w/ a step size of alpha.
@@ -174,7 +163,7 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Linearize and fill the QP w/ the problem definition.
   static Errors LinearizeAndFillQP(const Eigen::VectorXd& variables, double lambda,
-                                   const Norm& equality_norm, const Problem& problem, QP* qp);
+                                   const Problem& problem, QP* qp);
 
   // Solve the QP, and update the step direction `dx_`.
   std::tuple<QPSolverOutputs, std::optional<QPLagrangeMultipliers>> ComputeStepDirection(
@@ -192,8 +181,8 @@ struct ConstrainedNonlinearLeastSquares {
   StepSizeSelectionResult SelectStepSize(int max_iterations, double abs_first_derivative_tol,
                                          const Errors& errors_pre,
                                          const DirectionalDerivatives& derivatives, double penalty,
-                                         double armijo_c1, const LineSearchStrategy& strategy,
-                                         double backtrack_search_tau, const Norm& equality_norm);
+                                         double armijo_c1, LineSearchStrategy strategy,
+                                         double backtrack_search_tau);
 
   // Repeatedly approximate the cost function as a polynomial, and find the minimum.
   double ComputeAlphaPolynomialApproximation(int iteration, double alpha, const Errors& errors_pre,
@@ -201,13 +190,12 @@ struct ConstrainedNonlinearLeastSquares {
                                              double penalty) const;
 
   // Compute first derivative of the QP cost function.
-  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx,
-                                                        const Norm& equality_norm);
+  static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx);
 
   // Select a new penalty parameter, depending on norm type.
-  static double SelectPenalty(const Norm& norm_type, const QP& qp, const Eigen::VectorXd& dx,
+  static double SelectPenalty(const QP& qp, const Eigen::VectorXd& dx,
                               const std::optional<QPLagrangeMultipliers>& lagrange_multipliers,
-                              double equality_cost, double rho);
+                              double rho);
 
   // Solve the quadratic approximation of the cost function for best alpha.
   // Implements equation (3.57/3.58)
