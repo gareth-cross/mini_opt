@@ -32,7 +32,6 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   // leave uninitialized, we'll fill this in later
   variables_.resize(p_->dimension);
   candidate_vars_.resizeLike(variables_);
-  prev_variables_.resizeLike(variables_);
   dx_.resizeLike(variables_);
   dx_.setZero();
 
@@ -52,13 +51,19 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   F_ASSERT_GE(params.relative_exit_tol, 0);
   F_ASSERT_LE(params.relative_exit_tol, 1);
   F_ASSERT_GE(params.absolute_first_derivative_tol, 0);
+  F_ASSERT_GT(params.armijo_search_tau, 0);
+  F_ASSERT_LT(params.armijo_search_tau, 1);
+  F_ASSERT_GE(params.equality_penalty_initial, 0);
+  F_ASSERT_GE(params.equality_penalty_scale_factor, 1.0);
+  F_ASSERT_GE(params.equality_penalty_rho, 0);
+  F_ASSERT_LT(params.equality_penalty_rho, 1);
   F_ASSERT_GE(params.max_lambda, 0);
   F_ASSERT_LE(params.min_lambda, params.max_lambda);
   F_ASSERT_GE(params.lambda_initial, params.min_lambda);
   F_ASSERT_LE(params.lambda_initial, params.max_lambda);
   F_ASSERT_GE(params.lambda_failure_init, 0);
   F_ASSERT(params.equality_constraint_norm == Norm::L1 ||
-         params.equality_constraint_norm == Norm::QUADRATIC);
+           params.equality_constraint_norm == Norm::QUADRATIC);
 }
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
@@ -66,17 +71,13 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   F_ASSERT(p_ != nullptr, "Must have a valid problem");
   CheckParams(params);
   variables_ = variables;
-  prev_variables_ = variables;
   state_ = OptimizerState::NOMINAL;
-  bool has_cached_qp_state{false};
 
-  // Set up params, TODO(gareth): Tune this better.
-  QPInteriorPointSolver::Params qp_params{};
-  qp_params.max_iterations = params.max_qp_iterations;
-  qp_params.termination_kkt_tol = params.termination_kkt_tolerance;
-  qp_params.initial_mu = 1.0;
-  qp_params.sigma = 0.1;
-  qp_params.initialize_mu_with_complementarity = false;
+  if (p_->inequality_constraints.empty() && !p_->equality_constraints.empty()) {
+    solver_ = QPNullSpaceSolver();
+  } else {
+    solver_ = QPInteriorPointSolver();
+  }
 
   // Iterate until max.
   double lambda{params.lambda_initial};
@@ -87,45 +88,20 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const Errors errors_pre =
         LinearizeAndFillQP(variables_, lambda, params.equality_constraint_norm, *p_, &qp_);
 
-    if (iter == 0 || !has_cached_qp_state) {
-      // If there are inequality constraints, try initializing by just solving the
-      // equality constrained quadratic problem.
-      if (!qp_.constraints.empty()) {
-        qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
-      } else {
-        qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
-      }
-    } else {
-      // We'll use our initial guess from the previous iteration.
-      // This seems to produce a 2-3x reduction in # of QP iterations.
-      qp_params.initial_guess_method = InitialGuessMethod::USER_PROVIDED;
-      qp_params.initialize_mu_with_complementarity = true;
-      // Reduce the barrier more aggressively. This seems to make a small reduction in
-      // number of iterations, but needs more testing.
-      qp_params.sigma = 0.05;
-    }
-
-    // Solve the QP.
-    solver_.Setup(&qp_);
-    if (has_cached_qp_state) {
-      // Initialize everything from the output of the last iteration, except x (initialize to zero).
-      solver_.SetVariables(cached_qp_states_);
-      solver_.x_block().setZero();
-    }
-    const QPSolverOutputs qp_outputs = solver_.Solve(qp_params);
+    // Compute the descent direction, `dx`.
+    const auto [qp_outputs, lagrange_multipliers] = ComputeStepDirection(params);
     num_qp_iters += qp_outputs.num_iterations;
 
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
-    dx_ = solver_.x_block();
     const DirectionalDerivatives directional_derivative =
         ComputeQPCostDerivative(qp_, dx_, params.equality_constraint_norm);
 
     // Raise the penalty parameter if necessary.
     if (!p_->equality_constraints.empty()) {
-      const double new_penalty = SelectPenalty(
-          params.equality_constraint_norm,
-          const_cast<const QPInteriorPointSolver&>(solver_).y_block(), errors_pre.equality);
+      const double new_penalty =
+          SelectPenalty(params.equality_constraint_norm, qp_, dx_, lagrange_multipliers,
+                        errors_pre.equality, params.equality_penalty_rho);
       if (new_penalty > penalty) {
         penalty = new_penalty * params.equality_penalty_scale_factor;
       }
@@ -137,26 +113,29 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
         directional_derivative, penalty, 1.0e-4 /* todo: add param */, params.line_search_strategy,
         params.armijo_search_tau, params.equality_constraint_norm);
 
-    if (step_result == StepSizeSelectionResult::SUCCESS) {
-      // save the states of slacks, multipliers, etc...
-      cached_qp_states_ = solver_.variables();
-      has_cached_qp_state = true;
-    }
-
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
     NLSTerminationState maybe_exit =
-        UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, &lambda);
+        UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, lambda);
     if (logging_callback_) {
-      // log the eigenvalues of the QP as well
-      const auto dx_block = const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension);
+      // Log the eigenvalues of the QP as well.
+      // TODO: Make this an optional step, since it comes with material cost and is only for
+      //  logging.
       const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(qp_.G);
-      const NLSLogInfo info{iter,       state_,
-                            old_lambda, errors_pre,
-                            qp_outputs, solver.eigenvalues(),
-                            dx_block,   directional_derivative,
-                            penalty,    step_result,
-                            steps_,     maybe_exit};
+      const QPEigenvalues eigenvalues{solver.eigenvalues().minCoeff(),
+                                      solver.eigenvalues().maxCoeff(),
+                                      solver.eigenvalues().cwiseAbs().minCoeff()};
+      const NLSLogInfo info{iter,
+                            state_,
+                            old_lambda,
+                            errors_pre,
+                            qp_outputs,
+                            eigenvalues,
+                            directional_derivative,
+                            penalty,
+                            step_result,
+                            steps_,
+                            maybe_exit};
       const bool should_proceed = logging_callback_(*this, info);
       if (maybe_exit == NLSTerminationState::NONE && !should_proceed) {
         maybe_exit = NLSTerminationState::USER_CALLBACK;
@@ -207,7 +186,8 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   int row = 0;
   for (const ResidualBase::unique_ptr& eq : problem.equality_constraints) {
     const int dim = eq->Dimension();
-    F_ASSERT(row + dim <= qp->A_eq.rows());
+    F_ASSERT_LE(row + dim, qp->A_eq.rows());
+
     // block we write the error into
     auto b_seg = qp->b_eq.segment(row, dim);
     eq->UpdateJacobian(variables, qp->A_eq.middleRows(row, dim), b_seg);
@@ -227,6 +207,54 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
     qp->constraints.push_back(c.ShiftTo(variables));
   }
   return output_errors;
+}
+
+std::tuple<QPSolverOutputs, std::optional<QPLagrangeMultipliers>>
+ConstrainedNonlinearLeastSquares::ComputeStepDirection(const Params& params) {
+  dx_.setZero();
+
+  if (QPInteriorPointSolver* const ip_solver = std::get_if<QPInteriorPointSolver>(&solver_);
+      ip_solver) {
+    ip_solver->Setup(&qp_);
+
+    // Set up params, TODO(gareth): Tune this better.
+    QPInteriorPointSolver::Params qp_params{};
+    qp_params.max_iterations = params.max_qp_iterations;
+    qp_params.termination_kkt_tol = params.termination_kkt_tolerance;
+    qp_params.initial_mu = 1.0;
+    qp_params.sigma = 0.1;
+    qp_params.initialize_mu_with_complementarity = false;
+
+    // If there are equality constraints, try initializing by just solving the
+    // equality constrained quadratic problem.
+    if (!p_->equality_constraints.empty()) {
+      qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
+    } else {
+      qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
+    }
+
+    const QPSolverOutputs qp_outputs = ip_solver->Solve(qp_params);
+
+    // Update our search direction:
+    dx_ = ip_solver->x_block();
+
+    // Determine stats on the lagrange multipliers - these are used in the penalty update rules.
+    std::optional<QPLagrangeMultipliers> multipliers{};
+    if (const auto y = ip_solver->y_block(); y.rows() > 0) {
+      multipliers = QPLagrangeMultipliers{y.minCoeff(), y.lpNorm<Eigen::Infinity>(), y.norm()};
+    }
+
+    return std::make_tuple(qp_outputs, multipliers);
+  }
+
+  QPNullSpaceSolver* const null_solver = std::get_if<QPNullSpaceSolver>(&solver_);
+  F_ASSERT(null_solver);
+
+  null_solver->Setup(&qp_);
+  const QPSolverOutputs qp_outputs = null_solver->Solve();
+  dx_ = null_solver->variables();
+
+  return std::make_tuple(qp_outputs, std::optional<QPLagrangeMultipliers>{std::nullopt});
 }
 
 Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars,
@@ -251,17 +279,14 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
 
 // TODO(gareth): Investigate an approach like algorithm 11.5?
 NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitConditions(
-    const Params& params, const StepSizeSelectionResult& step_result, const Errors& initial_errors,
-    const double penalty, double* const lambda) {
-  F_ASSERT(lambda != nullptr);
-
+    const Params& params, const StepSizeSelectionResult step_result, const Errors& initial_errors,
+    const double penalty, double& lambda) {
   if (step_result == StepSizeSelectionResult::SUCCESS) {
     F_ASSERT(!steps_.empty(), "Must have logged a step");
     // Update the state, and decrease lambda.
-    prev_variables_.swap(variables_);  //  save the current variables
     variables_.swap(candidate_vars_);  //  replace w/ the candidate variables
     state_ = OptimizerState::NOMINAL;
-    *lambda = std::max(*lambda * 0.1, params.min_lambda);
+    lambda = std::max(lambda * 0.1, params.min_lambda);
 
     // Check termination criteria.
     const LineSearchStep& final_step = steps_.back();
@@ -279,14 +304,14 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
              step_result == StepSizeSelectionResult::FAILURE_POSITIVE_DERIVATIVE) {
     if (state_ == OptimizerState::NOMINAL) {
       // Things were going well, but we failed - initialize lambda to attempt restore.
-      *lambda = std::max(params.lambda_failure_init, *lambda);
+      lambda = std::max(params.lambda_failure_init, lambda);
       state_ = OptimizerState::ATTEMPTING_RESTORE_LM;
     } else {
       F_ASSERT(state_ == OptimizerState::ATTEMPTING_RESTORE_LM);
       // We are already attempting to recover and failing, ramp up lambda.
-      *lambda *= 10;
+      lambda *= 10;
     }
-    if (*lambda > params.max_lambda) {
+    if (lambda > params.max_lambda) {
       // failed
       return NLSTerminationState::MAX_LAMBDA;
     }
@@ -306,6 +331,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     const DirectionalDerivatives& derivatives, const double penalty, const double armijo_c1,
     const LineSearchStrategy& strategy, const double backtrack_search_tau,
     const Norm& equality_norm) {
+  F_ASSERT_GT(penalty, 0.0);
   steps_.clear();
 
   // compute the directional derivative, w/ the current penalty
@@ -314,7 +340,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
   // iterate to find a viable alpha, or give up
   double alpha{1};
   for (int iter = 0; iter <= max_iterations; ++iter) {
-    // compute nwe alpha value
+    // compute new alpha value
     if (strategy == LineSearchStrategy::POLYNOMIAL_APPROXIMATION) {
       alpha = ComputeAlphaPolynomialApproximation(iter, alpha, errors_pre, derivatives, penalty);
     } else {
@@ -369,6 +395,7 @@ double ConstrainedNonlinearLeastSquares::ComputeAlphaPolynomialApproximation(
     return new_alpha;
   }
   F_ASSERT_GE(steps_.size(), 2);
+
   // Try the cubic approximation.
   const LineSearchStep& second_last_step = steps_[steps_.size() - 2];
   const LineSearchStep& last_step = steps_.back();
@@ -409,6 +436,7 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
   //  For the equality constraint, we compute J(x)^T * f(x) here explicitly.
   F_ASSERT_EQ(qp.c.rows(), dx.rows(), "Mismatch between dx and c");
   F_ASSERT_EQ(qp.A_eq.cols(), dx.rows(), "Mismatch between dx and A_eq");
+
   DirectionalDerivatives out{};
   out.d_f = qp.c.dot(dx);
 
@@ -429,47 +457,40 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
   return out;
 }
 
-double ConstrainedNonlinearLeastSquares::SelectPenalty(const Norm& norm_type,
-                                                       const ConstVectorBlock& lagrange_multipliers,
-                                                       double equality_cost) {
-  if (norm_type == Norm::L1) {
-    // Equation 18.32. Note that this is not the recommended algorithm in the book, instead
-    // they suggest 18.33. But this seems to work better for me.
-    return lagrange_multipliers.lpNorm<Eigen::Infinity>();
-  } else {
-    // norm_type == Norm::QUADRATIC
-    // See: http://www.numerical.rl.ac.uk/people/nimg/oumsc/lectures/part5.2.pdf
-    const double l2_eq = std::sqrt(equality_cost);
-    if (l2_eq == 0) {
-      // If the cost is zero, the penalty will be multiplied by zero.
-      return 0;
+double ConstrainedNonlinearLeastSquares::SelectPenalty(
+    const Norm& norm_type, const QP& qp, const Eigen::VectorXd& dx,
+    const std::optional<QPLagrangeMultipliers>& lagrange_multipliers, const double equality_cost,
+    const double rho) {
+  if (lagrange_multipliers) {
+    if (norm_type == Norm::L1) {
+      // Equation 18.32. Note that this is not the recommended algorithm in the book, instead
+      // they suggest 18.33. But this seems to work better for me.
+      return lagrange_multipliers->l_infinity;
+    } else {
+      // TODO: This link is dead (and this merits a better reference anyways). I am thinking about
+      //  removing this code path anyways, since L1 works better.
+      // norm_type == Norm::QUADRATIC
+      // See: http://www.numerical.rl.ac.uk/people/nimg/oumsc/lectures/part5.2.pdf
+      const double l2_eq = std::sqrt(equality_cost);
+      if (l2_eq == 0) {
+        // If the cost is zero, the penalty will be multiplied by zero.
+        return 0;
+      }
+      // Ratio of the two L2 norms (non-quadratic).
+      return lagrange_multipliers->l2 / l2_eq;
     }
-    // Ratio of the two L2 norms (non-quadratic).
-    return lagrange_multipliers.norm() / l2_eq;
-  }
-}
+  } else {
+    // This code-path occurs when the null-space solver is in use.
+    // We don't have lagrange multipliers in this context, but we still need to update the penalty.
+    // Instead we apply the inequality (18.36).
+    const double l1_eq = std::max(qp.b_eq.lpNorm<1>(), std::numeric_limits<double>::epsilon());
 
-// Equation (18.33)
-// The idea here is to compute a value of the penalty (mu in the textbook, but not the same mu
-// as used in the IP solver, of course) that will result in `dx` being a descent direction of
-// the aggregated cost:
-//    phi(x) = f(x) + mu * |c(x)|, where we are taking the L1 norm of the equality
-// constraint c(x). This works because for the L1 norm you can show that the derivative of the
-// aggregated cost is:
-//    dphi(x + alpha * dx)/dalpha = df(x)^T * dx - mu * |c(x)|
-// Then (and this seems arbitrary, AFAIK), you require that the derivative satisfy:
-//   df(x)^T * dx - mu * |c(x)| <=-rho * |c(x)|
-// Where rho is a parameter between [0, 1). Small rho will lead to lower penalty, and rho near
-// 1 will lead to a massive penalty. In practice on some problems I have found that this
-// approximation does not play nice with the quadratic approximation line search, in that it
-// produces large penalties as |c(x)| -> 0, resulting in tiny step sizes and very slow convergence.
-double ConstrainedNonlinearLeastSquares::ComputeEqualityPenalty(double d_f, double c, double rho) {
-  F_ASSERT_LT(rho, 1);
-  F_ASSERT_GE(rho, 0);
-  if (c == 0) {
-    return 0;
+    // Compute: ∇ f^T * dx + (1/2) dx^T * (∇^2 f) * dx
+    const double quadratic_cost_approx =
+        qp.c.dot(dx) + 0.5 * std::max(0.0, dx.dot(qp.G.selfadjointView<Eigen::Lower>() * dx));
+
+    return quadratic_cost_approx / ((1 - rho) * l1_eq);
   }
-  return -d_f / ((1 - rho) * c);
 }
 
 // For this approximation to provide a decrease, we must have:
@@ -509,7 +530,7 @@ Eigen::Vector2d ConstrainedNonlinearLeastSquares::CubicApproxCoeffs(
   const Eigen::Matrix2d A = (Eigen::Matrix2d() <<
       alpha_0 * alpha_0 * alpha_0, alpha_0 * alpha_0,
       alpha_1 * alpha_1 * alpha_1, alpha_1 * alpha_1).finished();
-    const Eigen::Vector2d b{
+  const Eigen::Vector2d b{
       phi_alpha_0 - phi_0 - phi_prime_0 * alpha_0,
       phi_alpha_1 - phi_0 - phi_prime_0 * alpha_1
   };
@@ -522,9 +543,8 @@ double ConstrainedNonlinearLeastSquares::CubicApproxMinimum(const double phi_pri
   F_ASSERT_GT(std::abs(ab[0]), 0, "Coefficient a cannot be zero");
   const double arg_sqrt = ab[1] * ab[1] - 3 * ab[0] * phi_prime_0;
   constexpr double kNegativeTol = -1.0e-12;
-  F_ASSERT_GE(arg_sqrt, kNegativeTol,
-                       "This term must be positive: a={}, b={}, phi_prime_0={}", ab[0], ab[1],
-                       phi_prime_0);
+  F_ASSERT_GE(arg_sqrt, kNegativeTol, "This term must be positive: a={}, b={}, phi_prime_0={}",
+              ab[0], ab[1], phi_prime_0);
   return (std::sqrt(std::max(arg_sqrt, 0.)) - ab[1]) / (3 * ab[0]);
 }
 

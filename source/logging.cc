@@ -113,7 +113,7 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
 #endif
 }
 
-bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& solver,
+bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares&,
                                      const NLSLogInfo& info) {
   counters_.counts[StatCounters::NUM_NLS_ITERATIONS]++;
   counters_.counts[StatCounters::NUM_LINE_SEARCH_STEPS] += static_cast<int>(info.steps.size());
@@ -127,8 +127,9 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
                          fmt::streamed(info.optimizer_state), info.lambda);
   stream_ << fmt::format("  f(0): {:.16e}, c(0): {:.16e}, total: {:.16e}\n", info.errors_initial.f,
                          info.errors_initial.equality, info.errors_initial.Total(info.penalty));
-  stream_ << fmt::format("  min, max eig = {:.16e}, {:.16e}\n", info.qp_eigenvalues.minCoeff(),
-                         info.qp_eigenvalues.maxCoeff());
+  stream_ << fmt::format("  min, max, |min| eig = {:.16e}, {:.16e}, {:.16e}\n",
+                         info.qp_eigenvalues.min, info.qp_eigenvalues.max,
+                         info.qp_eigenvalues.abs_min);
   stream_ << fmt::format("  termination = {}\n", fmt::streamed(info.termination_state));
   stream_ << fmt::format("  penalty = {:.16f}\n", info.penalty);
   stream_ << fmt::format("  QP: {}, {}\n", fmt::streamed(info.qp_term_state.termination_state),
@@ -156,6 +157,8 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
     ++i;
   }
 
+// TODO: Get rid of this and log such values in a smarter way.
+#if 0
   const QPInteriorPointSolver& qp = solver.solver();
   const auto s_block = qp.s_block();
   if (s_block.rows() > 0) {
@@ -172,6 +175,7 @@ bool Logger::NonlinearSolverCallback(const ConstrainedNonlinearLeastSquares& sol
         fmt::streamed(solver.previous_variables().transpose().format(kMatrixFmt)),
         fmt::streamed(solver.variables().transpose().format(kMatrixFmt)));
   }
+#endif
   return true;
 }
 

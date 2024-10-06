@@ -2,7 +2,7 @@
 #pragma once
 #include <Eigen/Core>
 
-#include "mini_opt/residual.hpp"
+#include "mini_opt/assertions.hpp"
 #include "mini_opt/structs.hpp"
 
 /*
@@ -28,30 +28,45 @@ namespace mini_opt {
 struct LinearInequalityConstraint {
   // Index of the variable this refers to.
   int variable;
+
   // Constraint coefficients.
   double a;
   double b;
 
   // True if x is feasible.
-  bool IsFeasible(double x) const;
+  constexpr bool IsFeasible(double x) const noexcept {
+    // There might be an argument to be made we should tolerate some epsilon > 0 here?
+    return a * x + b >= 0.0;
+  }
 
   // Clamp a variable x to satisfy the inequality constraint.
-  double ClampX(double x) const;
+  constexpr double ClampX(double x) const {
+    F_ASSERT_NE(a, 0, "`a` cannot be zero");
+    // a * x + b >= 0 ---> a * x >= -b
+    if (a < 0) {
+      // x <= b/a
+      return std::min(x, b / -a);
+    } else {
+      // x >= -b/a
+      return std::max(x, -b / a);
+    }
+  }
 
   // Shift to a new linearization point.
   // a*(x + dx) + b >= 0  -->  a*dx + (ax + b) >= 0
-  LinearInequalityConstraint ShiftTo(double x) const { return {variable, a, a * x + b}; }
+  constexpr LinearInequalityConstraint ShiftTo(double x) const noexcept {
+    return {variable, a, a * x + b};
+  }
 
   // Version of shift that takes vector.
-  LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
+  constexpr LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
     F_ASSERT_LT(variable, x.rows());
     return ShiftTo(x[variable]);
   }
 
   // Construct with index and coefficients.
-  LinearInequalityConstraint(int variable, double a, double b) : variable(variable), a(a), b(b) {}
-
-  LinearInequalityConstraint() = default;
+  constexpr LinearInequalityConstraint(int variable, double a, double b) noexcept
+      : variable(variable), a(a), b(b) {}
 };
 
 /*
@@ -60,25 +75,26 @@ struct LinearInequalityConstraint {
  * Allows you to write Var(index) >= alpha to specify the appropriate LinearInequalityConstraint.
  */
 struct Var {
-  explicit Var(int variable) : variable_(variable) {}
+  explicit constexpr Var(int variable) noexcept : variable_(variable) {}
 
   // Specify constraint as <=
-  LinearInequalityConstraint operator<=(double value) const {
+  constexpr LinearInequalityConstraint operator<=(double value) const noexcept {
     return LinearInequalityConstraint(variable_, -1.0, value);
   }
 
   // Specify constraint as >=
-  LinearInequalityConstraint operator>=(double value) const {
+  constexpr LinearInequalityConstraint operator>=(double value) const noexcept {
     return LinearInequalityConstraint(variable_, 1.0, -value);
   }
 
-  const int variable_;
+ private:
+  int variable_;
 };
 
 /*
  * Problem specification for a QP:
  *
- *  minimize x^T * G * x + c^T * c
+ *  minimize x^T * G * x + x^T * c
  *
  *  st. A_e * x + b_e == 0
  *  st. a_i * x + b_i >= 0  (A_i is diagonal)
@@ -166,8 +182,8 @@ struct QPInteriorPointSolver {
 
   // Set the logger callback to a function pointer, lambda, etc.
   template <typename T>
-  void SetLoggerCallback(T cb) {
-    logger_callback_ = cb;
+  void SetLoggerCallback(T&& cb) {
+    logger_callback_ = std::forward<T>(cb);
   }
 
   // Const block accessors for state.
@@ -183,7 +199,7 @@ struct QPInteriorPointSolver {
   VectorBlock z_block();
 
   // Access all variables.
-  const Eigen::VectorXd& variables() const;
+  constexpr const Eigen::VectorXd& variables() const noexcept { return variables_; }
 
   // Set variables.
   void SetVariables(const Eigen::VectorXd& v);
@@ -226,7 +242,7 @@ struct QPInteriorPointSolver {
   LoggingCallback logger_callback_;
 
   // Return true if there are any inequality constraints.
-  bool HasInequalityConstraints() const { return dims_.M > 0; }
+  constexpr bool HasInequalityConstraints() const noexcept { return dims_.M > 0; }
 
   // Take a single step.
   // Computes mu, solves for the update, and takes the longest step we can while satisfying
@@ -284,6 +300,36 @@ struct QPInteriorPointSolver {
 
   friend class QPSolverTest;
   friend class ConstrainedNLSTest;
+};
+
+/*
+ * Solver for equality-constrained quadratic problem.
+ *
+ * minimize (1/2) x^T * G * x + x^T * c
+ *
+ *  st. A_e * x + b_e == 0
+ */
+class QPNullSpaceSolver {
+ public:
+  // Setup with a problem. We allow setting a new problem so storage can be re-used.
+  void Setup(const QP* problem);
+
+  // Solve the QP using the null-space method.
+  QPSolverOutputs Solve();
+
+  // Access all variables.
+  constexpr const Eigen::VectorXd& variables() const noexcept { return x_; }
+
+ private:
+  // Current problem, initialized by `Setup`.
+  const QP* p_{nullptr};
+
+  Eigen::MatrixXd Q_;
+  Eigen::MatrixXd G_reduced_;
+  Eigen::VectorXd permuted_rhs_;
+  Eigen::VectorXd u_;
+  Eigen::VectorXd y_;
+  Eigen::VectorXd x_;
 };
 
 /*

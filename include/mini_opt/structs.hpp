@@ -70,8 +70,12 @@ struct KKTError {
 
 // List of possible termination criteria.
 enum class QPTerminationState {
+  // Achieved numerical threshold `termination_kkt_tol`.
   SATISFIED_KKT_TOL = 0,
+  // Hit max number of iterations.
   MAX_ITERATIONS,
+  // Null-space solver was employed.
+  NULL_SPACE_SOLVER,
 };
 
 // ostream for termination states
@@ -79,10 +83,13 @@ std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state);
 
 // Results of QPInteriorPointSolver::Solve.
 struct QPSolverOutputs {
+  // Termination state of the solver.
   QPTerminationState termination_state;
+
+  // Number of iterations executed before hitting the termination state.
   int num_iterations;
 
-  QPSolverOutputs(const QPTerminationState state, const int iters)
+  constexpr QPSolverOutputs(QPTerminationState state, int iters) noexcept
       : termination_state(state), num_iterations(iters) {}
 };
 
@@ -111,37 +118,43 @@ std::ostream& operator<<(std::ostream& stream, const OptimizerState& v);
 struct Errors {
   // Sum of squared costs.
   double f{0};
+
   // Error in the non-linear equality constraints.
   double equality{0};
 
   // Total weighted cost function.
-  double Total(double penalty) const { return f + penalty * equality; }
+  constexpr double Total(double penalty) const noexcept { return f + penalty * equality; }
 
   // L-infinity norm
-  double LInfinity() const { return std::max(f, equality); }
+  constexpr double LInfinity() const noexcept { return std::max(f, equality); }
 };
 
 // Derivatives of `Errors`.
 struct DirectionalDerivatives {
   // Derivative of sum of squared costs wrt alpha.
   double d_f;
+
   // Derivative of the equality constraints wrt alpha.
   double d_equality;
 
-  double Total(double penalty) const { return d_f + penalty * d_equality; }
+  // Total error after applying penalty to the equality constraints.
+  constexpr double Total(double penalty) const noexcept { return d_f + penalty * d_equality; }
 
   // L-infinity norm
-  double LInfinity() const { return std::max(std::abs(d_f), std::abs(d_equality)); }
+  constexpr double LInfinity() const noexcept {
+    return std::max(std::abs(d_f), std::abs(d_equality));
+  }
 };
 
 // Pair together a step size and the error achieved.
 struct LineSearchStep {
   // Value of alpha this was computed at [0, 1]
   double alpha;
+
   // Cost function value at that step.
   Errors errors;
 
-  LineSearchStep(double a, Errors e) : alpha(a), errors(e) {}
+  constexpr LineSearchStep(double a, Errors e) noexcept : alpha(a), errors(e) {}
 };
 
 // Result of SelectStepSize
@@ -182,28 +195,47 @@ struct NLSSolverOutputs {
   int num_qp_iterations;
 
   // Construct.
-  NLSSolverOutputs(const NLSTerminationState& term_state, int num_iters, int num_qp_iters)
+  constexpr NLSSolverOutputs(NLSTerminationState term_state, int num_iters,
+                             int num_qp_iters) noexcept
       : termination_state(term_state), num_iterations(num_iters), num_qp_iterations(num_qp_iters) {}
 };
 
 // ostream for termination states
 std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state);
 
+// Summary of the eigenvalues of the hessian from the QP.
+struct QPEigenvalues {
+  // Minimum signed eigenvalue.
+  double min;
+  // Maximum signed eigenvalue.
+  double max;
+  // Minimum absolute eigenvalue.
+  double abs_min;
+};
+
+// Summary of the lagrange multipliers.
+struct QPLagrangeMultipliers {
+  // Minimum lagrange multiplier.
+  double min;
+  // The L-infinity (largest absolute value).
+  double l_infinity;
+  // The L2 norm of all the lagrange multipliers.
+  double l2;
+};
+
 // Details for the log, the current state of the non-linear optimizer.
 struct NLSLogInfo {
-  NLSLogInfo(int iteration, OptimizerState optimizer_state, double lambda,
-             const Errors& errors_initial, const QPSolverOutputs& qp,
-             const Eigen::VectorXd& qp_eigenvalues, ConstVectorBlock dx,
-             const DirectionalDerivatives& directional_derivatives, double penalty,
-             const StepSizeSelectionResult& step_result, const std::vector<LineSearchStep>& steps,
-             const NLSTerminationState& termination_state)
+  NLSLogInfo(int iteration, OptimizerState optimizer_state, double lambda, Errors errors_initial,
+             QPSolverOutputs qp, QPEigenvalues qp_eigenvalues,
+             DirectionalDerivatives directional_derivatives, double penalty,
+             StepSizeSelectionResult step_result, const std::vector<LineSearchStep>& steps,
+             NLSTerminationState termination_state)
       : iteration(iteration),
         optimizer_state(optimizer_state),
         lambda(lambda),
         errors_initial(errors_initial),
         qp_term_state(qp),
         qp_eigenvalues(qp_eigenvalues),
-        dx(std::move(dx)),
         directional_derivatives(directional_derivatives),
         penalty(penalty),
         step_result(step_result),
@@ -215,8 +247,7 @@ struct NLSLogInfo {
   double lambda;
   Errors errors_initial;
   QPSolverOutputs qp_term_state;
-  const Eigen::VectorXd& qp_eigenvalues;
-  const ConstVectorBlock dx;
+  QPEigenvalues qp_eigenvalues;
   DirectionalDerivatives directional_derivatives;
   double penalty;
   StepSizeSelectionResult step_result;

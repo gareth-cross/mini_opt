@@ -1,5 +1,8 @@
 // Copyright 2021 Gareth Cross
 #pragma once
+#include <optional>
+#include <variant>
+
 #include "mini_opt/qp.hpp"
 #include "mini_opt/residual.hpp"
 
@@ -94,11 +97,15 @@ struct ConstrainedNonlinearLeastSquares {
     Norm equality_constraint_norm{Norm::L1};
 
     // Initial value of the equality constraint penalty.
-    double equality_penalty_initial{0};
+    double equality_penalty_initial{0.01};
 
     // Scale factor when increasing the equality penalty.
-    // The new penalty is set to max(lambda) * scale_factor (must be > 1).
+    // If µ_new > µ_old, we increase the penalty to µ_new * equality_penalty_scale_factor.
     double equality_penalty_scale_factor{1.01};
+
+    // Parameter ρ used to scale the equality penalty according to equation (18.36).
+    // The penalty is scaled up by 1 / (1 - ρ).
+    double equality_penalty_rho{0.1};
 
     // Initial lambda value.
     double lambda_initial{0.0};
@@ -141,27 +148,25 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Set the callback which will be used for the QP solver.
   template <typename T>
-  void SetQPLoggingCallback(T cb) {
-    solver_.SetLoggerCallback(cb);
+  void SetQPLoggingCallback(T&& cb) {
+    // TODO: Get rid of the logging callback altogether. For now I maintain this path for existing
+    // unit tests.
+    if (QPInteriorPointSolver* ip_solver = std::get_if<QPInteriorPointSolver>(&solver_);
+        ip_solver != nullptr)
+      ip_solver->SetLoggerCallback(std::forward<T>(cb));
   }
 
   // Set the callback that will be used for the nonlinear solver.
   template <typename T>
-  void SetLoggingCallback(T cb) {
-    logging_callback_ = cb;
+  void SetLoggingCallback(T&& cb) {
+    logging_callback_ = std::forward<T>(cb);
   }
 
   // Get the current linearization point.
-  const Eigen::VectorXd& variables() const { return variables_; }
-
-  // Variables at the start of the last iteration.
-  const Eigen::VectorXd& previous_variables() const { return prev_variables_; }
+  constexpr const Eigen::VectorXd& variables() const noexcept { return variables_; }
 
   // Evaluate the non-linear error.
   Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars, const Norm& equality_norm);
-
-  // Access the qp.
-  const QPInteriorPointSolver& solver() const { return solver_; }
 
  private:
   // Update candidate_vars w/ a step size of alpha.
@@ -171,12 +176,16 @@ struct ConstrainedNonlinearLeastSquares {
   static Errors LinearizeAndFillQP(const Eigen::VectorXd& variables, double lambda,
                                    const Norm& equality_norm, const Problem& problem, QP* qp);
 
+  // Solve the QP, and update the step direction `dx_`.
+  std::tuple<QPSolverOutputs, std::optional<QPLagrangeMultipliers>> ComputeStepDirection(
+      const Params& params);
+
   // Based on the outcome of the step selection, update lambda and check if
   // we should exit. Returns NONE if no exit is required.
   NLSTerminationState UpdateLambdaAndCheckExitConditions(const Params& params,
-                                                         const StepSizeSelectionResult& step_result,
+                                                         StepSizeSelectionResult step_result,
                                                          const Errors& initial_errors,
-                                                         double penalty, double* lambda);
+                                                         double penalty, double& lambda);
 
   // Execute a back-tracking search until the cost decreases, or we hit
   // a max number of iterations
@@ -196,12 +205,9 @@ struct ConstrainedNonlinearLeastSquares {
                                                         const Norm& equality_norm);
 
   // Select a new penalty parameter, depending on norm type.
-  static double SelectPenalty(const Norm& norm_type, const ConstVectorBlock& lagrange_multipliers,
-                              double equality_cost);
-
-  // Computes the penalty param for the nonlinear merit function.
-  // Implement equation (18.33)
-  static double ComputeEqualityPenalty(double d_f, double c, double rho);
+  static double SelectPenalty(const Norm& norm_type, const QP& qp, const Eigen::VectorXd& dx,
+                              const std::optional<QPLagrangeMultipliers>& lagrange_multipliers,
+                              double equality_cost, double rho);
 
   // Solve the quadratic approximation of the cost function for best alpha.
   // Implements equation (3.57/3.58)
@@ -231,12 +237,11 @@ struct ConstrainedNonlinearLeastSquares {
   QP qp_{};
 
   // The QP solver itself, which we re-use at each iteration.
-  QPInteriorPointSolver solver_{};
+  std::variant<QPInteriorPointSolver, QPNullSpaceSolver> solver_{};
 
   // Parameters (the current linearization point)
   Eigen::VectorXd variables_;
   Eigen::VectorXd candidate_vars_;
-  Eigen::VectorXd prev_variables_;
   Eigen::VectorXd dx_;
 
   // Storage for computing errors.
@@ -244,9 +249,6 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Buffer for line search steps
   std::vector<LineSearchStep> steps_;
-
-  // Storage for QP intermediates.
-  Eigen::VectorXd cached_qp_states_;
 
   // Current state of the optimization
   OptimizerState state_{OptimizerState::NOMINAL};

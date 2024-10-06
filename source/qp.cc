@@ -1,30 +1,13 @@
 // Copyright 2021 Gareth Cross
 #include "mini_opt/qp.hpp"
 
+#include <fmt/ostream.h>
 #include <Eigen/Dense>
 
 using namespace Eigen;
 namespace mini_opt {
 
 static const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
-
-bool LinearInequalityConstraint::IsFeasible(double x) const {
-  // There might be an argument to be made we should tolerate some epsilon > 0 here?
-  return a * x + b >= 0.0;
-}
-
-double LinearInequalityConstraint::ClampX(double x) const {
-  F_ASSERT_NE(a, 0, "a cannot be zero");
-  // a * x + b >= 0
-  // a * x >= -b
-  if (a < 0) {
-    // x <= b/a
-    return std::min(x, b / -a);
-  } else {
-    // x >= -b/a
-    return std::max(x, -b / a);
-  }
-}
 
 QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem) { Setup(problem); }
 
@@ -224,8 +207,6 @@ VectorBlock QPInteriorPointSolver::y_block() { return YBlock(dims_, variables_);
 
 VectorBlock QPInteriorPointSolver::z_block() { return ZBlock(dims_, variables_); }
 
-const Eigen::VectorXd& QPInteriorPointSolver::variables() const { return variables_; }
-
 void QPInteriorPointSolver::SetVariables(const Eigen::VectorXd& v) { variables_ = v; }
 
 const QP& QPInteriorPointSolver::problem() const {
@@ -292,9 +273,8 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   // shouldn't happen due to selection of alpha, but double check
   const bool any_non_positive_s = (s.array() <= 0.0).any();
   if (include_inequalities && any_non_positive_s) {
-    std::stringstream ss;
-    ss << "Some slack variables s <= 0: " << s.transpose().format(kMatrixFmt);
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(fmt::format("Some slack variables s <= 0: {}",
+                                         fmt::streamed(s.transpose().format(kMatrixFmt))));
   }
 
   // build the left-hand side (we only need lower triangular)
@@ -312,11 +292,9 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   // factorize, TODO(gareth): preallocate ldlt...
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
-    std::stringstream ss;
-    ss << "Failed to solve self-adjoint (lower) system:\n"
-       << H_.format(kMatrixFmt) << "\n"
-       << "The hessian may not be positive semi-definite.";
-    throw FailedFactorization(ss.str());
+    throw FailedFactorization(fmt::format(
+        "Failed to solve self-adjoint (lower) system:\n{}\nThe hessian may not be semi-definite.",
+        fmt::streamed(H_.format(kMatrixFmt))));
   }
 
   // compute H^-1
@@ -656,6 +634,86 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
     s_inv_r_comp = z;  //  mu = 0
     r_pi = A_i * x + b_i - s;
   }
+}
+
+void QPNullSpaceSolver::Setup(const QP* problem) {
+  F_ASSERT(problem);
+  p_ = problem;
+}
+
+// min (1/2) * x^T * G * x + x^T * c
+//
+// Take derivative wrt `x`:
+//
+//  G * x + c = 0
+//
+// Insert: x = u + Q2 * y
+//
+//  G * (u + Q2 * y) + c = 0
+//
+//  G * u + G * Q2 * y + c = 0
+//
+//  G * (Q2 * y) = -c - G * u
+//
+// Multiply by Q2^T on both sides:
+//
+//  (Q2^T * G * Q2) * y = -Q2^T * (c + G * u)
+//
+// Solve for y:
+//
+//  y = (Q2^T * G * Q2)^-1 * -Q2^T * (c + G * u)
+//
+QPSolverOutputs QPNullSpaceSolver::Solve() {
+  F_ASSERT(p_);
+  F_ASSERT_GT(p_->A_eq.rows(), 0, "Problem must have at least one equality constraint");
+  F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows());
+
+  const int num_equality_constraints = p_->A_eq.rows();
+  const int num_params = p_->A_eq.cols();
+
+  // Compute [Q R] factorization of A_eq^T
+  const auto QR = p_->A_eq.transpose().colPivHouseholderQr();
+
+  Q_ = QR.matrixQ();
+  const auto& R = QR.matrixR();
+  const auto& P = QR.colsPermutation();
+  F_ASSERT_EQ(P.rows(), num_equality_constraints, "P = [{}, {}]", P.rows(), P.cols());
+
+  // The left and right parts of Q (Q2 is the null space basis of A_eq)
+  // [Q1 Q2] * R = A_eq^T
+  const int rank = QR.rank();
+  const auto Q1 = Q_.leftCols(rank);
+  const auto Q2 = Q_.rightCols(Q_.cols() - rank);
+
+  // The non-zero rows of R:
+  const auto R_upper = R.topRows(num_equality_constraints).template triangularView<Eigen::Upper>();
+
+  // Compute u = Q1 * (R1^T)^-1 * (P^-1) * b_eq
+  // `u` is a particular solution to the equality constrained system: A_eq * x + b = 0
+  permuted_rhs_ = P.transpose() * -p_->b_eq;
+  u_ = Q1 * R_upper.transpose().solve(permuted_rhs_);
+  F_ASSERT_EQ(num_params, u_.rows());
+
+  // Compute the reduced hessian by projecting `G` into null(A_eq)
+  G_reduced_ = Q2.transpose() * p_->G.template selfadjointView<Eigen::Lower>() * Q2;
+
+  // Factorize it with cholesky, which is only valid if `G_reduced` is PD.
+  const auto llt = G_reduced_.selfadjointView<Eigen::Lower>().llt();
+  F_ASSERT(llt.info() == Eigen::ComputationInfo::Success,
+           "Not PD (TODO: return something here instead of asserting)");
+
+  // Compute the rhs of:
+  // (Q2^T * G * Q2) * y = -Q2^T * (c + G * u)
+  y_ = -(Q2.transpose() * (p_->c + p_->G.selfadjointView<Eigen::Lower>() * u_));
+
+  // Solve for the vector `y` in:
+  llt.solveInPlace(y_);
+  F_ASSERT_EQ(Q_.cols() - rank, y_.rows());
+
+  // Construct the final solution:
+  x_ = u_ + Q2 * y_;
+
+  return QPSolverOutputs{QPTerminationState::NULL_SPACE_SOLVER, 1};
 }
 
 }  // namespace mini_opt
