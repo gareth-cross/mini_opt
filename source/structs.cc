@@ -17,6 +17,9 @@ std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) 
     case QPTerminationState::MAX_ITERATIONS:
       stream << "MAX_ITERATIONS";
       break;
+    case QPTerminationState::NULL_SPACE_SOLVER:
+      stream << "NULL_SPACE_SOLVER";
+      break;
   }
   return stream;
 }

@@ -856,6 +856,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.absolute_exit_tol = tol::kNano;
     p.termination_kkt_tolerance = tol::kMicro;
     p.max_line_search_iterations = 10;
+    p.equality_penalty_initial = 0.01;
 
     // The polynomial approximation does very poorly on this problem near the minimum. Perhaps
     // the quadratic approximation is just really unsuitable?

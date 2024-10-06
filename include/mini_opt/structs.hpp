@@ -70,8 +70,12 @@ struct KKTError {
 
 // List of possible termination criteria.
 enum class QPTerminationState {
+  // Achieved numerical threshold `termination_kkt_tol`.
   SATISFIED_KKT_TOL = 0,
+  // Hit max number of iterations.
   MAX_ITERATIONS,
+  // Null-space solver was employed.
+  NULL_SPACE_SOLVER,
 };
 
 // ostream for termination states
@@ -79,7 +83,10 @@ std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state);
 
 // Results of QPInteriorPointSolver::Solve.
 struct QPSolverOutputs {
+  // Termination state of the solver.
   QPTerminationState termination_state;
+
+  // Number of iterations executed before hitting the termination state.
   int num_iterations;
 
   constexpr QPSolverOutputs(QPTerminationState state, int iters) noexcept
@@ -204,6 +211,16 @@ struct QPEigenvalues {
   double max;
   // Minimum absolute eigenvalue.
   double abs_min;
+};
+
+// Summary of the lagrange multipliers.
+struct QPLagrangeMultipliers {
+  // Minimum lagrange multiplier.
+  double min;
+  // The L-infinity (largest absolute value).
+  double l_infinity;
+  // The L2 norm of all the lagrange multipliers.
+  double l2;
 };
 
 // Details for the log, the current state of the non-linear optimizer.

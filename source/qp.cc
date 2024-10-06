@@ -663,7 +663,7 @@ void QPNullSpaceSolver::Setup(const QP* problem) {
 //
 //  y = (Q2^T * G * Q2)^-1 * -Q2^T * (c + G * u)
 //
-void QPNullSpaceSolver::Solve() {
+QPSolverOutputs QPNullSpaceSolver::Solve() {
   F_ASSERT(p_);
   F_ASSERT_GT(p_->A_eq.rows(), 0, "Problem must have at least one equality constraint");
   F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows());
@@ -712,6 +712,8 @@ void QPNullSpaceSolver::Solve() {
 
   // Construct the final solution:
   x_ = u_ + Q2 * y_;
+
+  return QPSolverOutputs{QPTerminationState::NULL_SPACE_SOLVER, 1};
 }
 
 }  // namespace mini_opt

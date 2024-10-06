@@ -51,6 +51,12 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   F_ASSERT_GE(params.relative_exit_tol, 0);
   F_ASSERT_LE(params.relative_exit_tol, 1);
   F_ASSERT_GE(params.absolute_first_derivative_tol, 0);
+  F_ASSERT_GT(params.armijo_search_tau, 0);
+  F_ASSERT_LT(params.armijo_search_tau, 1);
+  F_ASSERT_GE(params.equality_penalty_initial, 0);
+  F_ASSERT_GE(params.equality_penalty_scale_factor, 1.0);
+  F_ASSERT_GE(params.equality_penalty_rho, 0);
+  F_ASSERT_LT(params.equality_penalty_rho, 1);
   F_ASSERT_GE(params.max_lambda, 0);
   F_ASSERT_LE(params.min_lambda, params.max_lambda);
   F_ASSERT_GE(params.lambda_initial, params.min_lambda);
@@ -67,20 +73,10 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   variables_ = variables;
   state_ = OptimizerState::NOMINAL;
 
-  // Set up params, TODO(gareth): Tune this better.
-  QPInteriorPointSolver::Params qp_params{};
-  qp_params.max_iterations = params.max_qp_iterations;
-  qp_params.termination_kkt_tol = params.termination_kkt_tolerance;
-  qp_params.initial_mu = 1.0;
-  qp_params.sigma = 0.1;
-  qp_params.initialize_mu_with_complementarity = false;
-
-  // If there are equality constraints, try initializing by just solving the
-  // equality constrained quadratic problem.
-  if (!p_->equality_constraints.empty()) {
-    qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
+  if (p_->inequality_constraints.empty() && !p_->equality_constraints.empty()) {
+    solver_ = QPNullSpaceSolver();
   } else {
-    qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
+    solver_ = QPInteriorPointSolver();
   }
 
   // Iterate until max.
@@ -92,23 +88,20 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const Errors errors_pre =
         LinearizeAndFillQP(variables_, lambda, params.equality_constraint_norm, *p_, &qp_);
 
-    // Solve the QP.
-    solver_.Setup(&qp_);
-
-    const QPSolverOutputs qp_outputs = solver_.Solve(qp_params);
+    // Compute the descent direction, `dx`.
+    const auto [qp_outputs, lagrange_multipliers] = ComputeStepDirection(params);
     num_qp_iters += qp_outputs.num_iterations;
 
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
-    dx_ = solver_.x_block();
     const DirectionalDerivatives directional_derivative =
         ComputeQPCostDerivative(qp_, dx_, params.equality_constraint_norm);
 
     // Raise the penalty parameter if necessary.
     if (!p_->equality_constraints.empty()) {
-      const double new_penalty = SelectPenalty(
-          params.equality_constraint_norm,
-          const_cast<const QPInteriorPointSolver&>(solver_).y_block(), errors_pre.equality);
+      const double new_penalty =
+          SelectPenalty(params.equality_constraint_norm, qp_, dx_, lagrange_multipliers,
+                        errors_pre.equality, params.equality_penalty_rho);
       if (new_penalty > penalty) {
         penalty = new_penalty * params.equality_penalty_scale_factor;
       }
@@ -125,7 +118,9 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     NLSTerminationState maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, lambda);
     if (logging_callback_) {
-      // log the eigenvalues of the QP as well
+      // Log the eigenvalues of the QP as well.
+      // TODO: Make this an optional step, since it comes with material cost and is only for
+      //  logging.
       const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(qp_.G);
       const QPEigenvalues eigenvalues{solver.eigenvalues().minCoeff(),
                                       solver.eigenvalues().maxCoeff(),
@@ -214,6 +209,54 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   return output_errors;
 }
 
+std::tuple<QPSolverOutputs, std::optional<QPLagrangeMultipliers>>
+ConstrainedNonlinearLeastSquares::ComputeStepDirection(const Params& params) {
+  dx_.setZero();
+
+  if (QPInteriorPointSolver* const ip_solver = std::get_if<QPInteriorPointSolver>(&solver_);
+      ip_solver) {
+    ip_solver->Setup(&qp_);
+
+    // Set up params, TODO(gareth): Tune this better.
+    QPInteriorPointSolver::Params qp_params{};
+    qp_params.max_iterations = params.max_qp_iterations;
+    qp_params.termination_kkt_tol = params.termination_kkt_tolerance;
+    qp_params.initial_mu = 1.0;
+    qp_params.sigma = 0.1;
+    qp_params.initialize_mu_with_complementarity = false;
+
+    // If there are equality constraints, try initializing by just solving the
+    // equality constrained quadratic problem.
+    if (!p_->equality_constraints.empty()) {
+      qp_params.initial_guess_method = InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED;
+    } else {
+      qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
+    }
+
+    const QPSolverOutputs qp_outputs = ip_solver->Solve(qp_params);
+
+    // Update our search direction:
+    dx_ = ip_solver->x_block();
+
+    // Determine stats on the lagrange multipliers - these are used in the penalty update rules.
+    std::optional<QPLagrangeMultipliers> multipliers{};
+    if (const auto y = ip_solver->y_block(); y.rows() > 0) {
+      multipliers = QPLagrangeMultipliers{y.minCoeff(), y.lpNorm<Eigen::Infinity>(), y.norm()};
+    }
+
+    return std::make_tuple(qp_outputs, multipliers);
+  }
+
+  QPNullSpaceSolver* const null_solver = std::get_if<QPNullSpaceSolver>(&solver_);
+  F_ASSERT(null_solver);
+
+  null_solver->Setup(&qp_);
+  const QPSolverOutputs qp_outputs = null_solver->Solve();
+  dx_ = null_solver->variables();
+
+  return std::make_tuple(qp_outputs, std::optional<QPLagrangeMultipliers>{std::nullopt});
+}
+
 Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars,
                                                                  const Norm& equality_norm) {
   Errors output_errors{};
@@ -288,6 +331,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     const DirectionalDerivatives& derivatives, const double penalty, const double armijo_c1,
     const LineSearchStrategy& strategy, const double backtrack_search_tau,
     const Norm& equality_norm) {
+  F_ASSERT_GT(penalty, 0.0);
   steps_.clear();
 
   // compute the directional derivative, w/ the current penalty
@@ -351,6 +395,7 @@ double ConstrainedNonlinearLeastSquares::ComputeAlphaPolynomialApproximation(
     return new_alpha;
   }
   F_ASSERT_GE(steps_.size(), 2);
+
   // Try the cubic approximation.
   const LineSearchStep& second_last_step = steps_[steps_.size() - 2];
   const LineSearchStep& last_step = steps_.back();
@@ -391,6 +436,7 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
   //  For the equality constraint, we compute J(x)^T * f(x) here explicitly.
   F_ASSERT_EQ(qp.c.rows(), dx.rows(), "Mismatch between dx and c");
   F_ASSERT_EQ(qp.A_eq.cols(), dx.rows(), "Mismatch between dx and A_eq");
+
   DirectionalDerivatives out{};
   out.d_f = qp.c.dot(dx);
 
@@ -411,47 +457,40 @@ DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative
   return out;
 }
 
-double ConstrainedNonlinearLeastSquares::SelectPenalty(const Norm& norm_type,
-                                                       const ConstVectorBlock& lagrange_multipliers,
-                                                       double equality_cost) {
-  if (norm_type == Norm::L1) {
-    // Equation 18.32. Note that this is not the recommended algorithm in the book, instead
-    // they suggest 18.33. But this seems to work better for me.
-    return lagrange_multipliers.lpNorm<Eigen::Infinity>();
-  } else {
-    // norm_type == Norm::QUADRATIC
-    // See: http://www.numerical.rl.ac.uk/people/nimg/oumsc/lectures/part5.2.pdf
-    const double l2_eq = std::sqrt(equality_cost);
-    if (l2_eq == 0) {
-      // If the cost is zero, the penalty will be multiplied by zero.
-      return 0;
+double ConstrainedNonlinearLeastSquares::SelectPenalty(
+    const Norm& norm_type, const QP& qp, const Eigen::VectorXd& dx,
+    const std::optional<QPLagrangeMultipliers>& lagrange_multipliers, const double equality_cost,
+    const double rho) {
+  if (lagrange_multipliers) {
+    if (norm_type == Norm::L1) {
+      // Equation 18.32. Note that this is not the recommended algorithm in the book, instead
+      // they suggest 18.33. But this seems to work better for me.
+      return lagrange_multipliers->l_infinity;
+    } else {
+      // TODO: This link is dead (and this merits a better reference anyways). I am thinking about
+      //  removing this code path anyways, since L1 works better.
+      // norm_type == Norm::QUADRATIC
+      // See: http://www.numerical.rl.ac.uk/people/nimg/oumsc/lectures/part5.2.pdf
+      const double l2_eq = std::sqrt(equality_cost);
+      if (l2_eq == 0) {
+        // If the cost is zero, the penalty will be multiplied by zero.
+        return 0;
+      }
+      // Ratio of the two L2 norms (non-quadratic).
+      return lagrange_multipliers->l2 / l2_eq;
     }
-    // Ratio of the two L2 norms (non-quadratic).
-    return lagrange_multipliers.norm() / l2_eq;
-  }
-}
+  } else {
+    // This code-path occurs when the null-space solver is in use.
+    // We don't have lagrange multipliers in this context, but we still need to update the penalty.
+    // Instead we apply the inequality (18.36).
+    const double l1_eq = std::max(qp.b_eq.lpNorm<1>(), std::numeric_limits<double>::epsilon());
 
-// Equation (18.33)
-// The idea here is to compute a value of the penalty (mu in the textbook, but not the same mu
-// as used in the IP solver, of course) that will result in `dx` being a descent direction of
-// the aggregated cost:
-//    phi(x) = f(x) + mu * |c(x)|, where we are taking the L1 norm of the equality
-// constraint c(x). This works because for the L1 norm you can show that the derivative of the
-// aggregated cost is:
-//    dphi(x + alpha * dx)/dalpha = df(x)^T * dx - mu * |c(x)|
-// Then (and this seems arbitrary, AFAIK), you require that the derivative satisfy:
-//   df(x)^T * dx - mu * |c(x)| <=-rho * |c(x)|
-// Where rho is a parameter between [0, 1). Small rho will lead to lower penalty, and rho near
-// 1 will lead to a massive penalty. In practice on some problems I have found that this
-// approximation does not play nice with the quadratic approximation line search, in that it
-// produces large penalties as |c(x)| -> 0, resulting in tiny step sizes and very slow convergence.
-double ConstrainedNonlinearLeastSquares::ComputeEqualityPenalty(double d_f, double c, double rho) {
-  F_ASSERT_LT(rho, 1);
-  F_ASSERT_GE(rho, 0);
-  if (c == 0) {
-    return 0;
+    // Compute: ∇ f^T * dx + (1/2) dx^T * (∇^2 f) * dx
+    const double quadratic_cost_approx =
+        qp.c.dot(dx) + 0.5 * std::max(0.0, dx.dot(qp.G.selfadjointView<Eigen::Lower>() * dx));
+
+    return quadratic_cost_approx / ((1 - rho) * l1_eq);
   }
-  return -d_f / ((1 - rho) * c);
 }
 
 // For this approximation to provide a decrease, we must have:

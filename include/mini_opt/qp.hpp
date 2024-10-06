@@ -94,7 +94,7 @@ struct Var {
 /*
  * Problem specification for a QP:
  *
- *  minimize x^T * G * x + c^T * c
+ *  minimize x^T * G * x + x^T * c
  *
  *  st. A_e * x + b_e == 0
  *  st. a_i * x + b_i >= 0  (A_i is diagonal)
@@ -315,7 +315,7 @@ class QPNullSpaceSolver {
   void Setup(const QP* problem);
 
   // Solve the QP using the null-space method.
-  void Solve();
+  QPSolverOutputs Solve();
 
   // Access all variables.
   constexpr const Eigen::VectorXd& variables() const noexcept { return x_; }
