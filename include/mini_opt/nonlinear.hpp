@@ -44,6 +44,13 @@ struct Problem {
 
   // Nonlinear inequality constraints.
   std::vector<ResidualBase::unique_ptr> equality_constraints;
+
+  // Clear all factors.
+  void clear() {
+    costs.clear();
+    inequality_constraints.clear();
+    equality_constraints.clear();
+  }
 };
 
 /*
@@ -86,7 +93,7 @@ struct ConstrainedNonlinearLeastSquares {
     double armijo_search_tau{0.8};
 
     // Initial value of the equality constraint penalty.
-    double equality_penalty_initial{0.01};
+    double equality_penalty_initial{1.0};
 
     // Scale factor when increasing the equality penalty.
     // If µ_new > µ_old, we increase the penalty to µ_new * equality_penalty_scale_factor.

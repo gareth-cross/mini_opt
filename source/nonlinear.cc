@@ -1,8 +1,10 @@
 // Copyright 2021 Gareth Cross
 #include "mini_opt/nonlinear.hpp"
 
-#include <Eigen/Dense>  //  for inverse()
 #include <utility>
+
+#include <fmt/ostream.h>
+#include <Eigen/Dense>  //  for inverse()
 
 namespace mini_opt {
 
@@ -103,9 +105,10 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     }
 
     // Do line search.
+    constexpr double armijo_c1 = 1.0e-4; /* todo: add param */
     const StepSizeSelectionResult step_result =
         SelectStepSize(params.max_line_search_iterations, params.absolute_first_derivative_tol,
-                       errors_pre, directional_derivative, penalty, 1.0e-4 /* todo: add param */,
+                       errors_pre, directional_derivative, penalty, armijo_c1,
                        params.line_search_strategy, params.armijo_search_tau);
 
     // Check if we should terminate (this call also updates variables_ on success).
@@ -259,6 +262,8 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
     eq->ErrorVector(vars, err_out);
     output_errors.equality += err_out.lpNorm<1>();
   }
+  F_ASSERT(!std::isnan(output_errors.f), "vars = {}", fmt::streamed(vars.transpose()));
+  F_ASSERT(!std::isnan(output_errors.equality), "vars = {}", fmt::streamed(vars.transpose()));
   return output_errors;
 }
 
@@ -335,6 +340,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     }
 
     // Update our candidate state.
+    F_ASSERT(std::isfinite(alpha), "alpha = {}, iter = {}", alpha, iter);
     RetractCandidateVars(alpha);
 
     // Compute errors.
@@ -451,7 +457,6 @@ double ConstrainedNonlinearLeastSquares::SelectPenalty(
     // Compute: ∇ f^T * dx + (1/2) dx^T * (∇^2 f) * dx
     const double quadratic_cost_approx =
         qp.c.dot(dx) + 0.5 * std::max(0.0, dx.dot(qp.G.selfadjointView<Eigen::Lower>() * dx));
-
     return quadratic_cost_approx / ((1 - rho) * l1_eq);
   }
 }
