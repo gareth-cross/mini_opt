@@ -44,6 +44,13 @@ struct Problem {
 
   // Nonlinear inequality constraints.
   std::vector<ResidualBase::unique_ptr> equality_constraints;
+
+  // Clear all factors.
+  void clear() {
+    costs.clear();
+    inequality_constraints.clear();
+    equality_constraints.clear();
+  }
 };
 
 /*
@@ -86,7 +93,7 @@ struct ConstrainedNonlinearLeastSquares {
     double armijo_search_tau{0.8};
 
     // Initial value of the equality constraint penalty.
-    double equality_penalty_initial{0.01};
+    double equality_penalty_initial{1.0};
 
     // Scale factor when increasing the equality penalty.
     // If µ_new > µ_old, we increase the penalty to µ_new * equality_penalty_scale_factor.
@@ -183,6 +190,11 @@ struct ConstrainedNonlinearLeastSquares {
                                          const DirectionalDerivatives& derivatives, double penalty,
                                          double armijo_c1, LineSearchStrategy strategy,
                                          double backtrack_search_tau);
+
+  // Determine if we can reduce the penalty parameter after a successful step.
+  double MaybeReducePenalty(const Errors& previous_errors,
+                            const DirectionalDerivatives& derivatives,
+                            double current_penalty) const;
 
   // Repeatedly approximate the cost function as a polynomial, and find the minimum.
   double ComputeAlphaPolynomialApproximation(int iteration, double alpha, const Errors& errors_pre,
