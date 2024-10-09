@@ -19,7 +19,10 @@ function(add_gtest)
     add_subdirectory(googletest)
   endif()
 endfunction()
-add_gtest()
+
+if(MINI_OPT_BUILD_TESTS)
+  add_gtest()
+endif()
 
 # Create a target for eigen.
 function(add_eigen)
@@ -40,4 +43,7 @@ function(add_geometry_utils)
     add_subdirectory(geometry_utils)
   endif()
 endfunction()
-add_geometry_utils()
+
+if(MINI_OPT_BUILD_TESTS)
+  add_geometry_utils()
+endif()
