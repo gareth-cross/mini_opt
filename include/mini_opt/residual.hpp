@@ -156,6 +156,8 @@ double Residual<ResidualDim, NumParams>::UpdateHessian(const Eigen::VectorXd& pa
     J.resize(ResidualDim, index.size());
   }
   const ResidualType r = function(relevant_params, &J);
+  F_ASSERT(!r.hasNaN() && !J.hasNaN(), "Residual evaluation produced NaN:\nJ = {}\bb = {}",
+           fmt::streamed(J), fmt::streamed(r));
 
   // Add contributions to the hessian, only lower part.
   const int N = static_cast<int>(index.size());
@@ -197,6 +199,8 @@ void Residual<ResidualDim, NumParams>::UpdateJacobian(
     J.resize(ResidualDim, index.size());
   }
   b_out.noalias() = function(relevant_params, &J);
+  F_ASSERT(!b_out.hasNaN() && !J.hasNaN(), "Residual evaluation produced NaN:\nJ = {}\bb = {}",
+           fmt::streamed(J), fmt::streamed(b_out));
 
   for (int col_local = 0; col_local < static_cast<int>(index.size()); ++col_local) {
     const int col_global = index[col_local];

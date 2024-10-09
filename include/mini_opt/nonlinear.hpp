@@ -118,7 +118,7 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Signature of custom retraction operator.
   using Retraction =
-      std::function<void(Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha)>;
+      std::function<void(Eigen::VectorXd& x, const ConstVectorBlock& dx, const double alpha)>;
 
   // Signature of custom logger.
   using LoggingCallback =

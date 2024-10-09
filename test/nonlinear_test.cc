@@ -812,10 +812,10 @@ class ConstrainedNLSTest : public ::testing::Test {
     problem.dimension = 2;
 
     ConstrainedNonlinearLeastSquares nls(
-        &problem, [](Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha) {
-          for (int i = 0; i < x->rows(); ++i) {
+        &problem, [](Eigen::VectorXd& x, const ConstVectorBlock& dx, const double alpha) {
+          for (int i = 0; i < x.rows(); ++i) {
             // These are angles, so clamp them in range of [-pi, pi]
-            x->operator[](i) = math::ModPi(x->operator[](i) + dx[i] * alpha);
+            x[i] = math::ModPi(x[i] + dx[i] * alpha);
           }
         });
 
@@ -1045,10 +1045,10 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     // everything is an angle, so retract in the range [-pi, pi]
     ConstrainedNonlinearLeastSquares nls(
-        &problem, [](Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha) {
-          for (int i = 0; i < x->rows(); ++i) {
+        &problem, [](Eigen::VectorXd& x, const ConstVectorBlock& dx, const double alpha) {
+          for (int i = 0; i < x.rows(); ++i) {
             // These are angles, so clamp them in range of [-pi, pi]
-            x->operator[](i) = math::ModPi(x->operator[](i) + dx[i] * alpha);
+            x[i] = math::ModPi(x[i] + dx[i] * alpha);
           }
         });
 
