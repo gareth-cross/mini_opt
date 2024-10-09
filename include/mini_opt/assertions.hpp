@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include <fmt/core.h>
+#include <fmt/ostream.h>
 
 namespace assert {
 namespace constants {
@@ -15,8 +16,8 @@ inline constexpr std::string_view message_prefix = "Assertion failed: {}\nFile: 
 // Generates an exception with a formatted string.
 template <typename... Ts>
 [[nodiscard]] auto format_assert(const std::string_view condition, const std::string_view file,
-                                   const int line, const std::string_view reason_fmt = {},
-                                   Ts&&... args) {
+                                 const int line, const std::string_view reason_fmt = {},
+                                 Ts&&... args) {
   std::string err = fmt::format(constants::message_prefix, condition, file, line);
   if (!reason_fmt.empty()) {
     err.append("\nReason: ");

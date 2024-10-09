@@ -91,6 +91,10 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     const auto [qp_outputs, lagrange_multipliers] = ComputeStepDirection(params);
     num_qp_iters += qp_outputs.num_iterations;
 
+    F_ASSERT(!dx_.hasNaN(), "QP produced NaN values. G:\n{}\nc: {}\nA_eq:\n{}\nb_eq: {}",
+             fmt::streamed(qp_.G), fmt::streamed(qp_.c.transpose()), fmt::streamed(qp_.A_eq),
+             fmt::streamed(qp_.b_eq.transpose()));
+
     // Compute the directional derivative of the cost function about the current linearization
     // point, in the direction of the QP step.
     const DirectionalDerivatives directional_derivative = ComputeQPCostDerivative(qp_, dx_);
@@ -150,8 +154,8 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 void ConstrainedNonlinearLeastSquares::RetractCandidateVars(const double alpha) {
   candidate_vars_ = variables_;
   if (custom_retraction_) {
-    custom_retraction_(&candidate_vars_,
-                       const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension), alpha);
+    custom_retraction_(candidate_vars_, const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension),
+                       alpha);
   } else {
     candidate_vars_ += dx_ * alpha;
   }
