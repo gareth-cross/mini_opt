@@ -354,7 +354,7 @@ class ConstrainedNLSTest : public ::testing::Test {
                                                      {0, -5},   {4, 0},      {100, 50},
                                                      {-35, 40}, {1000, -50}, {0.8, -0.3}};
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{false, true};
+      Logger logger{};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
 
       // solve it
@@ -393,7 +393,7 @@ class ConstrainedNLSTest : public ::testing::Test {
         {12, -5}, {100.0, -20.0}, {1423.0, -400.0}, {-20.0, 10.0}, {-120.0, 35.0}, {-50.0, 0.5}};
     std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{false, true};
+      Logger logger{};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
@@ -476,7 +476,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const Vector6& guess : {guess0, guess1}) {
-      Logger logger{false, true};
+      Logger logger{};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
@@ -565,7 +565,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{false, true};
+      Logger logger{};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
@@ -628,7 +628,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{false, true};
+      Logger logger{};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
@@ -731,7 +731,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const auto& guess : guesses) {
-      Logger logger{true, true};
+      Logger logger{};
       nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
@@ -853,7 +853,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const auto& guess : initial_guesses) {
-      Logger logger{true, true};
+      Logger logger{};
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
       nls.SetLoggingCallback(
           [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
@@ -899,7 +899,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     counters.clear();
     for (const auto& guess : initial_guesses) {
-      Logger logger{true, true};
+      Logger logger{};
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
       nls.SetLoggingCallback(
           [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
@@ -1084,7 +1084,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     // solve it
     std::vector<StatCounters> counters{};
     for (const auto& guess : guesses) {
-      Logger logger{true, true};
+      Logger logger{};
       nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
       nls.SetLoggingCallback([&](const ConstrainedNonlinearLeastSquares& solver,
                                  const NLSLogInfo& info) {

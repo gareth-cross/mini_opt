@@ -312,7 +312,7 @@ class QPSolverTest : public ::testing::Test {
 
     for (InitialGuessMethod method :
          {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
-      Logger logger{true};
+      Logger logger{};
       solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
       // solve it
@@ -358,7 +358,7 @@ class QPSolverTest : public ::testing::Test {
 
     for (InitialGuessMethod method :
          {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
-      Logger logger{true};
+      Logger logger{};
       solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
       // solve it

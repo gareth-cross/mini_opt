@@ -62,7 +62,7 @@ std::ostream& operator<<(std::ostream& s, const StatCounters::Stats& val) {
   return s;
 }
 
-void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
+void Logger::QPSolverCallback(const QPInteriorPointSolver&, const KKTError& kkt_prev,
                               const KKTError& kkt_after, const IPIterationOutputs& outputs) {
   counters_.counts[StatCounters::NUM_QP_ITERATIONS]++;
   stream_ << fmt::format(
@@ -86,6 +86,7 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
       kkt_prev.r_dual, kkt_after.r_dual, kkt_prev.r_comp, kkt_after.r_comp, kkt_prev.r_primal_eq,
       kkt_after.r_primal_eq, kkt_prev.r_primal_ineq, kkt_after.r_primal_ineq);
 
+#if 0
   if (print_qp_variables_) {
     // dump the state with labels
     stream_ << fmt::format(
@@ -99,6 +100,7 @@ void Logger::QPSolverCallback(const QPInteriorPointSolver& solver, const KKTErro
         fmt::streamed(solver.y_block().transpose().format(kMatrixFmt)),
         fmt::streamed(solver.z_block().transpose().format(kMatrixFmt)));
   }
+#endif
   // summarize where the inequality constraints are
 #if 0
   stream_ << " Constraints:\n";
