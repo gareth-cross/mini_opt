@@ -72,7 +72,7 @@ struct Residual : public ResidualBase {
   Residual() = default;
 
   // Construct from members by copy.
-  Residual(const IndexType& index, const FunctionType& func) : index(index), function(func) {}
+  Residual(IndexType index, const FunctionType& func) : index(std::move(index)), function(func) {}
 
   // Return constant dimension.
   int Dimension() const override { return ResidualDim; }
