@@ -30,10 +30,6 @@ std::ostream& operator<<(std::ostream& s, const StatCounters::Stats& val);
  * and records it in a string stream. We print it later if the test fails.
  */
 struct Logger {
-  explicit Logger(bool print_qp_variables = false, bool print_nonlinear_variables = false)
-      : print_qp_variables_(print_qp_variables),
-        print_nonlinear_variables_(print_nonlinear_variables) {}
-
   // Callback for the QP solver.
   void QPSolverCallback(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
                         const KKTError& kkt_after, const IPIterationOutputs& outputs);
@@ -57,11 +53,9 @@ struct Logger {
   }
 
   // Enable or disable use of colors
-  void SetUseColors(bool c) { use_colors_ = c; }
+  constexpr void SetUseColors(bool c) noexcept { use_colors_ = c; }
 
  private:
-  const bool print_qp_variables_;
-  const bool print_nonlinear_variables_;
   bool use_colors_{true};
   std::stringstream stream_;
   StatCounters counters_{};
