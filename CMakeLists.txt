@@ -1,7 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 project(mini_opt CXX)
-enable_testing()
 include(GNUInstallDirs)
+
+# Options controlling compilation:
+option(MINI_OPT_BUILD_TESTS "Build with tests enabled." ON)
+
+if(MINI_OPT_BUILD_TESTS)
+  enable_testing()
+endif()
 
 add_subdirectory(dependencies)
 
@@ -49,4 +55,6 @@ install(
   PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${LIBRARY_NAME}")
 
 # Unit tests
-add_subdirectory(test)
+if(MINI_OPT_BUILD_TESTS)
+  add_subdirectory(test)
+endif()
