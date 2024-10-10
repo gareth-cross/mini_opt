@@ -441,7 +441,7 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
     // we can sometimes guess zero for `x`. This is fairly simple, but I keep it around
     // to compare to.
   } else {
-    F_ASSERT(params.initial_guess_method == InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
+    F_ASSERT_EQ(params.initial_guess_method, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
     // Formulate the problem without inequalities.
     ComputeLDLT(false);
     EvaluateKKTConditions(false);

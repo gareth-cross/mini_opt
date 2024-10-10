@@ -1,9 +1,11 @@
 // Copyright 2021 Gareth Cross
 #pragma once
-#include <Eigen/Core>
 #include <limits>
 #include <ostream>
 #include <vector>
+
+#include <fmt/ostream.h>
+#include <Eigen/Core>
 
 namespace mini_opt {
 
@@ -34,6 +36,8 @@ enum class InitialGuessMethod {
   // Do nothing, we expect the variables to be initialized externally.
   USER_PROVIDED,
 };
+
+std::ostream& operator<<(std::ostream& stream, InitialGuessMethod method);
 
 struct AlphaValues {
   // Alpha in the primal variables (x an s), set to 1 if we have no s
@@ -79,7 +83,7 @@ enum class QPTerminationState {
 };
 
 // ostream for termination states
-std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state);
+std::ostream& operator<<(std::ostream& stream, QPTerminationState state);
 
 // Results of QPInteriorPointSolver::Solve.
 struct QPSolverOutputs {
@@ -102,7 +106,7 @@ enum class LineSearchStrategy {
 };
 
 // ostream for LineSearchStrategy
-std::ostream& operator<<(std::ostream& stream, const LineSearchStrategy& strategy);
+std::ostream& operator<<(std::ostream& stream, LineSearchStrategy strategy);
 
 // State of the nonlinear optimizer.
 enum class OptimizerState {
@@ -112,7 +116,7 @@ enum class OptimizerState {
   ATTEMPTING_RESTORE_LM = 1,
 };
 
-std::ostream& operator<<(std::ostream& stream, const OptimizerState& v);
+std::ostream& operator<<(std::ostream& stream, OptimizerState v);
 
 // Total squared errors from a nonlinear optimization.
 struct Errors {
@@ -169,7 +173,7 @@ enum class StepSizeSelectionResult {
   FAILURE_POSITIVE_DERIVATIVE = 3,
 };
 
-std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult& result);
+std::ostream& operator<<(std::ostream& stream, StepSizeSelectionResult result);
 
 // Exit condition of the non-linear optimization.
 enum class NLSTerminationState {
@@ -201,7 +205,7 @@ struct NLSSolverOutputs {
 };
 
 // ostream for termination states
-std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state);
+std::ostream& operator<<(std::ostream& stream, NLSTerminationState state);
 
 // Summary of the eigenvalues of the hessian from the QP.
 struct QPEigenvalues {
@@ -256,3 +260,21 @@ struct NLSLogInfo {
 };
 
 }  // namespace mini_opt
+
+template <>
+struct fmt::formatter<mini_opt::QPTerminationState> : fmt::ostream_formatter {};
+
+template <>
+struct fmt::formatter<mini_opt::InitialGuessMethod> : fmt::ostream_formatter {};
+
+template <>
+struct fmt::formatter<mini_opt::LineSearchStrategy> : fmt::ostream_formatter {};
+
+template <>
+struct fmt::formatter<mini_opt::OptimizerState> : fmt::ostream_formatter {};
+
+template <>
+struct fmt::formatter<mini_opt::StepSizeSelectionResult> : fmt::ostream_formatter {};
+
+template <>
+struct fmt::formatter<mini_opt::NLSTerminationState> : fmt::ostream_formatter {};
