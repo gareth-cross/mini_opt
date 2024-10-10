@@ -64,6 +64,10 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
   F_ASSERT_GE(params.lambda_initial, params.min_lambda);
   F_ASSERT_LE(params.lambda_initial, params.max_lambda);
   F_ASSERT_GE(params.lambda_failure_init, 0);
+  F_ASSERT_GE(params.lambda_decrease_on_success, 0);
+  F_ASSERT_LT(params.lambda_decrease_on_success, 1.0);
+  F_ASSERT_GE(params.lambda_decrease_on_restore, 0);
+  F_ASSERT_LT(params.lambda_decrease_on_restore, 1.0);
 }
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
@@ -277,10 +281,16 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
     const double penalty, double& lambda) {
   if (step_result == StepSizeSelectionResult::SUCCESS) {
     F_ASSERT(!steps_.empty(), "Must have logged a step");
+
     // Update the state, and decrease lambda.
     variables_.swap(candidate_vars_);  //  replace w/ the candidate variables
+    if (state_ == OptimizerState::ATTEMPTING_RESTORE_LM) {
+      lambda = std::max(lambda * params.lambda_decrease_on_restore, params.min_lambda);
+
+    } else {
+      lambda = std::max(lambda * params.lambda_decrease_on_success, params.min_lambda);
+    }
     state_ = OptimizerState::NOMINAL;
-    lambda = std::max(lambda * 0.1, params.min_lambda);
 
     // Check termination criteria.
     const LineSearchStep& final_step = steps_.back();
@@ -298,12 +308,12 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
              step_result == StepSizeSelectionResult::FAILURE_POSITIVE_DERIVATIVE) {
     if (state_ == OptimizerState::NOMINAL) {
       // Things were going well, but we failed - initialize lambda to attempt restore.
-      lambda = std::max(params.lambda_failure_init, lambda);
+      lambda = std::max(params.lambda_failure_init, lambda * 10.0);
       state_ = OptimizerState::ATTEMPTING_RESTORE_LM;
     } else {
       F_ASSERT_EQ(state_, OptimizerState::ATTEMPTING_RESTORE_LM);
       // We are already attempting to recover and failing, ramp up lambda.
-      lambda *= 10;
+      lambda *= 10.0;
     }
     if (lambda > params.max_lambda) {
       // failed
