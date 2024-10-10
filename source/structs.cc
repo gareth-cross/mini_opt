@@ -9,7 +9,22 @@ double KKTError::Max() const {
   return std::max(r_dual, std::max(r_comp, std::max(r_primal_eq, r_primal_ineq)));
 }
 
-std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) {
+std::ostream& operator<<(std::ostream& stream, InitialGuessMethod method) {
+  switch (method) {
+    case InitialGuessMethod::NAIVE:
+      stream << "NAIVE";
+      break;
+    case InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED:
+      stream << "SOLVE_EQUALITY_CONSTRAINED";
+      break;
+    case InitialGuessMethod::USER_PROVIDED:
+      stream << "USER_PROVIDED";
+      break;
+  }
+  return stream;
+}
+
+std::ostream& operator<<(std::ostream& stream, const QPTerminationState state) {
   switch (state) {
     case QPTerminationState::SATISFIED_KKT_TOL:
       stream << "SATISFIED_KKT_TOL";
@@ -24,7 +39,7 @@ std::ostream& operator<<(std::ostream& stream, const QPTerminationState& state) 
   return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, const LineSearchStrategy& strategy) {
+std::ostream& operator<<(std::ostream& stream, const LineSearchStrategy strategy) {
   switch (strategy) {
     case LineSearchStrategy::ARMIJO_BACKTRACK:
       stream << "ARMIJO_BACKTRACK";
@@ -36,7 +51,7 @@ std::ostream& operator<<(std::ostream& stream, const LineSearchStrategy& strateg
   return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, const OptimizerState& v) {
+std::ostream& operator<<(std::ostream& stream, const OptimizerState v) {
   switch (v) {
     case OptimizerState::NOMINAL:
       stream << "NOMINAL";
@@ -48,7 +63,7 @@ std::ostream& operator<<(std::ostream& stream, const OptimizerState& v) {
   return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult& result) {
+std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult result) {
   switch (result) {
     case StepSizeSelectionResult::SUCCESS:
       stream << "SUCCESS";
@@ -66,7 +81,7 @@ std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult& re
   return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, const NLSTerminationState& state) {
+std::ostream& operator<<(std::ostream& stream, const NLSTerminationState state) {
   switch (state) {
     case NLSTerminationState::NONE:
       stream << "NONE";

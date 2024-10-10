@@ -159,8 +159,8 @@ TEST(MiniOptTest, TestDynamicParameterVector) {
     Matrix<double, 2, 3> J_static;
     const auto r = DummyFunction(p, J ? &J_static : nullptr);
     if (J) {
-      F_ASSERT(2 == J->rows());
-      F_ASSERT(3 == J->cols());
+      F_ASSERT_EQ(2, J->rows());
+      F_ASSERT_EQ(3, J->cols());
       J->noalias() = J_static;
     }
     return r;
