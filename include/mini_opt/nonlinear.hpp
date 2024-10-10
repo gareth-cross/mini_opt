@@ -109,6 +109,9 @@ struct ConstrainedNonlinearLeastSquares {
     // Initial lambda value on entering the ATTEMPTING_RESTORE_LM state.
     double lambda_failure_init{1.0e-2};
 
+    // Multiplicative amount to decrease lambda when exiting the `ATTEMPTING_RESTORE_LM` state.
+    double lambda_successful_restore_decrease{0.8};
+
     // Maximum lambda value.
     double max_lambda{1.};
 
