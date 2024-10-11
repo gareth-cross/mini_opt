@@ -9,6 +9,12 @@ namespace mini_opt {
 
 static const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
 
+QPEigenvalues QP::ComputeEigenvalueStats() const {
+  const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(G);
+  return {solver.eigenvalues().minCoeff(), solver.eigenvalues().maxCoeff(),
+          solver.eigenvalues().cwiseAbs().minCoeff()};
+}
+
 QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem) { Setup(problem); }
 
 void QPInteriorPointSolver::Setup(const QP* const problem) {
@@ -91,7 +97,8 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
  * far the simpler strategy of just scaling `mu` with complementarity seems better, but there
  * may be an implementation issue.
  */
-QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params& params) {
+QPInteriorPointSolverOutputs QPInteriorPointSolver::Solve(
+    const QPInteriorPointSolver::Params& params) {
   F_ASSERT(p_, "Must have a valid problem");
   CheckParams(params);
 
@@ -101,6 +108,9 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
   // on the first iteration, the residual needs to be filled first
   // TODO(gareth): this is superfluous, just get it as the output of Iterate()
   EvaluateKKTConditions();
+
+  std::vector<QPInteriorPointIteration> iterations{};
+  iterations.reserve(5);
 
   double mu{params.initialize_mu_with_complementarity ? ComputeMu() : params.initial_mu};
   for (int iter = 0; iter < params.max_iterations; ++iter) {
@@ -115,16 +125,14 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
     EvaluateKKTConditions();
 
     const KKTError kkt_after = ComputeErrors(mu);
-    if (logger_callback_) {
-      // pass progress to the logger callback for printing in the test
-      logger_callback_(const_cast<const QPInteriorPointSolver&>(*this), kkt_prev, kkt_after,
-                       iteration_outputs);
-    }
+
+    // Record progress and check if we can terminate because the KKT conditions were satisfied.
+    iterations.emplace_back(kkt_prev, kkt_after, iteration_outputs);
 
     if (kkt_after.Max() < params.termination_kkt_tol &&
         ComputeMu() < params.termination_complementarity_tol) {
       // error is low enough, stop
-      return {QPTerminationState::SATISFIED_KKT_TOL, iter + 1};
+      return {QPInteriorPointTerminationState::SATISFIED_KKT_TOL, std::move(iterations)};
     }
 
     // adjust the barrier parameter
@@ -136,7 +144,8 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
       }
     }
   }
-  return {QPTerminationState::MAX_ITERATIONS, params.max_iterations};
+
+  return {QPInteriorPointTerminationState::MAX_ITERATIONS, std::move(iterations)};
 }
 
 IPIterationOutputs QPInteriorPointSolver::Iterate(const double mu_input,
@@ -663,7 +672,7 @@ void QPNullSpaceSolver::Setup(const QP* problem) {
 //
 //  y = (Q2^T * G * Q2)^-1 * -Q2^T * (c + G * u)
 //
-QPSolverOutputs QPNullSpaceSolver::Solve() {
+void QPNullSpaceSolver::Solve() {
   F_ASSERT(p_);
   F_ASSERT_GT(p_->A_eq.rows(), 0, "Problem must have at least one equality constraint");
   F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows());
@@ -712,8 +721,6 @@ QPSolverOutputs QPNullSpaceSolver::Solve() {
 
   // Construct the final solution:
   x_ = u_ + Q2 * y_;
-
-  return QPSolverOutputs{QPTerminationState::NULL_SPACE_SOLVER, 1};
 }
 
 }  // namespace mini_opt

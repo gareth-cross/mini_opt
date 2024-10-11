@@ -86,14 +86,14 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   // Iterate until max.
   double lambda{params.lambda_initial};
   double penalty{params.equality_penalty_initial};
-  int num_qp_iters = 0;
+  std::vector<NLSIteration> iterations;
+  iterations.reserve(10);
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // Fill out the QP and compute current errors.
     const Errors errors_pre = LinearizeAndFillQP(variables_, lambda, *p_, &qp_);
 
     // Compute the descent direction, `dx`.
-    const auto [qp_outputs, lagrange_multipliers] = ComputeStepDirection(params);
-    num_qp_iters += qp_outputs.num_iterations;
+    auto [qp_outputs, lagrange_multipliers] = ComputeStepDirection(params);
 
     F_ASSERT(!dx_.hasNaN(), "QP produced NaN values. G:\n{}\nc: {}\nA_eq:\n{}\nb_eq: {}",
              fmt::streamed(qp_.G), fmt::streamed(qp_.c.transpose()), fmt::streamed(qp_.A_eq),
@@ -121,38 +121,40 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
-    NLSTerminationState maybe_exit =
+    const NLSTerminationState maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, lambda);
+
+    const std::optional<QPEigenvalues> eigenvalues =
+        params.log_qp_eigenvalues ? qp_.ComputeEigenvalueStats() : std::optional<QPEigenvalues>{};
+
+    NLSIteration info{iter,
+                      state_,
+                      old_lambda,
+                      errors_pre,
+                      std::move(qp_outputs),
+                      eigenvalues,
+                      directional_derivative,
+                      penalty,
+                      step_result,
+                      std::move(steps_),
+                      maybe_exit};
+    iterations.push_back(std::move(info));
+
+    // TODO: Add this functionality back:
+#if 0
     if (logging_callback_) {
-      // Log the eigenvalues of the QP as well.
-      // TODO: Make this an optional step, since it comes with material cost and is only for
-      //  logging.
-      const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(qp_.G);
-      const QPEigenvalues eigenvalues{solver.eigenvalues().minCoeff(),
-                                      solver.eigenvalues().maxCoeff(),
-                                      solver.eigenvalues().cwiseAbs().minCoeff()};
-      const NLSLogInfo info{iter,
-                            state_,
-                            old_lambda,
-                            errors_pre,
-                            qp_outputs,
-                            eigenvalues,
-                            directional_derivative,
-                            penalty,
-                            step_result,
-                            steps_,
-                            maybe_exit};
       const bool should_proceed = logging_callback_(*this, info);
       if (maybe_exit == NLSTerminationState::NONE && !should_proceed) {
         maybe_exit = NLSTerminationState::USER_CALLBACK;
       }
     }
+#endif
 
     if (maybe_exit != NLSTerminationState::NONE) {
-      return {maybe_exit, iter + 1, num_qp_iters};
+      return {maybe_exit, std::move(iterations)};
     }
   }
-  return {NLSTerminationState::MAX_ITERATIONS, params.max_iterations, num_qp_iters};
+  return {NLSTerminationState::MAX_ITERATIONS, std::move(iterations)};
 }
 
 void ConstrainedNonlinearLeastSquares::RetractCandidateVars(const double alpha) {
@@ -210,7 +212,7 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   return output_errors;
 }
 
-std::tuple<QPSolverOutputs, std::optional<QPLagrangeMultipliers>>
+std::tuple<std::optional<QPInteriorPointSolverOutputs>, std::optional<QPLagrangeMultipliers>>
 ConstrainedNonlinearLeastSquares::ComputeStepDirection(const Params& params) {
   dx_.setZero();
 
@@ -234,7 +236,7 @@ ConstrainedNonlinearLeastSquares::ComputeStepDirection(const Params& params) {
       qp_params.initial_guess_method = InitialGuessMethod::NAIVE;
     }
 
-    const QPSolverOutputs qp_outputs = ip_solver->Solve(qp_params);
+    QPInteriorPointSolverOutputs qp_outputs = ip_solver->Solve(qp_params);
 
     // Update our search direction:
     dx_ = ip_solver->x_block();
@@ -245,17 +247,19 @@ ConstrainedNonlinearLeastSquares::ComputeStepDirection(const Params& params) {
       multipliers = QPLagrangeMultipliers{y.minCoeff(), y.lpNorm<Eigen::Infinity>(), y.norm()};
     }
 
-    return std::make_tuple(qp_outputs, multipliers);
+    return std::make_tuple(std::optional{std::move(qp_outputs)}, multipliers);
   }
 
   QPNullSpaceSolver* const null_solver = std::get_if<QPNullSpaceSolver>(&solver_);
   F_ASSERT(null_solver);
 
   null_solver->Setup(&qp_);
-  const QPSolverOutputs qp_outputs = null_solver->Solve();
+  null_solver->Solve();
   dx_ = null_solver->variables();
 
-  return std::make_tuple(qp_outputs, std::optional<QPLagrangeMultipliers>{std::nullopt});
+  // TODO: This should probably be a variant with different output configurations in it.
+  return std::make_tuple(std::optional<QPInteriorPointSolverOutputs>{std::nullopt},
+                         std::optional<QPLagrangeMultipliers>{std::nullopt});
 }
 
 Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars) {
@@ -336,6 +340,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     const LineSearchStrategy strategy, const double backtrack_search_tau) {
   F_ASSERT_GT(penalty, 0.0);
   steps_.clear();
+  steps_.reserve(5);
 
   // compute the directional derivative, w/ the current penalty
   const double directional_derivative = derivatives.Total(penalty);

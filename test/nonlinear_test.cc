@@ -8,7 +8,6 @@
 #include "geometry_utils/angle_utils.hpp"
 #include "geometry_utils/numerical_derivative.hpp"
 
-#include "mini_opt/logging.hpp"
 #include "mini_opt/nonlinear.hpp"
 
 #include "test_utils.hpp"
@@ -16,8 +15,8 @@
 
 // TODO(gareth): Split up this file a bit.
 namespace mini_opt {
-using namespace Eigen;
 using namespace std::placeholders;
+using namespace Eigen;
 
 template <int ResidualDim, int NumParams>
 static void TestResidualFunctionDerivative(
@@ -38,6 +37,69 @@ static void TestResidualFunctionDerivative(
 
   ASSERT_EIGEN_NEAR(J_numerical, J, tol);
 }
+
+enum class StatCounterName : int32_t {
+  NUM_NLS_ITERATIONS = 0,
+  NUM_QP_ITERATIONS,
+  NUM_FAILED_LINE_SEARCHES,
+  NUM_LINE_SEARCH_STEPS,
+  MAX_VALUE,
+};
+
+std::ostream& operator<<(std::ostream& s, const StatCounterName val) {
+  switch (val) {
+    case StatCounterName::NUM_FAILED_LINE_SEARCHES:
+      s << "NUM_FAILED_LINE_SEARCHES";
+      break;
+    case StatCounterName::NUM_NLS_ITERATIONS:
+      s << "NUM_NLS_ITERATIONS";
+      break;
+    case StatCounterName::NUM_QP_ITERATIONS:
+      s << "NUM_QP_ITERATIONS";
+      break;
+    case StatCounterName::NUM_LINE_SEARCH_STEPS:
+      s << "NUM_LINE_SEARCH_STEPS";
+      break;
+    case StatCounterName::MAX_VALUE:
+      s << "<INVALID VALUE>";
+      break;
+  }
+  return s;
+}
+
+// Accumulate counts for testing.
+struct StatCounters {
+  // All the counts.
+  std::array<std::size_t, static_cast<std::size_t>(StatCounterName::MAX_VALUE)> counts{};
+
+  StatCounters() noexcept { counts.fill(0); }
+
+  std::size_t at(const StatCounterName name) const {
+    return counts[static_cast<std::size_t>(name)];
+  }
+
+  std::size_t& at(const StatCounterName name) { return counts[static_cast<std::size_t>(name)]; }
+
+  StatCounters operator+(const StatCounters& c) noexcept {
+    StatCounters out = *this;
+    out += c;
+    return out;
+  }
+
+  constexpr StatCounters& operator+=(const StatCounters& c) noexcept {
+    for (std::size_t i = 0; i < counts.size(); ++i) {
+      counts[i] += c.counts[i];
+    }
+    return *this;
+  }
+
+  explicit StatCounters(const NLSSolverOutputs& outputs) noexcept : StatCounters() {
+    at(StatCounterName::NUM_NLS_ITERATIONS) = outputs.iterations.size();
+    at(StatCounterName::NUM_QP_ITERATIONS) = outputs.NumQPIterations();
+    at(StatCounterName::NUM_FAILED_LINE_SEARCHES) = outputs.NumFailedLineSearches();
+    at(StatCounterName::NUM_LINE_SEARCH_STEPS) = outputs.NumLineSearchSteps();
+  }
+};
 
 // Test constrained non-linear least squares.
 class ConstrainedNLSTest : public ::testing::Test {
@@ -244,17 +306,16 @@ class ConstrainedNLSTest : public ::testing::Test {
               eq.function(x_lin + dx_in + dx_out, nullptr).norm());
   }
 
-  static void SummarizeCounts(const std::string& name, const std::vector<StatCounters>& counters) {
+  static void SummarizeCounts(std::string_view name, const std::vector<StatCounters>& counters) {
     ASSERT_GT(counters.size(), 0u);
     // get all the stats and dump them
-    fmt::print("Stats from {} trials.\n", counters.size());
-    for (const StatCounters::Stats& v :
-         {StatCounters::NUM_NLS_ITERATIONS, StatCounters::NUM_QP_ITERATIONS,
-          StatCounters::NUM_FAILED_LINE_SEARCHES, StatCounters::NUM_LINE_SEARCH_STEPS}) {
+    fmt::print("Stats  from {} trials.\n", counters.size());
+    for (const auto stat_name :
+         {StatCounterName::NUM_NLS_ITERATIONS, StatCounterName::NUM_QP_ITERATIONS,
+          StatCounterName::NUM_FAILED_LINE_SEARCHES, StatCounterName::NUM_LINE_SEARCH_STEPS}) {
       std::vector<int> sorted;
-      std::transform(
-          counters.begin(), counters.end(), std::back_inserter(sorted),
-          [&](const StatCounters& c) { return (c.counts.count(v) > 0) ? c.counts.at(v) : 0; });
+      std::transform(counters.begin(), counters.end(), std::back_inserter(sorted),
+                     [&stat_name](const StatCounters& c) { return c.at(stat_name); });
       std::sort(sorted.begin(), sorted.end());
       const auto total = std::accumulate(sorted.begin(), sorted.end(), 0);
       const std::size_t num = sorted.size();
@@ -265,8 +326,8 @@ class ConstrainedNLSTest : public ::testing::Test {
           "  Max: {}\n"
           "  Min: {}\n"
           "  95 percentile: {}\n",
-          name, fmt::streamed(v), total / static_cast<double>(num), sorted[num / 2], sorted.back(),
-          sorted.front(), sorted[(num * 95) / 100]);
+          name, fmt::streamed(stat_name), total / static_cast<double>(num), sorted[num / 2],
+          sorted.back(), sorted.front(), sorted[(num * 95) / 100]);
     }
   }
 
@@ -312,18 +373,16 @@ class ConstrainedNLSTest : public ::testing::Test {
                                                      {0, -5},   {4, 0},      {100, 50},
                                                      {-35, 40}, {1000, -50}, {0.8, -0.3}};
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{};
-      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
       ASSERT_EQ(outputs.termination_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
-      ASSERT_EQ(outputs.num_qp_iterations, outputs.num_iterations);
+      ASSERT_EQ(outputs.NumQPIterations(), outputs.iterations.size());
 
       // check solution
-      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro) << fmt::format(
-          "Initial guess: {}\nSummary:\n{}\n",
-          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
+      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro)
+          << fmt::format("Initial guess: {}\nSummary:\n{}\n",
+                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
+                         outputs.ToString(true));
     }
   }
 
@@ -354,18 +413,16 @@ class ConstrainedNLSTest : public ::testing::Test {
                                                      {0, -5},   {4, 0},      {100, 50},
                                                      {-35, 40}, {1000, -50}, {0.8, -0.3}};
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{};
-      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
       ASSERT_EQ(outputs.termination_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL);
-      ASSERT_EQ(outputs.num_qp_iterations, outputs.num_iterations);
+      ASSERT_EQ(outputs.NumQPIterations(), outputs.iterations.size());
 
       // check solution
-      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro) << fmt::format(
-          "Initial guess: {}\nSummary:\n{}\n",
-          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
+      ASSERT_EIGEN_NEAR(Vector2d::Ones(), nls.variables(), tol::kMicro)
+          << fmt::format("Initial guess: {}\nSummary:\n{}\n",
+                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
+                         outputs.ToString(true));
     }
   }
 
@@ -393,25 +450,22 @@ class ConstrainedNLSTest : public ::testing::Test {
         {12, -5}, {100.0, -20.0}, {1423.0, -400.0}, {-20.0, 10.0}, {-120.0, 35.0}, {-50.0, 0.5}};
     std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{};
-      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.push_back(logger.counters());
+      counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
                   (outputs.termination_state != NLSTerminationState::MAX_LAMBDA))
           << fmt::format("Initial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
-                         logger.GetString());
+                         outputs.ToString(true));
 
       // check solution, it should be at the constraint
-      ASSERT_EIGEN_NEAR(Vector2d(1.2, 0.5), nls.variables(), tol::kMicro) << fmt::format(
-          "Initial guess: {}\nSummary:\n{}\n",
-          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
+      ASSERT_EIGEN_NEAR(Vector2d(1.2, 0.5), nls.variables(), tol::kMicro)
+          << fmt::format("Initial guess: {}\nSummary:\n{}\n",
+                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
+                         outputs.ToString(true));
     }
     SummarizeCounts("Rosenbrock 2D", counters);
   }
@@ -476,13 +530,9 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const Vector6& guess : {guess0, guess1}) {
-      Logger logger{};
-      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.push_back(logger.counters());
+      counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
       EXPECT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -490,12 +540,13 @@ class ConstrainedNLSTest : public ::testing::Test {
           << fmt::format("Termination state: {}\nInitial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(outputs.termination_state),
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
-                         logger.GetString());
+                         outputs.ToString(true));
 
       // check solution, it should be at the constraint
-      ASSERT_EIGEN_NEAR(solution, nls.variables(), 1.0e-5) << fmt::format(
-          "Initial guess: {}\nSummary:\n{}\n",
-          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
+      ASSERT_EIGEN_NEAR(solution, nls.variables(), 1.0e-5)
+          << fmt::format("Initial guess: {}\nSummary:\n{}\n",
+                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
+                         outputs.ToString(true));
     }
     SummarizeCounts("Rosenbrock 6D", counters);
   }
@@ -565,13 +616,9 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{};
-      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.push_back(logger.counters());
+      counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -579,7 +626,7 @@ class ConstrainedNLSTest : public ::testing::Test {
                   (outputs.termination_state != NLSTerminationState::NONE))
           << fmt::format("Initial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
-                         logger.GetString());
+                         outputs.ToString(true));
 
       // one of the solutions should match
       const Vector2d best_sol = *std::min_element(
@@ -589,7 +636,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
       ASSERT_EIGEN_NEAR(best_sol, nls.variables(), 5.0e-5) << fmt::format(
           "Initial guess: {}\nSummary:\n{}\n",
-          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
+          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), outputs.ToString());
     }
     SummarizeCounts("Himmelblau", counters);
   }
@@ -628,13 +675,9 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
-      Logger logger{};
-      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.push_back(logger.counters());
+      counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -642,12 +685,13 @@ class ConstrainedNLSTest : public ::testing::Test {
                   (outputs.termination_state != NLSTerminationState::NONE))
           << fmt::format("Initial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
-                         logger.GetString());
+                         outputs.ToString(true));
 
       // should match this solution well
-      ASSERT_EIGEN_NEAR(Vector2d(3.0, 2.0), nls.variables(), 5.0e-5) << fmt::format(
-          "Initial guess: {}\nSummary:\n{}\n",
-          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
+      ASSERT_EIGEN_NEAR(Vector2d(3.0, 2.0), nls.variables(), 5.0e-5)
+          << fmt::format("Initial guess: {}\nSummary:\n{}\n",
+                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
+                         outputs.ToString(true));
     }
     SummarizeCounts("Himmelblau Quadrant Inequality Constrained", counters);
   }
@@ -731,13 +775,9 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const auto& guess : guesses) {
-      Logger logger{};
-      nls.SetLoggingCallback(std::bind(&Logger::NonlinearSolverCallback, &logger, _1, _2));
-      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.push_back(logger.counters());
+      counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
       ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
@@ -746,7 +786,7 @@ class ConstrainedNLSTest : public ::testing::Test {
           << fmt::format("Termination: {}\nInitial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(outputs.termination_state),
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
-                         logger.GetString());
+                         outputs.ToString(true));
 
       // find whichever of the 4 best solutions we found
       const auto min_it =
@@ -754,11 +794,13 @@ class ConstrainedNLSTest : public ::testing::Test {
             return (a - nls.variables()).squaredNorm() < (b - nls.variables()).squaredNorm();
           });
 
-      ASSERT_EIGEN_NEAR(*min_it, nls.variables(), 5.0e-5) << fmt::format(
-          "Initial guess: {}\nSummary:\n{}\n",
-          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
+      ASSERT_EIGEN_NEAR(*min_it, nls.variables(), 5.0e-5)
+          << fmt::format("Initial guess: {}\nSummary:\n{}\n",
+                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
+                         outputs.ToString(true));
 
-      ASSERT_EQ(logger.GetCount(StatCounters::NUM_FAILED_LINE_SEARCHES), 0) << logger.GetString();
+      ASSERT_EQ(0, counters.back().at(StatCounterName::NUM_FAILED_LINE_SEARCHES))
+          << outputs.ToString(true);
     }
     SummarizeCounts("Sphere With Nonlinear Equalities", counters);
   }
@@ -853,29 +895,18 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     std::vector<StatCounters> counters;
     for (const auto& guess : initial_guesses) {
-      Logger logger{};
-      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-      nls.SetLoggingCallback(
-          [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
-            logger.NonlinearSolverCallback(solver, info);
-            chain->Update(solver.variables());
-            logger.stream() << fmt::format(
-                "  Effector: {}\n", fmt::streamed(chain->translation().head(2).transpose().format(
-                                        test_utils::kNumPyMatrixFmt)));
-            return true;
-          });
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.push_back(logger.counters());
+      counters.emplace_back(outputs);
 
       // check that we reached the desired position
       const VectorXd& angles_out = nls.variables();
       chain->Update(angles_out);
-      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->translation().head(2), 5.0e-5) << fmt::format(
-          "Termination: {}\nInitial guess: {}\nSummary:\n{}\n",
-          fmt::streamed(outputs.termination_state),
-          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)), logger.GetString());
+      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->translation().head(2), 5.0e-5)
+          << fmt::format("Termination: {}\nInitial guess: {}\nSummary:\n{}\n",
+                         fmt::streamed(outputs.termination_state),
+                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
+                         outputs.ToString(true));
     }
     SummarizeCounts("Only Equality Constrained (NLS)", counters);
 
@@ -894,29 +925,11 @@ class ConstrainedNLSTest : public ::testing::Test {
     // Need multiple iterations on the QP now.
     p.max_qp_iterations = 10;
 
-    nls.SetLoggingCallback(nullptr);
-    nls.SetQPLoggingCallback(nullptr);
-
     counters.clear();
     for (const auto& guess : initial_guesses) {
-      Logger logger{};
-      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-      nls.SetLoggingCallback(
-          [&](const ConstrainedNonlinearLeastSquares& solver, const NLSLogInfo& info) {
-            logger.NonlinearSolverCallback(solver, info);
-        // TODO: Get `dx` values from elsewhere, it's strange to access them directly in this
-        // callback.
-#if 0
-            logger.stream() << fmt::format(
-                "    dx = {}\n",
-                fmt::streamed(info.dx.transpose().format(test_utils::kNumPyMatrixFmt)));
-#endif
-            return true;
-          });
-
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.push_back(logger.counters());
+      counters.emplace_back(outputs);
 
       // check that we reached the desired position
       const VectorXd& angles_out = nls.variables();
@@ -925,9 +938,10 @@ class ConstrainedNLSTest : public ::testing::Test {
           << fmt::format("Termination: {}\nInitial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(outputs.termination_state),
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
-                         logger.GetString());
+                         outputs.ToString(true));
 
-      ASSERT_LT(logger.GetCount(StatCounters::NUM_LINE_SEARCH_STEPS), 100) << logger.GetString();
+      ASSERT_LT(counters.back().at(StatCounterName::NUM_LINE_SEARCH_STEPS), 100)
+          << outputs.ToString(true);
     }
     SummarizeCounts("Inequality constrained (NLS)", counters);
   }
@@ -1084,27 +1098,10 @@ class ConstrainedNLSTest : public ::testing::Test {
     // solve it
     std::vector<StatCounters> counters{};
     for (const auto& guess : guesses) {
-      Logger logger{};
-      nls.SetQPLoggingCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-      nls.SetLoggingCallback([&](const ConstrainedNonlinearLeastSquares& solver,
-                                 const NLSLogInfo& info) {
-        logger.NonlinearSolverCallback(solver, info);
-        const auto& vars = solver.variables();
-        chain_rear->Update(vars.head<3>());
-        chain_front->Update(Vector3d{vars[0], vars[3], vars[4]});
-        logger.stream() << fmt::format(
-            "  Rear: {}\n", fmt::streamed(chain_rear->translation().head(2).transpose().format(
-                                test_utils::kNumPyMatrixFmt)));
-        logger.stream() << fmt::format(
-            "  Front: {}\n", fmt::streamed(chain_front->translation().head(2).transpose().format(
-                                 test_utils::kNumPyMatrixFmt)));
-        return true;
-      });
-
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
       ASSERT_EQ(outputs.termination_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL)
-          << logger.GetString();
-      counters.push_back(logger.counters());
+          << outputs.ToString(true);
+      counters.emplace_back(outputs);
 
       // check costs
       for (const ResidualBase::unique_ptr& eq : problem.equality_constraints) {
@@ -1115,7 +1112,8 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
 
       // No strong reason for 30, just place a max to track performance here.
-      ASSERT_LT(logger.GetCount(StatCounters::NUM_LINE_SEARCH_STEPS), 36) << logger.GetString();
+      ASSERT_LT(counters.back().at(StatCounterName::NUM_LINE_SEARCH_STEPS), 36)
+          << outputs.ToString(true);
     }
     SummarizeCounts("Dual Actuator Balancing", counters);
   }

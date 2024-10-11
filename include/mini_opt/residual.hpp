@@ -1,9 +1,11 @@
 // Copyright 2021 Gareth Cross
 #pragma once
-#include <Eigen/Core>
 #include <array>
 #include <memory>
 #include <vector>
+
+#include <fmt/ostream.h>
+#include <Eigen/Core>
 
 #include "mini_opt/assertions.hpp"
 

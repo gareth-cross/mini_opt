@@ -1,6 +1,8 @@
 // Copyright 2021 Gareth Cross
 #pragma once
+#include <algorithm>
 #include <limits>
+#include <optional>
 #include <ostream>
 #include <vector>
 
@@ -69,32 +71,47 @@ struct KKTError {
   double r_primal_ineq{0};  // Primal inequality constraint: A_i*x + b_i - s
 
   // Max of all elements.
-  double Max() const;
+  constexpr double Max() const noexcept {
+    return std::max<double>({r_dual, r_comp, r_primal_eq, r_primal_ineq});
+  }
+};
+
+// Represents the state of the QP at a given iteration.
+struct QPInteriorPointIteration {
+  KKTError kkt_initial{};
+  KKTError kkt_final{};
+  IPIterationOutputs ip_outputs{};
+
+  constexpr QPInteriorPointIteration(KKTError kkt_initial, KKTError kkt_final,
+                                     IPIterationOutputs ip_outputs) noexcept
+      : kkt_initial(kkt_initial), kkt_final(kkt_final), ip_outputs(ip_outputs) {}
+
+  // Create a string summary of the iteration.
+  std::string ToString() const;
 };
 
 // List of possible termination criteria.
-enum class QPTerminationState {
+enum class QPInteriorPointTerminationState {
   // Achieved numerical threshold `termination_kkt_tol`.
   SATISFIED_KKT_TOL = 0,
   // Hit max number of iterations.
   MAX_ITERATIONS,
-  // Null-space solver was employed.
-  NULL_SPACE_SOLVER,
 };
 
 // ostream for termination states
-std::ostream& operator<<(std::ostream& stream, QPTerminationState state);
+std::ostream& operator<<(std::ostream& stream, QPInteriorPointTerminationState state);
 
 // Results of QPInteriorPointSolver::Solve.
-struct QPSolverOutputs {
+struct QPInteriorPointSolverOutputs {
   // Termination state of the solver.
-  QPTerminationState termination_state;
+  QPInteriorPointTerminationState termination_state;
 
-  // Number of iterations executed before hitting the termination state.
-  int num_iterations;
+  // Iterations executed before hitting the termination state.
+  std::vector<QPInteriorPointIteration> iterations;
 
-  constexpr QPSolverOutputs(QPTerminationState state, int iters) noexcept
-      : termination_state(state), num_iterations(iters) {}
+  QPInteriorPointSolverOutputs(QPInteriorPointTerminationState state,
+                               std::vector<QPInteriorPointIteration> iterations) noexcept
+      : termination_state(state), iterations(std::move(iterations)) {}
 };
 
 // Different methods we can execute the linear search in the nonlinear LS solver.
@@ -158,7 +175,7 @@ struct LineSearchStep {
   // Cost function value at that step.
   Errors errors;
 
-  constexpr LineSearchStep(double a, Errors e) noexcept : alpha(a), errors(e) {}
+  constexpr LineSearchStep(double alpha, Errors errors) noexcept : alpha(alpha), errors(errors) {}
 };
 
 // Result of SelectStepSize
@@ -192,18 +209,6 @@ enum class NLSTerminationState {
   USER_CALLBACK,
 };
 
-// Outputs from NLS Solve() method.
-struct NLSSolverOutputs {
-  NLSTerminationState termination_state;
-  int num_iterations;
-  int num_qp_iterations;
-
-  // Construct.
-  constexpr NLSSolverOutputs(NLSTerminationState term_state, int num_iters,
-                             int num_qp_iters) noexcept
-      : termination_state(term_state), num_iterations(num_iters), num_qp_iterations(num_qp_iters) {}
-};
-
 // ostream for termination states
 std::ostream& operator<<(std::ostream& stream, NLSTerminationState state);
 
@@ -227,42 +232,88 @@ struct QPLagrangeMultipliers {
   double l2;
 };
 
-// Details for the log, the current state of the non-linear optimizer.
-struct NLSLogInfo {
-  NLSLogInfo(int iteration, OptimizerState optimizer_state, double lambda, Errors errors_initial,
-             QPSolverOutputs qp, QPEigenvalues qp_eigenvalues,
-             DirectionalDerivatives directional_derivatives, double penalty,
-             StepSizeSelectionResult step_result, const std::vector<LineSearchStep>& steps,
-             NLSTerminationState termination_state)
+// The current state of the non-linear optimizer. We generate one of these at every iteration.s
+struct NLSIteration {
+  NLSIteration(int iteration, OptimizerState optimizer_state, double lambda, Errors errors_initial,
+               std::optional<QPInteriorPointSolverOutputs> qp_outputs,
+               std::optional<QPEigenvalues> qp_eigenvalues,
+               DirectionalDerivatives directional_derivatives, double penalty,
+               StepSizeSelectionResult step_result, std::vector<LineSearchStep> line_search_steps,
+               NLSTerminationState termination_state)
       : iteration(iteration),
         optimizer_state(optimizer_state),
         lambda(lambda),
         errors_initial(errors_initial),
-        qp_term_state(qp),
+        qp_outputs(std::move(qp_outputs)),
         qp_eigenvalues(qp_eigenvalues),
         directional_derivatives(directional_derivatives),
         penalty(penalty),
         step_result(step_result),
-        steps(steps),
+        line_search_steps(std::move(line_search_steps)),
         termination_state(termination_state) {}
 
+  // Counter of optimization iteration.
   int iteration;
+
+  // Whether or not we are trying to recover progress using LM.
   OptimizerState optimizer_state;
+
+  // Current lambda value used by LM trust-region method.
   double lambda;
+
+  // Errors at the start of this iteration (prior to computing an update).
   Errors errors_initial;
-  QPSolverOutputs qp_term_state;
-  QPEigenvalues qp_eigenvalues;
+
+  // Optional: Internal stats from the interior point solver, when it is used.
+  std::optional<QPInteriorPointSolverOutputs> qp_outputs;
+
+  // Optional: Eigenvalues of the approximated hessian, when `log_qp_eigenvalues` is true.
+  std::optional<QPEigenvalues> qp_eigenvalues;
+
+  // Directional derivatives of the nonlinear costs.
   DirectionalDerivatives directional_derivatives;
+
+  // Current penalty `μ` on the equality constraints: f(x) + μ * c(x)
   double penalty;
+
+  // Did we succeed in computing a step size that reduces our cost function?
   StepSizeSelectionResult step_result;
-  const std::vector<LineSearchStep>& steps;
+
+  // Log of all steps we tried while searching along the descent direction.
+  std::vector<LineSearchStep> line_search_steps;
+
+  // Describe if we have hit the termination state on this iteration, and why.
   NLSTerminationState termination_state;
+
+  // Convert to a string representation.
+  std::string ToString(bool use_color = false, bool include_qp = false) const;
+};
+
+// Outputs from NLS Solve() method.
+struct NLSSolverOutputs {
+  NLSTerminationState termination_state;
+  std::vector<NLSIteration> iterations;
+
+  NLSSolverOutputs(NLSTerminationState term_state, std::vector<NLSIteration> iterations) noexcept
+      : termination_state(term_state), iterations(std::move(iterations)) {}
+
+  // Number of QP iterations over all iterations of the nonlinear optimization.
+  std::size_t NumQPIterations() const noexcept;
+
+  // Number of line-search steps over all iterations of the optimization.
+  std::size_t NumLineSearchSteps() const noexcept;
+
+  // Number of line-search steps that failed to reduce the cost.
+  std::size_t NumFailedLineSearches() const noexcept;
+
+  // Convert to string.
+  std::string ToString(bool use_color = false, bool include_qp = false) const;
 };
 
 }  // namespace mini_opt
 
 template <>
-struct fmt::formatter<mini_opt::QPTerminationState> : fmt::ostream_formatter {};
+struct fmt::formatter<mini_opt::QPInteriorPointTerminationState> : fmt::ostream_formatter {};
 
 template <>
 struct fmt::formatter<mini_opt::InitialGuessMethod> : fmt::ostream_formatter {};

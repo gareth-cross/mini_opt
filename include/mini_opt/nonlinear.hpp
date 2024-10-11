@@ -120,15 +120,14 @@ struct ConstrainedNonlinearLeastSquares {
 
     // Minimum lambda value.
     double min_lambda{0.};
+
+    // If true, compute and log summary stats of the eigenvalues from the QP hessian `G`.
+    bool log_qp_eigenvalues{false};
   };
 
   // Signature of custom retraction operator.
   using Retraction =
       std::function<void(Eigen::VectorXd& x, const ConstVectorBlock& dx, const double alpha)>;
-
-  // Signature of custom logger.
-  using LoggingCallback =
-      std::function<bool(const ConstrainedNonlinearLeastSquares& self, const NLSLogInfo& info)>;
 
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* problem,
@@ -148,22 +147,6 @@ struct ConstrainedNonlinearLeastSquares {
    */
   NLSSolverOutputs Solve(const Params& params, const Eigen::VectorXd& variables);
 
-  // Set the callback which will be used for the QP solver.
-  template <typename T>
-  void SetQPLoggingCallback(T&& cb) {
-    // TODO: Get rid of the logging callback altogether. For now I maintain this path for existing
-    // unit tests.
-    if (QPInteriorPointSolver* ip_solver = std::get_if<QPInteriorPointSolver>(&solver_);
-        ip_solver != nullptr)
-      ip_solver->SetLoggerCallback(std::forward<T>(cb));
-  }
-
-  // Set the callback that will be used for the nonlinear solver.
-  template <typename T>
-  void SetLoggingCallback(T&& cb) {
-    logging_callback_ = std::forward<T>(cb);
-  }
-
   // Get the current linearization point.
   constexpr const Eigen::VectorXd& variables() const noexcept { return variables_; }
 
@@ -179,8 +162,8 @@ struct ConstrainedNonlinearLeastSquares {
                                    const Problem& problem, QP* qp);
 
   // Solve the QP, and update the step direction `dx_`.
-  std::tuple<QPSolverOutputs, std::optional<QPLagrangeMultipliers>> ComputeStepDirection(
-      const Params& params);
+  std::tuple<std::optional<QPInteriorPointSolverOutputs>, std::optional<QPLagrangeMultipliers>>
+  ComputeStepDirection(const Params& params);
 
   // Based on the outcome of the step selection, update lambda and check if
   // we should exit. Returns NONE if no exit is required.
@@ -229,7 +212,7 @@ struct ConstrainedNonlinearLeastSquares {
       const std::vector<ResidualBase::unique_ptr>& equality_constraints, QP* qp,
       Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver, Eigen::VectorXd* dx_out);
 
-  const Problem* const p_;
+  const Problem* p_;
 
   // Custom retraction operator, optional.
   Retraction custom_retraction_;
@@ -253,9 +236,6 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Current state of the optimization
   OptimizerState state_{OptimizerState::NOMINAL};
-
-  // Logging callback.
-  LoggingCallback logging_callback_{};
 
   friend class ConstrainedNLSTest;
 };
