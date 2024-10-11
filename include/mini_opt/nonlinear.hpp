@@ -126,8 +126,7 @@ struct ConstrainedNonlinearLeastSquares {
   };
 
   // Signature of custom retraction operator.
-  using Retraction =
-      std::function<void(Eigen::VectorXd& x, const ConstVectorBlock& dx, const double alpha)>;
+  using Retraction = std::function<void(Eigen::VectorXd& x, ConstVectorBlock dx, double alpha)>;
 
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* problem,
@@ -152,6 +151,12 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Evaluate the non-linear error.
   Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars);
+
+  // The user exit callback may return `false` to cause the optimization to terminate early.
+  template <typename T>
+  void SetUserExitCallback(T&& cb) {
+    user_exit_callback_ = std::forward<T>(cb);
+  }
 
  private:
   // Update candidate_vars w/ a step size of alpha.
@@ -236,6 +241,9 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Current state of the optimization
   OptimizerState state_{OptimizerState::NOMINAL};
+
+  // A user-specified callback that can opt to terminate the optimization early.
+  std::function<bool(const NLSIteration&)> user_exit_callback_{};
 
   friend class ConstrainedNLSTest;
 };

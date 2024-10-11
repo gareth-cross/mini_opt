@@ -140,15 +140,13 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
                       maybe_exit};
     iterations.push_back(std::move(info));
 
-    // TODO: Add this functionality back:
-#if 0
-    if (logging_callback_) {
-      const bool should_proceed = logging_callback_(*this, info);
+    // If the user callback returns false, we will terminate early.
+    if (user_exit_callback_) {
+      const bool should_proceed = user_exit_callback_(iterations.back());
       if (maybe_exit == NLSTerminationState::NONE && !should_proceed) {
-        maybe_exit = NLSTerminationState::USER_CALLBACK;
+        return {NLSTerminationState::USER_CALLBACK, std::move(iterations)};
       }
     }
-#endif
 
     if (maybe_exit != NLSTerminationState::NONE) {
       return {maybe_exit, std::move(iterations)};
