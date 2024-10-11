@@ -6,7 +6,6 @@
 #include <string_view>
 
 #include <fmt/core.h>
-#include <fmt/ostream.h>
 
 namespace assert {
 namespace constants {

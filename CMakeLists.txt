@@ -22,12 +22,10 @@ set(LIBRARY_NAME ${PROJECT_NAME})
 add_library(
   ${LIBRARY_NAME} STATIC
   include/mini_opt/assertions.hpp
-  include/mini_opt/logging.hpp
   include/mini_opt/nonlinear.hpp
   include/mini_opt/qp.hpp
   include/mini_opt/residual.hpp
   include/mini_opt/structs.hpp
-  source/logging.cc
   source/nonlinear.cc
   source/qp.cc
   source/residual.cc

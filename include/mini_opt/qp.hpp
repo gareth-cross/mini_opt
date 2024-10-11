@@ -118,6 +118,9 @@ struct QP {
 
   // Diagonal inequality constraints.
   std::vector<LinearInequalityConstraint> constraints;
+
+  // Compute and return the `QPEigenvalues` struct, which summarizes eigenvalues of `G`.
+  QPEigenvalues ComputeEigenvalueStats() const;
 };
 
 /*
@@ -178,13 +181,7 @@ struct QPInteriorPointSolver {
    *
    * Returns termination state and number of iterations executed.
    */
-  QPSolverOutputs Solve(const Params& params);
-
-  // Set the logger callback to a function pointer, lambda, etc.
-  template <typename T>
-  void SetLoggerCallback(T&& cb) {
-    logger_callback_ = std::forward<T>(cb);
-  }
+  QPInteriorPointSolverOutputs Solve(const Params& params);
 
   // Const block accessors for state.
   ConstVectorBlock x_block() const;
@@ -203,11 +200,6 @@ struct QPInteriorPointSolver {
 
   // Set variables.
   void SetVariables(const Eigen::VectorXd& v);
-
-  // Type for a callback that we call after each iteration, used for logging stats, tests.
-  using LoggingCallback =
-      std::function<void(const QPInteriorPointSolver& solver, const KKTError& kkt_prev,
-                         const KKTError& kkt_after, const IPIterationOutputs& iter_outputs)>;
 
   // Access the problem itself. Asserts that `p_` is not null.
   const QP& problem() const;
@@ -237,9 +229,6 @@ struct QPInteriorPointSolver {
   // Solution vector at each iteration
   Eigen::VectorXd delta_;
   Eigen::VectorXd delta_affine_;
-
-  // Optional iteration logger.
-  LoggingCallback logger_callback_;
 
   // Return true if there are any inequality constraints.
   constexpr bool HasInequalityConstraints() const noexcept { return dims_.M > 0; }
@@ -315,7 +304,7 @@ class QPNullSpaceSolver {
   void Setup(const QP* problem);
 
   // Solve the QP using the null-space method.
-  QPSolverOutputs Solve();
+  void Solve();
 
   // Access all variables.
   constexpr const Eigen::VectorXd& variables() const noexcept { return x_; }
