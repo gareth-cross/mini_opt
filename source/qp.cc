@@ -677,8 +677,8 @@ void QPNullSpaceSolver::Solve() {
   F_ASSERT_GT(p_->A_eq.rows(), 0, "Problem must have at least one equality constraint");
   F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows());
 
-  const int num_equality_constraints = p_->A_eq.rows();
-  const int num_params = p_->A_eq.cols();
+  const int num_equality_constraints = static_cast<int>(p_->A_eq.rows());
+  const int num_params = static_cast<int>(p_->A_eq.cols());
 
   // Compute [Q R] factorization of A_eq^T
   const auto QR = p_->A_eq.transpose().colPivHouseholderQr();
@@ -690,7 +690,7 @@ void QPNullSpaceSolver::Solve() {
 
   // The left and right parts of Q (Q2 is the null space basis of A_eq)
   // [Q1 Q2] * R = A_eq^T
-  const int rank = QR.rank();
+  const int rank = static_cast<int>(QR.rank());
   const auto Q1 = Q_.leftCols(rank);
   const auto Q2 = Q_.rightCols(Q_.cols() - rank);
 
