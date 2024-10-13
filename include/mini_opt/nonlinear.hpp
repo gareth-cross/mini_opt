@@ -92,7 +92,7 @@ struct ConstrainedNonlinearLeastSquares {
     // Value by which to decrease alpha for the backtracking line search.
     double armijo_search_tau{0.8};
 
-    // Initial value of the equality constraint penalty.
+    // Initial value of the equality constraint penalty, µ.
     double equality_penalty_initial{1.0};
 
     // Scale factor when increasing the equality penalty.
