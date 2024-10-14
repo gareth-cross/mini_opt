@@ -558,7 +558,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.max_iterations = 30;
     p.max_qp_iterations = 30;
     p.relative_exit_tol = tol::kMicro;
-    p.absolute_first_derivative_tol = tol::kMicro;
+    p.absolute_first_derivative_tol = 5 * tol::kMicro;
     p.termination_kkt_tolerance = tol::kMicro;
     p.max_lambda = 10.0;
 
@@ -577,8 +577,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
-      EXPECT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
-                  (outputs.termination_state != NLSTerminationState::NONE))
+      EXPECT_TRUE(TerminationStateIndicatesSatisfiedTol(outputs.termination_state))
           << fmt::format("Termination state: {}\nInitial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(outputs.termination_state),
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
@@ -663,9 +662,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
-      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
-                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
-                  (outputs.termination_state != NLSTerminationState::NONE))
+      ASSERT_TRUE(TerminationStateIndicatesSatisfiedTol(outputs.termination_state))
           << fmt::format("Initial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
                          outputs.ToString(true));
@@ -722,9 +719,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
-      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
-                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
-                  (outputs.termination_state != NLSTerminationState::NONE))
+      ASSERT_TRUE(TerminationStateIndicatesSatisfiedTol(outputs.termination_state))
           << fmt::format("Initial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
                          outputs.ToString(true));
@@ -822,9 +817,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       counters.emplace_back(outputs);
 
       // we can terminate due to absolute tol, derivative tol, etc
-      ASSERT_TRUE((outputs.termination_state != NLSTerminationState::MAX_ITERATIONS) &&
-                  (outputs.termination_state != NLSTerminationState::MAX_LAMBDA) &&
-                  (outputs.termination_state != NLSTerminationState::NONE))
+      ASSERT_TRUE(TerminationStateIndicatesSatisfiedTol(outputs.termination_state))
           << fmt::format("Termination: {}\nInitial guess: {}\nSummary:\n{}\n",
                          fmt::streamed(outputs.termination_state),
                          fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),

@@ -121,7 +121,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
 
     // Check if we should terminate (this call also updates variables_ on success).
     const double old_lambda = lambda;
-    const NLSTerminationState maybe_exit =
+    const std::optional<NLSTerminationState> maybe_exit =
         UpdateLambdaAndCheckExitConditions(params, step_result, errors_pre, penalty, lambda);
 
     NLSIteration info{
@@ -134,20 +134,19 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
         directional_derivative,
         penalty,
         step_result,
-        std::move(steps_),
-        maybe_exit};
+        std::move(steps_)};
     iterations.push_back(std::move(info));
 
     // If the user callback returns false, we will terminate early.
     if (user_exit_callback_) {
       const bool should_proceed = user_exit_callback_(iterations.back());
-      if (maybe_exit == NLSTerminationState::NONE && !should_proceed) {
+      if (!maybe_exit.has_value() && !should_proceed) {
         return {NLSTerminationState::USER_CALLBACK, std::move(iterations)};
       }
     }
 
-    if (maybe_exit != NLSTerminationState::NONE) {
-      return {maybe_exit, std::move(iterations)};
+    if (maybe_exit.has_value()) {
+      return {*maybe_exit, std::move(iterations)};
     }
   }
   return {NLSTerminationState::MAX_ITERATIONS, std::move(iterations)};
@@ -287,7 +286,8 @@ Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::Ve
 }
 
 // TODO(gareth): Investigate an approach like algorithm 11.5?
-NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitConditions(
+std::optional<NLSTerminationState>
+ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitConditions(
     const Params& params, const StepSizeSelectionResult step_result, const Errors& initial_errors,
     const double penalty, double& lambda) {
   if (step_result == StepSizeSelectionResult::SUCCESS) {
@@ -332,7 +332,7 @@ NLSTerminationState ConstrainedNonlinearLeastSquares::UpdateLambdaAndCheckExitCo
     }
   }
   // continue
-  return NLSTerminationState::NONE;
+  return std::nullopt;
 }
 
 /*
@@ -382,7 +382,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
 
     // Compute errors, and double check that they were numerically valid.
     const Errors errors_step = EvaluateNonlinearErrors(candidate_vars_);
-    steps_.emplace_back(alpha, errors_step);
+    steps_.push_back(LineSearchStep{alpha, errors_step});
 
     if (errors_step.ContainsInvalidValues()) {
       return StepSizeSelectionResult::FAILURE_NON_FINITE_COST;

@@ -94,9 +94,6 @@ std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult res
 
 std::ostream& operator<<(std::ostream& stream, const NLSTerminationState state) {
   switch (state) {
-    case NLSTerminationState::NONE:
-      stream << "NONE";
-      break;
     case NLSTerminationState::MAX_ITERATIONS:
       stream << "MAX_ITERATIONS";
       break;
@@ -150,7 +147,7 @@ std::string QPInteriorPointIteration::ToString() const {
   return result;
 }
 
-enum class ColorCode : int { GREEN = 112, RED = 160, NONE = -1 };
+enum class ColorCode : int { GREEN = 112, RED = 160, ORANGE = 202, NONE = -1 };
 
 struct ColorFmt {
   constexpr ColorFmt(ColorCode code, bool enabled) noexcept : code(code), enabled(enabled) {}
@@ -172,13 +169,6 @@ std::string NLSIteration::ToString(const bool use_color, const bool include_qp) 
                    "  min, max, |min| eig = {:.16e}, {:.16e}, {:.16e}\n", qp_eigenvalues->min,
                    qp_eigenvalues->max, qp_eigenvalues->abs_min);
   }
-  fmt::format_to(std::back_inserter(result), "  termination = {}{}{}\n",
-                 ColorFmt(termination_state != NLSTerminationState::MAX_LAMBDA &&
-                                  termination_state != NLSTerminationState::MAX_ITERATIONS
-                              ? ColorCode::GREEN
-                              : ColorCode::RED,
-                          use_color),
-                 termination_state, ColorFmt(ColorCode::NONE, use_color));
   fmt::format_to(std::back_inserter(result), "  penalty = {:.16f}\n", penalty);
   if (const QPInteriorPointSolverOutputs* ip =
           std::get_if<QPInteriorPointSolverOutputs>(&qp_outputs);
@@ -245,11 +235,35 @@ std::size_t NLSSolverOutputs::NumFailedLineSearches() const noexcept {
       });
 }
 
+inline ColorCode ColorFromTerminationState(const NLSTerminationState state) {
+  switch (state) {
+    case NLSTerminationState::SATISFIED_ABSOLUTE_TOL:
+    case NLSTerminationState::SATISFIED_RELATIVE_TOL:
+    case NLSTerminationState::SATISFIED_FIRST_ORDER_TOL: {
+      return ColorCode::GREEN;
+    }
+    case NLSTerminationState::MAX_LAMBDA:
+    case NLSTerminationState::MAX_ITERATIONS:
+    case NLSTerminationState::USER_CALLBACK: {
+      return ColorCode::ORANGE;
+    }
+    case NLSTerminationState::QP_INDEFINITE: {
+      return ColorCode::RED;
+    }
+    default:
+      break;
+  }
+  return ColorCode::NONE;
+}
+
 std::string NLSSolverOutputs::ToString(bool use_color, bool include_qp) const {
   std::string result;
   for (const auto& iter : iterations) {
     result += iter.ToString(use_color, include_qp);
   }
+  fmt::format_to(std::back_inserter(result), "  termination = {}{}{}\n",
+                 ColorFmt(ColorFromTerminationState(termination_state), use_color),
+                 termination_state, ColorFmt(ColorCode::NONE, use_color));
   return result;
 }
 

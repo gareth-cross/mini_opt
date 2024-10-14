@@ -83,6 +83,8 @@ struct QPInteriorPointIteration {
   KKTError kkt_final{};
   IPIterationOutputs ip_outputs{};
 
+  QPInteriorPointIteration() noexcept = default;
+
   constexpr QPInteriorPointIteration(KKTError kkt_initial, KKTError kkt_final,
                                      IPIterationOutputs ip_outputs) noexcept
       : kkt_initial(kkt_initial), kkt_final(kkt_final), ip_outputs(ip_outputs) {}
@@ -108,8 +110,6 @@ struct QPLagrangeMultipliers {
   double min;
   // The L-infinity (largest absolute value).
   double l_infinity;
-  // The L2 norm of all the lagrange multipliers.
-  double l2;
 };
 
 // Results of QPInteriorPointSolver::Solve.
@@ -122,6 +122,8 @@ struct QPInteriorPointSolverOutputs {
 
   // Lagrange multipliers on equality constraints, if there are any.
   std::optional<QPLagrangeMultipliers> lagrange_multipliers;
+
+  QPInteriorPointSolverOutputs() noexcept = default;
 
   QPInteriorPointSolverOutputs(QPInteriorPointTerminationState state,
                                std::vector<QPInteriorPointIteration> iterations,
@@ -207,8 +209,6 @@ struct LineSearchStep {
 
   // Cost function value at that step.
   Errors errors;
-
-  constexpr LineSearchStep(double alpha, Errors errors) noexcept : alpha(alpha), errors(errors) {}
 };
 
 // Result of SelectStepSize
@@ -231,7 +231,6 @@ std::ostream& operator<<(std::ostream& stream, StepSizeSelectionResult result);
 
 // Exit condition of the non-linear optimization.
 enum class NLSTerminationState {
-  NONE = -1,
   // Hit max number of iterations.
   MAX_ITERATIONS,
   // Satisfied absolute tolerance on the cost function.
@@ -247,6 +246,19 @@ enum class NLSTerminationState {
   // User specified callback indicated exit.
   USER_CALLBACK,
 };
+
+inline bool TerminationStateIndicatesSatisfiedTol(const NLSTerminationState state) {
+  switch (state) {
+    case NLSTerminationState::SATISFIED_ABSOLUTE_TOL:
+    case NLSTerminationState::SATISFIED_RELATIVE_TOL:
+    case NLSTerminationState::SATISFIED_FIRST_ORDER_TOL: {
+      return true;
+    }
+    default:
+      break;
+  }
+  return false;
+}
 
 // ostream for termination states
 std::ostream& operator<<(std::ostream& stream, NLSTerminationState state);
@@ -267,8 +279,7 @@ struct NLSIteration {
                std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs> qp_outputs,
                std::optional<QPEigenvalues> qp_eigenvalues,
                DirectionalDerivatives directional_derivatives, double penalty,
-               StepSizeSelectionResult step_result, std::vector<LineSearchStep> line_search_steps,
-               NLSTerminationState termination_state)
+               StepSizeSelectionResult step_result, std::vector<LineSearchStep> line_search_steps)
       : iteration(iteration),
         optimizer_state(optimizer_state),
         lambda(lambda),
@@ -278,8 +289,7 @@ struct NLSIteration {
         directional_derivatives(directional_derivatives),
         penalty(penalty),
         step_result(step_result),
-        line_search_steps(std::move(line_search_steps)),
-        termination_state(termination_state) {}
+        line_search_steps(std::move(line_search_steps)) {}
 
   // Counter of optimization iteration.
   int iteration;
@@ -310,9 +320,6 @@ struct NLSIteration {
 
   // Log of all steps we tried while searching along the descent direction.
   std::vector<LineSearchStep> line_search_steps;
-
-  // Describe if we have hit the termination state on this iteration, and why.
-  NLSTerminationState termination_state;
 
   // Convert to a string representation.
   std::string ToString(bool use_color = false, bool include_qp = false) const;
