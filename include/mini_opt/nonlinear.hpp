@@ -167,8 +167,16 @@ struct ConstrainedNonlinearLeastSquares {
                                    const Problem& problem, QP* qp);
 
   // Solve the QP, and update the step direction `dx_`.
-  std::tuple<std::optional<QPInteriorPointSolverOutputs>, std::optional<QPLagrangeMultipliers>>
-  ComputeStepDirection(const Params& params);
+  std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs> ComputeStepDirection(
+      const Params& params);
+
+  // Extract lagrange multipliers from the QP solver outputs, if they were used.
+  static std::optional<QPLagrangeMultipliers> MaybeGetLagrangeMultipliers(
+      const std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs>& output);
+
+  // True if the QP was indefinite (in which case we will terminate optimization).
+  static bool QPWasIndefinite(
+      const std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs>& output);
 
   // Based on the outcome of the step selection, update lambda and check if
   // we should exit. Returns NONE if no exit is required.
@@ -186,9 +194,9 @@ struct ConstrainedNonlinearLeastSquares {
                                          double backtrack_search_tau);
 
   // Repeatedly approximate the cost function as a polynomial, and find the minimum.
-  double ComputeAlphaPolynomialApproximation(int iteration, double alpha, const Errors& errors_pre,
-                                             const DirectionalDerivatives& derivatives,
-                                             double penalty) const;
+  std::optional<double> ComputeAlphaPolynomialApproximation(
+      int iteration, const Errors& errors_pre, const DirectionalDerivatives& derivatives,
+      double penalty) const;
 
   // Compute first derivative of the QP cost function.
   static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx);
@@ -200,8 +208,8 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Solve the quadratic approximation of the cost function for best alpha.
   // Implements equation (3.57/3.58)
-  static double QuadraticApproxMinimum(double phi_0, double phi_prime_0, double alpha_0,
-                                       double phi_alpha_0);
+  static std::optional<double> QuadraticApproxMinimum(double phi_0, double phi_prime_0,
+                                                      double alpha_0, double phi_alpha_0);
 
   // Get the polynomial coefficients c0, c1 from the cubic approximation of the cost.
   // Implements equation after 3.58, returns [a, b]
@@ -209,13 +217,7 @@ struct ConstrainedNonlinearLeastSquares {
                                            double phi_alpha_0, double alpha_1, double phi_alpha_1);
 
   // Get the solution of the cubic approximation.
-  static double CubicApproxMinimum(double phi_prime_0, const Eigen::Vector2d& ab);
-
-  // Compute the second order correction to the equality constraints.
-  static void ComputeSecondOrderCorrection(
-      const Eigen::VectorXd& updated_x,
-      const std::vector<ResidualBase::unique_ptr>& equality_constraints, QP* qp,
-      Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver, Eigen::VectorXd* dx_out);
+  static std::optional<double> CubicApproxMinimum(double phi_prime_0, const Eigen::Vector2d& ab);
 
   const Problem* p_;
 

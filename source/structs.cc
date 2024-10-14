@@ -32,6 +32,18 @@ std::ostream& operator<<(std::ostream& stream, const QPInteriorPointTerminationS
   return stream;
 }
 
+std::ostream& operator<<(std::ostream& stream, QPNullSpaceTerminationState termination) {
+  switch (termination) {
+    case QPNullSpaceTerminationState::SUCCESS:
+      stream << "SUCCESS";
+      break;
+    case QPNullSpaceTerminationState::NOT_POSITIVE_DEFINITE:
+      stream << "NOT_POSITIVE_DEFINITE";
+      break;
+  }
+  return stream;
+}
+
 std::ostream& operator<<(std::ostream& stream, const LineSearchStrategy strategy) {
   switch (strategy) {
     case LineSearchStrategy::ARMIJO_BACKTRACK:
@@ -61,14 +73,20 @@ std::ostream& operator<<(std::ostream& stream, const StepSizeSelectionResult res
     case StepSizeSelectionResult::SUCCESS:
       stream << "SUCCESS";
       break;
-    case StepSizeSelectionResult::FAILURE_MAX_ITERATIONS:
-      stream << "FAILURE_MAX_ITERATIONS";
+    case StepSizeSelectionResult::MAX_ITERATIONS:
+      stream << "MAX_ITERATIONS";
       break;
-    case StepSizeSelectionResult::FAILURE_POSITIVE_DERIVATIVE:
-      stream << "FAILURE_POSITIVE_DERIVATIVE";
+    case StepSizeSelectionResult::POSITIVE_DERIVATIVE:
+      stream << "POSITIVE_DERIVATIVE";
       break;
-    case StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED:
-      stream << "FAILURE_FIRST_ORDER_SATISFIED";
+    case StepSizeSelectionResult::FIRST_ORDER_SATISFIED:
+      stream << "FIRST_ORDER_SATISFIED";
+      break;
+    case StepSizeSelectionResult::FAILURE_NON_FINITE_COST:
+      stream << "FAILURE_NON_FINITE_COST";
+      break;
+    case StepSizeSelectionResult::FAILURE_INVALID_ALPHA:
+      stream << "FAILURE_INVALID_ALPHA";
       break;
   }
   return stream;
@@ -93,6 +111,9 @@ std::ostream& operator<<(std::ostream& stream, const NLSTerminationState state) 
       break;
     case NLSTerminationState::MAX_LAMBDA:
       stream << "MAX_LAMBDA";
+      break;
+    case NLSTerminationState::QP_INDEFINITE:
+      stream << "QP_INDEFINITE";
       break;
     case NLSTerminationState::USER_CALLBACK:
       stream << "USER_CALLBACK";
@@ -159,9 +180,15 @@ std::string NLSIteration::ToString(const bool use_color, const bool include_qp) 
                           use_color),
                  termination_state, ColorFmt(ColorCode::NONE, use_color));
   fmt::format_to(std::back_inserter(result), "  penalty = {:.16f}\n", penalty);
-  if (qp_outputs) {
-    fmt::format_to(std::back_inserter(result), "  QP: {}, {}\n", qp_outputs->termination_state,
-                   qp_outputs->iterations.size());
+  if (const QPInteriorPointSolverOutputs* ip =
+          std::get_if<QPInteriorPointSolverOutputs>(&qp_outputs);
+      ip) {
+    fmt::format_to(std::back_inserter(result), "  QP-IP: {}, {}\n", ip->termination_state,
+                   ip->iterations.size());
+  } else if (const QPNullSpaceTerminationState* ns =
+                 std::get_if<QPNullSpaceTerminationState>(&qp_outputs);
+             ns) {
+    fmt::format_to(std::back_inserter(result), "  QP: {}\n", *ns);
   }
   fmt::format_to(std::back_inserter(result), "  df/dalpha = {}, dc/dalpha = {}\n",
                  directional_derivatives.d_f, directional_derivatives.d_equality);
@@ -178,8 +205,10 @@ std::string NLSIteration::ToString(const bool use_color, const bool include_qp) 
                    step.errors.f, i, step.errors.equality, step.errors.Total(penalty), step.alpha);
     ++i;
   }
-  if (include_qp && qp_outputs) {
-    for (const auto& iter : qp_outputs->iterations) {
+  if (const QPInteriorPointSolverOutputs* ip =
+          std::get_if<QPInteriorPointSolverOutputs>(&qp_outputs);
+      ip && include_qp) {
+    for (const auto& iter : ip->iterations) {
       result += iter.ToString();
     }
   }
@@ -189,9 +218,13 @@ std::string NLSIteration::ToString(const bool use_color, const bool include_qp) 
 std::size_t NLSSolverOutputs::NumQPIterations() const noexcept {
   return std::accumulate(iterations.begin(), iterations.end(), static_cast<std::size_t>(0),
                          [](std::size_t total, const NLSIteration& iteration) {
-                           return total + (iteration.qp_outputs.has_value()
-                                               ? iteration.qp_outputs->iterations.size()
-                                               : 1);
+                           if (const QPInteriorPointSolverOutputs* ip =
+                                   std::get_if<QPInteriorPointSolverOutputs>(&iteration.qp_outputs);
+                               ip != nullptr) {
+                             return total + ip->iterations.size();
+                           } else {
+                             return total + 1;
+                           }
                          });
 }
 
@@ -206,10 +239,9 @@ std::size_t NLSSolverOutputs::NumFailedLineSearches() const noexcept {
   return std::accumulate(
       iterations.begin(), iterations.end(), static_cast<std::size_t>(0),
       [](std::size_t total, const NLSIteration& iteration) {
-        return total +
-               static_cast<std::size_t>(iteration.step_result != StepSizeSelectionResult::SUCCESS &&
-                                        iteration.step_result !=
-                                            StepSizeSelectionResult::FAILURE_FIRST_ORDER_SATISFIED);
+        return total + static_cast<std::size_t>(
+                           iteration.step_result != StepSizeSelectionResult::SUCCESS &&
+                           iteration.step_result != StepSizeSelectionResult::FIRST_ORDER_SATISFIED);
       });
 }
 

@@ -132,7 +132,8 @@ QPInteriorPointSolverOutputs QPInteriorPointSolver::Solve(
     if (kkt_after.Max() < params.termination_kkt_tol &&
         ComputeMu() < params.termination_complementarity_tol) {
       // error is low enough, stop
-      return {QPInteriorPointTerminationState::SATISFIED_KKT_TOL, std::move(iterations)};
+      return {QPInteriorPointTerminationState::SATISFIED_KKT_TOL, std::move(iterations),
+              ComputeLagrangeMultiplierSummary()};
     }
 
     // adjust the barrier parameter
@@ -145,7 +146,8 @@ QPInteriorPointSolverOutputs QPInteriorPointSolver::Solve(
     }
   }
 
-  return {QPInteriorPointTerminationState::MAX_ITERATIONS, std::move(iterations)};
+  return {QPInteriorPointTerminationState::MAX_ITERATIONS, std::move(iterations),
+          ComputeLagrangeMultiplierSummary()};
 }
 
 IPIterationOutputs QPInteriorPointSolver::Iterate(const double mu_input,
@@ -280,11 +282,8 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   const auto z = ConstZBlock(dims_, variables_);
 
   // shouldn't happen due to selection of alpha, but double check
-  const bool any_non_positive_s = (s.array() <= 0.0).any();
-  if (include_inequalities && any_non_positive_s) {
-    throw std::runtime_error(fmt::format("Some slack variables s <= 0: {}",
-                                         fmt::streamed(s.transpose().format(kMatrixFmt))));
-  }
+  F_ASSERT(!include_inequalities || (s.array() > 0.0).all(), "Some slack variables s <= 0: [{}]",
+           fmt::streamed(s.transpose().format(kMatrixFmt)));
 
   // build the left-hand side (we only need lower triangular)
   H_.topLeftCorner(N, N).triangularView<Eigen::Lower>() = p_->G.triangularView<Eigen::Lower>();
@@ -299,6 +298,7 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   }
 
   // factorize, TODO(gareth): preallocate ldlt...
+  // TODO: when this happens, return an enum value indicating failure
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
     throw FailedFactorization(fmt::format(
@@ -536,6 +536,15 @@ double QPInteriorPointSolver::ComputePredictorCorrectorMuAffine(
   return std::max(mu_affine, 0.0);
 }
 
+std::optional<QPLagrangeMultipliers> QPInteriorPointSolver::ComputeLagrangeMultiplierSummary()
+    const {
+  if (const auto y = y_block(); y.rows() > 0) {
+    return QPLagrangeMultipliers{y.minCoeff(), y.lpNorm<Eigen::Infinity>(), y.norm()};
+  } else {
+    return std::nullopt;
+  }
+}
+
 ConstVectorBlock QPInteriorPointSolver::ConstXBlock(const ProblemDims& dims,
                                                     const Eigen::VectorXd& vec) {
   return vec.head(dims.N);
@@ -672,7 +681,7 @@ void QPNullSpaceSolver::Setup(const QP* problem) {
 //
 //  y = (Q2^T * G * Q2)^-1 * -Q2^T * (c + G * u)
 //
-void QPNullSpaceSolver::Solve() {
+QPNullSpaceTerminationState QPNullSpaceSolver::Solve() {
   F_ASSERT(p_);
   F_ASSERT_GT(p_->A_eq.rows(), 0, "Problem must have at least one equality constraint");
   F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows());
@@ -708,8 +717,9 @@ void QPNullSpaceSolver::Solve() {
 
   // Factorize it with cholesky, which is only valid if `G_reduced` is PD.
   const auto llt = G_reduced_.selfadjointView<Eigen::Lower>().llt();
-  F_ASSERT(llt.info() == Eigen::ComputationInfo::Success,
-           "Not PD (TODO: return something here instead of asserting)");
+  if (llt.info() != Eigen::ComputationInfo::Success) {
+    return QPNullSpaceTerminationState::NOT_POSITIVE_DEFINITE;
+  }
 
   // Compute the rhs of:
   // (Q2^T * G * Q2) * y = -Q2^T * (c + G * u)
@@ -721,6 +731,7 @@ void QPNullSpaceSolver::Solve() {
 
   // Construct the final solution:
   x_ = u_ + Q2 * y_;
+  return QPNullSpaceTerminationState::SUCCESS;
 }
 
 }  // namespace mini_opt

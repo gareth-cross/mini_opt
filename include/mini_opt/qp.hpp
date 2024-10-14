@@ -181,7 +181,7 @@ struct QPInteriorPointSolver {
    *
    * Returns termination state and number of iterations executed.
    */
-  QPInteriorPointSolverOutputs Solve(const Params& params);
+  [[nodiscard]] QPInteriorPointSolverOutputs Solve(const Params& params);
 
   // Const block accessors for state.
   ConstVectorBlock x_block() const;
@@ -274,6 +274,9 @@ struct QPInteriorPointSolver {
   // Compute the predictor/corrector `mu_affine`, equation (19.22)
   double ComputePredictorCorrectorMuAffine(double mu, const AlphaValues& alpha_probe) const;
 
+  // Compute summary of the lagrange-multipliers, if we have equality constraints.
+  std::optional<QPLagrangeMultipliers> ComputeLagrangeMultiplierSummary() const;
+
   // Helpers for accessing segments of vectors.
   static ConstVectorBlock ConstXBlock(const ProblemDims& dims, const Eigen::VectorXd& vec);
   static ConstVectorBlock ConstSBlock(const ProblemDims& dims, const Eigen::VectorXd& vec);
@@ -304,7 +307,7 @@ class QPNullSpaceSolver {
   void Setup(const QP* problem);
 
   // Solve the QP using the null-space method.
-  void Solve();
+  [[nodiscard]] QPNullSpaceTerminationState Solve();
 
   // Access all variables.
   constexpr const Eigen::VectorXd& variables() const noexcept { return x_; }

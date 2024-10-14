@@ -4,6 +4,7 @@
 #include <limits>
 #include <optional>
 #include <ostream>
+#include <variant>
 #include <vector>
 
 #include <fmt/ostream.h>
@@ -101,6 +102,16 @@ enum class QPInteriorPointTerminationState {
 // ostream for termination states
 std::ostream& operator<<(std::ostream& stream, QPInteriorPointTerminationState state);
 
+// Summary of the lagrange multipliers.
+struct QPLagrangeMultipliers {
+  // Minimum lagrange multiplier.
+  double min;
+  // The L-infinity (largest absolute value).
+  double l_infinity;
+  // The L2 norm of all the lagrange multipliers.
+  double l2;
+};
+
 // Results of QPInteriorPointSolver::Solve.
 struct QPInteriorPointSolverOutputs {
   // Termination state of the solver.
@@ -109,10 +120,27 @@ struct QPInteriorPointSolverOutputs {
   // Iterations executed before hitting the termination state.
   std::vector<QPInteriorPointIteration> iterations;
 
+  // Lagrange multipliers on equality constraints, if there are any.
+  std::optional<QPLagrangeMultipliers> lagrange_multipliers;
+
   QPInteriorPointSolverOutputs(QPInteriorPointTerminationState state,
-                               std::vector<QPInteriorPointIteration> iterations) noexcept
-      : termination_state(state), iterations(std::move(iterations)) {}
+                               std::vector<QPInteriorPointIteration> iterations,
+                               std::optional<QPLagrangeMultipliers> lagrange_multipliers) noexcept
+      : termination_state(state),
+        iterations(std::move(iterations)),
+        lagrange_multipliers(lagrange_multipliers) {}
 };
+
+// Result of QPNullSpaceSolver::Solve.
+enum class QPNullSpaceTerminationState {
+  // Successfully solved the system.
+  SUCCESS = 0,
+  // The reduced hessian was not positive definite.
+  NOT_POSITIVE_DEFINITE,
+};
+
+// ostream for QPNullSpaceTerminationState
+std::ostream& operator<<(std::ostream& stream, QPNullSpaceTerminationState termination);
 
 // Different methods we can execute the linear search in the nonlinear LS solver.
 enum class LineSearchStrategy {
@@ -148,6 +176,11 @@ struct Errors {
 
   // L-infinity norm
   constexpr double LInfinity() const noexcept { return std::max(f, equality); }
+
+  // Check if either of the values are NaN or Inf.
+  constexpr bool ContainsInvalidValues() const noexcept {
+    return !std::isfinite(f) || !std::isfinite(equality);
+  }
 };
 
 // Derivatives of `Errors`.
@@ -182,12 +215,16 @@ struct LineSearchStep {
 enum class StepSizeSelectionResult {
   // Success, found a valid alpha that decreases cost.
   SUCCESS = 0,
-  // Failure, hit max # of iterations.
-  FAILURE_MAX_ITERATIONS = 1,
-  // Failure, directional derivative of cost is ~= 0 at the current point.
-  FAILURE_FIRST_ORDER_SATISFIED = 2,
-  // Failure, the directional derivative is positive in the direction selected by QP.
-  FAILURE_POSITIVE_DERIVATIVE = 3,
+  // Hit max # of iterations.
+  MAX_ITERATIONS,
+  // Directional derivative of cost is ~= 0 at the current point.
+  FIRST_ORDER_SATISFIED,
+  // The directional derivative is positive in the direction selected by QP.
+  POSITIVE_DERIVATIVE,
+  // Failure, the costs became infinite or NaN.
+  FAILURE_NON_FINITE_COST,
+  // Failure, alpha exited the range (0, 1].
+  FAILURE_INVALID_ALPHA,
 };
 
 std::ostream& operator<<(std::ostream& stream, StepSizeSelectionResult result);
@@ -205,6 +242,8 @@ enum class NLSTerminationState {
   SATISFIED_FIRST_ORDER_TOL,
   // Hit max lambda value while failing to decrease cost.
   MAX_LAMBDA,
+  // The QP approximation was indefinite.
+  QP_INDEFINITE,
   // User specified callback indicated exit.
   USER_CALLBACK,
 };
@@ -222,20 +261,10 @@ struct QPEigenvalues {
   double abs_min;
 };
 
-// Summary of the lagrange multipliers.
-struct QPLagrangeMultipliers {
-  // Minimum lagrange multiplier.
-  double min;
-  // The L-infinity (largest absolute value).
-  double l_infinity;
-  // The L2 norm of all the lagrange multipliers.
-  double l2;
-};
-
 // The current state of the non-linear optimizer. We generate one of these at every iteration.s
 struct NLSIteration {
   NLSIteration(int iteration, OptimizerState optimizer_state, double lambda, Errors errors_initial,
-               std::optional<QPInteriorPointSolverOutputs> qp_outputs,
+               std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs> qp_outputs,
                std::optional<QPEigenvalues> qp_eigenvalues,
                DirectionalDerivatives directional_derivatives, double penalty,
                StepSizeSelectionResult step_result, std::vector<LineSearchStep> line_search_steps,
@@ -264,8 +293,8 @@ struct NLSIteration {
   // Errors at the start of this iteration (prior to computing an update).
   Errors errors_initial;
 
-  // Optional: Internal stats from the interior point solver, when it is used.
-  std::optional<QPInteriorPointSolverOutputs> qp_outputs;
+  // Internal stats from the QP solver.
+  std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs> qp_outputs;
 
   // Optional: Eigenvalues of the approximated hessian, when `log_qp_eigenvalues` is true.
   std::optional<QPEigenvalues> qp_eigenvalues;
@@ -314,6 +343,9 @@ struct NLSSolverOutputs {
 
 template <>
 struct fmt::formatter<mini_opt::QPInteriorPointTerminationState> : fmt::ostream_formatter {};
+
+template <>
+struct fmt::formatter<mini_opt::QPNullSpaceTerminationState> : fmt::ostream_formatter {};
 
 template <>
 struct fmt::formatter<mini_opt::InitialGuessMethod> : fmt::ostream_formatter {};
