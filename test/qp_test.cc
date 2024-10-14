@@ -617,7 +617,8 @@ class QPSolverTest : public ::testing::Test {
 
     QPNullSpaceSolver solver{};
     solver.Setup(&qp);
-    solver.Solve();
+    const QPNullSpaceTerminationState term = solver.Solve();
+    ASSERT_EQ(QPNullSpaceTerminationState::SUCCESS, term);
 
     const Eigen::VectorXd x = solver.variables();
 
@@ -699,7 +700,8 @@ class QPSolverTest : public ::testing::Test {
 
     QPNullSpaceSolver solver{};
     solver.Setup(&qp);
-    solver.Solve();
+    const auto term = solver.Solve();
+    ASSERT_EQ(QPNullSpaceTerminationState::SUCCESS, term);
 
     const Eigen::VectorXd x = solver.variables();
     static const Eigen::IOFormat kMatrixFmt(Eigen::FullPrecision, 0, ", ", ",\n", "[", "]", "[",

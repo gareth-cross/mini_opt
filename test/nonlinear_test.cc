@@ -188,12 +188,21 @@ class ConstrainedNLSTest : public ::testing::Test {
     constexpr double phi_alpha_0 = 2.2;
 
     // compute via form 1
-    const double solution = ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(
+    const std::optional<double> solution = ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(
         phi_0, phi_prime_0, alpha_0, phi_alpha_0);
+    ASSERT_TRUE(solution);
 
     const double a = (phi_alpha_0 - phi_0 - alpha_0 * phi_prime_0) / std::pow(alpha_0, 2);
     const double b = phi_prime_0;
-    ASSERT_NEAR(-b / (2 * a), solution, tol::kPico);
+    ASSERT_NEAR(-b / (2 * a), solution.value(), tol::kPico);
+
+    // Try invalid solutions:
+    // phi_prime_0 > 0
+    ASSERT_FALSE(
+        ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(phi_0, 1.3, alpha_0, phi_alpha_0));
+    // phi_alpha_0 > phi_prime_0 * alpha_0 - phi_0
+    ASSERT_FALSE(ConstrainedNonlinearLeastSquares::QuadraticApproxMinimum(
+        phi_0, 1.3, alpha_0, (phi_prime_0 * alpha_0 - phi_0) * 1.01));
   }
 
   // Check that close form cubic approximation is correct.
@@ -219,12 +228,45 @@ class ConstrainedNLSTest : public ::testing::Test {
         phi_alpha_1, tol::kPico);
 
     // find the minimum
-    const double min_alpha = ConstrainedNonlinearLeastSquares::CubicApproxMinimum(phi_prime_0, ab);
+    const std::optional<double> min_alpha =
+        ConstrainedNonlinearLeastSquares::CubicApproxMinimum(phi_prime_0, ab);
+    ASSERT_TRUE(min_alpha);
 
     // check it actually is the minimum
-    ASSERT_NEAR(0.0, 3 * ab[0] * std::pow(min_alpha, 2) + 2 * ab[1] * min_alpha + phi_prime_0,
-                tol::kPico);
-    ASSERT_GT(6 * ab[0] * min_alpha + 2 * ab[1], 0);
+    ASSERT_NEAR(
+        0.0,
+        3 * ab[0] * std::pow(min_alpha.value(), 2) + 2 * ab[1] * min_alpha.value() + phi_prime_0,
+        tol::kPico);
+    ASSERT_GT(6 * ab[0] * min_alpha.value() + 2 * ab[1], 0);
+
+    // create an invalid scenario:
+    ASSERT_FALSE(ConstrainedNonlinearLeastSquares::CubicApproxMinimum(phi_prime_0, {0.0, ab[1]}));
+
+    //  b * b - 3 * a * phi_prime_0 --> a > b*b/(3 * phi_prime_0)
+    ASSERT_FALSE(ConstrainedNonlinearLeastSquares::CubicApproxMinimum(
+        phi_prime_0, {(ab[1] * ab[1] / (3 * phi_prime_0)) * 1.01, ab[1]}));
+  }
+
+  void ComputeSecondOrderCorrection(
+      const Eigen::VectorXd& updated_x,
+      const std::vector<ResidualBase::unique_ptr>& equality_constraints, QP* qp,
+      Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver, Eigen::VectorXd* dx_out) {
+    F_ASSERT(qp);
+    F_ASSERT(solver);
+    F_ASSERT(dx_out);
+
+    // we use the QP `b` vector as storage for this operation
+    int row = 0;
+    for (const ResidualBase::unique_ptr& eq : equality_constraints) {
+      const int dim = eq->Dimension();
+      F_ASSERT_LE(row + dim, qp->b_eq.rows(), "Insufficient rows in vector b");
+      eq->ErrorVector(updated_x, qp->b_eq.segment(row, dim));
+      row += dim;
+    }
+
+    // compute the pseudo-inverse
+    solver->compute(qp->A_eq);
+    dx_out->noalias() -= solver->solve(qp->b_eq);
   }
 
   void TestComputeSecondOrderCorrection() {
@@ -291,8 +333,8 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     Eigen::VectorXd dx_out(3);
     dx_out.setZero();
-    ConstrainedNonlinearLeastSquares::ComputeSecondOrderCorrection(
-        x_lin + dx_in, problem.equality_constraints, &qp, &decomposition, &dx_out);
+    ComputeSecondOrderCorrection(x_lin + dx_in, problem.equality_constraints, &qp, &decomposition,
+                                 &dx_out);
     PRINT_MATRIX(dx_out.transpose());
 
     // should satisfy: A * dx_out + c(x + dx_in)
