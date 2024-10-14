@@ -539,7 +539,7 @@ double QPInteriorPointSolver::ComputePredictorCorrectorMuAffine(
 std::optional<QPLagrangeMultipliers> QPInteriorPointSolver::ComputeLagrangeMultiplierSummary()
     const {
   if (const auto y = y_block(); y.rows() > 0) {
-    return QPLagrangeMultipliers{y.minCoeff(), y.lpNorm<Eigen::Infinity>(), y.norm()};
+    return QPLagrangeMultipliers{y.minCoeff(), y.lpNorm<Eigen::Infinity>()};
   } else {
     return std::nullopt;
   }
