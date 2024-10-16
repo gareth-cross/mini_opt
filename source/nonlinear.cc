@@ -6,6 +6,8 @@
 #include <fmt/ostream.h>
 #include <Eigen/Dense>  //  for inverse()
 
+#include "mini_opt/tracing.hpp"
+
 namespace mini_opt {
 
 ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem* const problem,
@@ -72,6 +74,7 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
                                                          const Eigen::VectorXd& variables) {
+  MINI_OPT_FUNCTION_TRACE();
   F_ASSERT(p_ != nullptr, "Must have a valid problem");
   CheckParams(params);
   variables_ = variables;
@@ -165,6 +168,7 @@ void ConstrainedNonlinearLeastSquares::RetractCandidateVars(const double alpha) 
 Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorXd& variables,
                                                             const double lambda,
                                                             const Problem& problem, QP* const qp) {
+  MINI_OPT_FUNCTION_TRACE();
   F_ASSERT(qp != nullptr);
   F_ASSERT_EQ(qp->G.rows(), problem.dimension);
   F_ASSERT_EQ(qp->G.cols(), problem.dimension);
@@ -209,6 +213,7 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
 
 std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs>
 ConstrainedNonlinearLeastSquares::ComputeStepDirection(const Params& params) {
+  MINI_OPT_FUNCTION_TRACE();
   dx_.setZero();
 
   if (QPInteriorPointSolver* const ip_solver = std::get_if<QPInteriorPointSolver>(&solver_);
@@ -271,6 +276,7 @@ bool ConstrainedNonlinearLeastSquares::QPWasIndefinite(
 }
 
 Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars) {
+  MINI_OPT_FUNCTION_TRACE();
   Errors output_errors{};
   for (const ResidualBase::unique_ptr& cost : p_->costs) {
     const auto err_out = error_buffer_.head(cost->Dimension());
@@ -345,6 +351,7 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     const int max_iterations, const double abs_first_derivative_tol, const Errors& errors_pre,
     const DirectionalDerivatives& derivatives, const double penalty, const double armijo_c1,
     const LineSearchStrategy strategy, const double backtrack_search_tau) {
+  MINI_OPT_FUNCTION_TRACE();
   F_ASSERT_GT(penalty, 0.0);
   F_ASSERT(!errors_pre.ContainsInvalidValues(), "{}, {}", errors_pre.f, errors_pre.equality);
   steps_.clear();
@@ -448,6 +455,7 @@ static T Sign(T x) {
 
 DirectionalDerivatives ConstrainedNonlinearLeastSquares::ComputeQPCostDerivative(
     const QP& qp, const Eigen::VectorXd& dx) {
+  MINI_OPT_FUNCTION_TRACE();
   // We want the first derivative of the cost function, evaluated at the current linearization
   // point.
   //  d( 0.5 * h(x + dx * alpha)^T * h(x + dx * alpha) ) =
