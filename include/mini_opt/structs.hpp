@@ -180,7 +180,7 @@ struct Errors {
   constexpr double LInfinity() const noexcept { return std::max(f, equality); }
 
   // Check if either of the values are NaN or Inf.
-  constexpr bool ContainsInvalidValues() const noexcept {
+  bool ContainsInvalidValues() const noexcept {
     return !std::isfinite(f) || !std::isfinite(equality);
   }
 };
