@@ -708,12 +708,12 @@ QPNullSpaceTerminationState QPNullSpaceSolver::Solve() {
 
   // Compute u = Q1 * (R1^T)^-1 * (P^-1) * b_eq
   // `u` is a particular solution to the equality constrained system: A_eq * x + b = 0
-  permuted_rhs_ = P.transpose() * -p_->b_eq;
-  u_ = Q1 * R_upper.transpose().solve(permuted_rhs_);
+  permuted_rhs_.noalias() = P.transpose() * -p_->b_eq;
+  u_.noalias() = Q1 * R_upper.transpose().solve(permuted_rhs_);
   F_ASSERT_EQ(num_params, u_.rows());
 
   // Compute the reduced hessian by projecting `G` into null(A_eq)
-  G_reduced_ = Q2.transpose() * p_->G.template selfadjointView<Eigen::Lower>() * Q2;
+  G_reduced_.noalias() = Q2.transpose() * p_->G.template selfadjointView<Eigen::Lower>() * Q2;
 
   // Factorize it with cholesky, which is only valid if `G_reduced` is PD.
   const auto llt = G_reduced_.selfadjointView<Eigen::Lower>().llt();
@@ -723,14 +723,14 @@ QPNullSpaceTerminationState QPNullSpaceSolver::Solve() {
 
   // Compute the rhs of:
   // (Q2^T * G * Q2) * y = -Q2^T * (c + G * u)
-  y_ = -(Q2.transpose() * (p_->c + p_->G.selfadjointView<Eigen::Lower>() * u_));
+  y_.noalias() = -(Q2.transpose() * (p_->c + p_->G.selfadjointView<Eigen::Lower>() * u_));
 
   // Solve for the vector `y` in:
   llt.solveInPlace(y_);
   F_ASSERT_EQ(Q_.cols() - rank, y_.rows());
 
   // Construct the final solution:
-  x_ = u_ + Q2 * y_;
+  x_.noalias() = u_ + Q2 * y_;
   return QPNullSpaceTerminationState::SUCCESS;
 }
 

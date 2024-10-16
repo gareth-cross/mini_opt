@@ -4,7 +4,8 @@ include(GNUInstallDirs)
 
 # Options controlling compilation:
 option(MINI_OPT_BUILD_TESTS "Build with tests enabled." ON)
-option(MINI_OPT_SERIALIZATION "Build with serialization enabled." ON)
+option(MINI_OPT_SERIALIZATION "Build with serialization enabled." OFF)
+option(MINI_OPT_TRACING "Build with tracing enabled." OFF)
 
 if(MINI_OPT_BUILD_TESTS)
   enable_testing()
@@ -28,15 +29,20 @@ add_library(
   include/mini_opt/residual.hpp
   include/mini_opt/structs.hpp
   include/mini_opt/serialization.hpp
+  include/mini_opt/tracing.hpp
   source/nonlinear.cc
   source/qp.cc
   source/residual.cc
   source/structs.cc
-  source/serialization.cc)
+  source/serialization.cc
+  source/tracing.cc)
 target_link_libraries(${LIBRARY_NAME} PUBLIC fmt::fmt-header-only eigen)
 if(MINI_OPT_SERIALIZATION)
   target_link_libraries(${LIBRARY_NAME} PUBLIC nlohmann_json::nlohmann_json)
   target_compile_definitions(${LIBRARY_NAME} PUBLIC -DMINI_OPT_SERIALIZATION)
+endif()
+if(MINI_OPT_TRACING)
+  target_compile_definitions(${LIBRARY_NAME} PUBLIC -DMINI_OPT_TRACING)
 endif()
 target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_17)
 target_compile_options(${LIBRARY_NAME} PRIVATE ${COMPILATION_FLAGS})
