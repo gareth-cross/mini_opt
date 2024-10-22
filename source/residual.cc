@@ -3,10 +3,11 @@
 
 namespace mini_opt {
 
-double ResidualBase::QuadraticError(const Eigen::VectorXd& params) const {
-  Eigen::VectorXd b(Dimension());
-  ErrorVector(params, b.head(Dimension()));
-  return b.squaredNorm();
+double Residual::QuadraticError(const Eigen::VectorXd& params) const {
+  const int dim = Dimension();
+  Eigen::VectorXd b(dim);
+  ErrorVector(params, b.head(dim));
+  return 0.5 * b.squaredNorm();
 }
 
 }  // namespace mini_opt

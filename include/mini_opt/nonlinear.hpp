@@ -31,19 +31,17 @@ namespace mini_opt {
  * with diagonal inequality constraints on the decision variables.
  */
 struct Problem {
-  using unique_ptr = std::unique_ptr<Problem>;
-
   // Problem dimension. (ie. max variable index + 1)
   int dimension;
 
   // The errors that form the sum of squares part of the cost function.
-  std::vector<ResidualBase::unique_ptr> costs;
+  std::vector<Residual> costs;
 
   // Linear inequality constraints.
   std::vector<LinearInequalityConstraint> inequality_constraints;
 
   // Nonlinear inequality constraints.
-  std::vector<ResidualBase::unique_ptr> equality_constraints;
+  std::vector<Residual> equality_constraints;
 
   // Clear all factors.
   void clear() {

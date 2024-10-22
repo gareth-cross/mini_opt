@@ -23,9 +23,9 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   // determine the size of the equality constraint matrix
   int total_eq_size = 0;
   int max_error_size = 0;
-  for (const ResidualBase::unique_ptr& constraint : p_->equality_constraints) {
-    total_eq_size += constraint->Dimension();
-    max_error_size = std::max(max_error_size, constraint->Dimension());
+  for (const Residual& constraint : p_->equality_constraints) {
+    total_eq_size += constraint.Dimension();
+    max_error_size = std::max(max_error_size, constraint.Dimension());
   }
   qp_.A_eq.resize(total_eq_size, p_->dimension);
   qp_.b_eq.resize(total_eq_size);
@@ -40,8 +40,8 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   dx_.setZero();
 
   // also compute max error size for the soft costs too
-  for (const ResidualBase::unique_ptr& cost : p_->costs) {
-    max_error_size = std::max(max_error_size, cost->Dimension());
+  for (const Residual& cost : p_->costs) {
+    max_error_size = std::max(max_error_size, cost.Dimension());
   }
   error_buffer_.resize(max_error_size);
 }
@@ -179,8 +179,8 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   // zero out the linear system before adding all the costs to it
   qp->G.setZero();
   qp->c.setZero();
-  for (const ResidualBase::unique_ptr& cost : problem.costs) {
-    output_errors.f += cost->UpdateHessian(variables, &qp->G, &qp->c);
+  for (const Residual& cost : problem.costs) {
+    output_errors.f += cost.UpdateHessian(variables, &qp->G, &qp->c);
   }
   if (lambda > 0) {
     qp->G.diagonal().array() += lambda;
@@ -190,13 +190,13 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   qp->A_eq.setZero();
   qp->b_eq.setZero();
   int row = 0;
-  for (const ResidualBase::unique_ptr& eq : problem.equality_constraints) {
-    const int dim = eq->Dimension();
+  for (const Residual& eq : problem.equality_constraints) {
+    const int dim = eq.Dimension();
     F_ASSERT_LE(row + dim, qp->A_eq.rows());
 
     // block we write the error into
     auto b_seg = qp->b_eq.segment(row, dim);
-    eq->UpdateJacobian(variables, qp->A_eq.middleRows(row, dim), b_seg);
+    eq.UpdateJacobian(variables, qp->A_eq.middleRows(row, dim), b_seg);
 
     // total L1 norm in the equality constraints
     output_errors.equality += b_seg.lpNorm<1>();
@@ -278,14 +278,14 @@ bool ConstrainedNonlinearLeastSquares::QPWasIndefinite(
 Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars) {
   MINI_OPT_FUNCTION_TRACE();
   Errors output_errors{};
-  for (const ResidualBase::unique_ptr& cost : p_->costs) {
-    const auto err_out = error_buffer_.head(cost->Dimension());
-    cost->ErrorVector(vars, err_out);
+  for (const Residual& cost : p_->costs) {
+    const auto err_out = error_buffer_.head(cost.Dimension());
+    cost.ErrorVector(vars, err_out);
     output_errors.f += 0.5 * err_out.squaredNorm();
   }
-  for (const ResidualBase::unique_ptr& eq : p_->equality_constraints) {
-    const auto err_out = error_buffer_.head(eq->Dimension());
-    eq->ErrorVector(vars, err_out);
+  for (const Residual& eq : p_->equality_constraints) {
+    const auto err_out = error_buffer_.head(eq.Dimension());
+    eq.ErrorVector(vars, err_out);
     output_errors.equality += err_out.lpNorm<1>();
   }
   return output_errors;

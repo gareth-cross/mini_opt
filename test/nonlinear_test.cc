@@ -108,9 +108,9 @@ class ConstrainedNLSTest : public ::testing::Test {
   // a numerical version.
   void TestComputeQPCostDerivative() {
     using Vector5 = Matrix<double, 5, 1>;
-    Residual<3, 5> cost;
-    cost.index = {{0, 2, 1, 4, 3}};
-    cost.function = [](const Vector5& params, Matrix<double, 3, 5>* J_out) -> Matrix<double, 3, 1> {
+
+    auto cost_func = [](const Vector5& params,
+                        Matrix<double, 3, 5>* J_out) -> Matrix<double, 3, 1> {
       // some nonsense
       Vector3d result{params[0] * params[1] - params[3], std::sin(params[1]) * std::cos(params[2]),
                       params[3] * params[0] - params[2]};
@@ -128,10 +128,10 @@ class ConstrainedNLSTest : public ::testing::Test {
       return result;
     };
 
+    Residual cost = MakeResidual<3, 5>({0, 2, 1, 4, 3}, cost_func);
+
     // Make up an equality constraint
-    Residual<2, 3> eq;
-    eq.index = {{3, 4, 0}};
-    eq.function = [](const Vector3d& params, Matrix<double, 2, 3>* J_out) -> Vector2d {
+    auto eq_func = [](const Vector3d& params, Matrix<double, 2, 3>* J_out) -> Vector2d {
       Vector2d result{params[0] - params[1], -params[2] * params[2]};
       if (J_out) {
         J_out->setZero();
@@ -142,22 +142,18 @@ class ConstrainedNLSTest : public ::testing::Test {
       return result;
     };
 
+    Residual eq = MakeResidual<2, 3>({3, 4, 0}, eq_func);
+
     // check that the derivatives are correct
     const Vector5 params = (Vector5() << -0.5, 0.2, 0.3, -0.8, 1.2).finished();
-    TestResidualFunctionDerivative<3, 5>(cost.function, params);
-    TestResidualFunctionDerivative<2, 3>(eq.function, params.head<3>());
+    TestResidualFunctionDerivative<3, 5>(cost_func, params);
+    TestResidualFunctionDerivative<2, 3>(eq_func, params.head<3>());
 
     // pick a direction for the directional derivative
     const VectorXd dx = (Vector5() << 0.1, 0.25, -0.87, 1.1, -0.02).finished();
 
     // The penalty on the equality constraint
     constexpr double penalty = 0.334;
-
-    // set up a problem
-    Problem problem{};
-    problem.dimension = 5;
-    problem.costs.emplace_back(new Residual<3, 5>(cost));
-    problem.equality_constraints.emplace_back(new Residual<2, 3>(eq));
 
     // test with L1
     // compute the derivative of the sum cost function
@@ -168,6 +164,12 @@ class ConstrainedNLSTest : public ::testing::Test {
       eq.ErrorVector(params + dx * alpha, equality_out.head(2));
       return 0.5 * cost_out.squaredNorm() + penalty * equality_out.lpNorm<1>();
     });
+
+    // set up a problem
+    Problem problem{};
+    problem.dimension = 5;
+    problem.costs.emplace_back(std::move(cost));
+    problem.equality_constraints.emplace_back(std::move(eq));
 
     // compute analytically as well
     QP qp{static_cast<Index>(problem.dimension)};
@@ -247,20 +249,20 @@ class ConstrainedNLSTest : public ::testing::Test {
         phi_prime_0, {(ab[1] * ab[1] / (3 * phi_prime_0)) * 1.01, ab[1]}));
   }
 
-  void ComputeSecondOrderCorrection(
-      const Eigen::VectorXd& updated_x,
-      const std::vector<ResidualBase::unique_ptr>& equality_constraints, QP* qp,
-      Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver, Eigen::VectorXd* dx_out) {
+  void ComputeSecondOrderCorrection(const Eigen::VectorXd& updated_x,
+                                    const std::vector<Residual>& equality_constraints, QP* qp,
+                                    Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver,
+                                    Eigen::VectorXd* dx_out) {
     F_ASSERT(qp);
     F_ASSERT(solver);
     F_ASSERT(dx_out);
 
     // we use the QP `b` vector as storage for this operation
     int row = 0;
-    for (const ResidualBase::unique_ptr& eq : equality_constraints) {
-      const int dim = eq->Dimension();
+    for (const Residual& eq : equality_constraints) {
+      const int dim = eq.Dimension();
       F_ASSERT_LE(row + dim, qp->b_eq.rows(), "Insufficient rows in vector b");
-      eq->ErrorVector(updated_x, qp->b_eq.segment(row, dim));
+      eq.ErrorVector(updated_x, qp->b_eq.segment(row, dim));
       row += dim;
     }
 
@@ -271,9 +273,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
   void TestComputeSecondOrderCorrection() {
     // create a non-linear equality constraint
-    Residual<2, 3> eq;
-    eq.index = {{0, 1, 2}};
-    eq.function = [](const Vector3d& x, Matrix<double, 2, 3>* J) -> Vector2d {
+    auto func = [](const Vector3d& x, Matrix<double, 2, 3>* J) -> Vector2d {
       if (J) {
         J->setZero();
         J->operator()(0, 0) = 2 * x[0];
@@ -288,7 +288,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     };
 
     const Vector3d x_lin{-0.5, 1.2, -0.5};
-    TestResidualFunctionDerivative<2, 3>(eq.function, x_lin);
+    TestResidualFunctionDerivative<2, 3>(func, x_lin);
 
     // make space for linearized problem
     QP qp{};
@@ -300,7 +300,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     // linearize it
     Problem problem{};
     problem.dimension = 3;
-    problem.equality_constraints.emplace_back(new Residual<2, 3>(eq));
+    problem.equality_constraints.emplace_back(MakeResidual<2, 3>({0, 1, 2}, func));
     ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(x_lin, 0.0, problem, &qp);
 
     // find a solution that satisfies the linearized problem
@@ -338,14 +338,13 @@ class ConstrainedNLSTest : public ::testing::Test {
     PRINT_MATRIX(dx_out.transpose());
 
     // should satisfy: A * dx_out + c(x + dx_in)
-    ASSERT_EIGEN_NEAR(qp.A_eq * dx_out + eq.function(x_lin + dx_in, nullptr), Vector2d::Zero(),
+    ASSERT_EIGEN_NEAR(qp.A_eq * dx_out + func(x_lin + dx_in, nullptr), Vector2d::Zero(),
                       tol::kPico);
 
     // error should be reduced if we re-evaluate
-    PRINT_MATRIX(eq.function(x_lin + dx_in, nullptr).transpose());
-    PRINT_MATRIX(eq.function(x_lin + dx_in + dx_out, nullptr).transpose());
-    ASSERT_GT(eq.function(x_lin + dx_in, nullptr).norm(),
-              eq.function(x_lin + dx_in + dx_out, nullptr).norm());
+    PRINT_MATRIX(func(x_lin + dx_in, nullptr).transpose());
+    PRINT_MATRIX(func(x_lin + dx_in + dx_out, nullptr).transpose());
+    ASSERT_GT(func(x_lin + dx_in, nullptr).norm(), func(x_lin + dx_in + dx_out, nullptr).norm());
   }
 
   static void SummarizeCounts(std::string_view name, const std::vector<StatCounters>& counters) {
@@ -389,18 +388,14 @@ class ConstrainedNLSTest : public ::testing::Test {
   // Test optimization of rosenbrock function w/ no constraints.
   // A very simple function that is easy to minimize.
   void TestRosenbrock() {
-    Residual<2, 2> rosenbrock;
-    rosenbrock.index = {{0, 1}};
-    rosenbrock.function = &ConstrainedNLSTest::Rosenbrock;
-
     // check that it behaves correctly
-    TestResidualFunctionDerivative<2, 2>(rosenbrock.function, Vector2d{5, -3});
-    TestResidualFunctionDerivative<2, 2>(rosenbrock.function, Vector2d{1, 1});
+    TestResidualFunctionDerivative<2, 2>(&ConstrainedNLSTest::Rosenbrock, Vector2d{5, -3});
+    TestResidualFunctionDerivative<2, 2>(&ConstrainedNLSTest::Rosenbrock, Vector2d{1, 1});
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), Rosenbrock({1, 1}), tol::kPico);
 
     // simple problem with only one cost
     Problem problem{};
-    problem.costs.emplace_back(new Residual<2, 2>(rosenbrock));
+    problem.costs.push_back(MakeResidual<2, 2>({0, 1}, &ConstrainedNLSTest::Rosenbrock));
     problem.dimension = 2;
 
     ConstrainedNonlinearLeastSquares nls(&problem);
@@ -430,13 +425,9 @@ class ConstrainedNLSTest : public ::testing::Test {
 
   // Solve un-constrained rosenbrock, but don't use line search. Instead, depend on LM.
   void TestRosenbrockLM() {
-    Residual<2, 2> rosenbrock;
-    rosenbrock.index = {{0, 1}};
-    rosenbrock.function = &ConstrainedNLSTest::Rosenbrock;
-
     // simple problem with only one cost
     Problem problem{};
-    problem.costs.emplace_back(new Residual<2, 2>(rosenbrock));
+    problem.costs.emplace_back(MakeResidual<2, 2>({0, 1}, &ConstrainedNLSTest::Rosenbrock));
     problem.dimension = 2;
 
     ConstrainedNonlinearLeastSquares nls(&problem);
@@ -470,13 +461,9 @@ class ConstrainedNLSTest : public ::testing::Test {
 
   // Test rosenbrock w/ inequality constraints about the optimum.
   void TestInequalityConstrainedRosenbrock() {
-    Residual<2, 2> rosenbrock;
-    rosenbrock.index = {{0, 1}};
-    rosenbrock.function = &ConstrainedNLSTest::Rosenbrock;
-
     // simple problem with only one cost
     Problem problem{};
-    problem.costs.emplace_back(new Residual<2, 2>(rosenbrock));
+    problem.costs.emplace_back(MakeResidual<2, 2>({0, 1}, &ConstrainedNLSTest::Rosenbrock));
     problem.dimension = 2;
     problem.inequality_constraints.push_back(Var(0) >= 1.2);
     problem.inequality_constraints.push_back(Var(1) <= 0.5);
@@ -535,17 +522,14 @@ class ConstrainedNLSTest : public ::testing::Test {
 
   // Test rosenbrock w/ inequality constraints about the optimum, in 6 dimensions.
   void TestInequalityConstrainedRosenbrock6D() {
-    Residual<10, 6> rosenbrock;
-    std::iota(rosenbrock.index.begin(), rosenbrock.index.end(), 0);
-    rosenbrock.function = &ConstrainedNLSTest::Rosenbrock6D;
-
     using Vector6 = Matrix<double, 6, 1>;
-    TestResidualFunctionDerivative<10, 6>(rosenbrock.function, Vector6::Zero());
-    TestResidualFunctionDerivative<10, 6>(rosenbrock.function, Vector6::Ones());
+    TestResidualFunctionDerivative<10, 6>(&ConstrainedNLSTest::Rosenbrock6D, Vector6::Zero());
+    TestResidualFunctionDerivative<10, 6>(&ConstrainedNLSTest::Rosenbrock6D, Vector6::Ones());
 
     // simple problem with only one cost
     Problem problem{};
-    problem.costs.emplace_back(new Residual<10, 6>(rosenbrock));
+    problem.costs.push_back(
+        MakeResidual<10, 6>({0, 1, 2, 3, 4, 5}, &ConstrainedNLSTest::Rosenbrock6D));
     problem.dimension = 6;
     problem.inequality_constraints.push_back(Var(0) >= 2.3);
     problem.inequality_constraints.push_back(Var(1) <= -1.2);
@@ -618,8 +602,8 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     // break problem into 2 costs for testing
     Problem problem{};
-    problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau1));
-    problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau2));
+    problem.costs.push_back(MakeResidual<1, 2>({0, 1}, &ConstrainedNLSTest::Himmelblau1));
+    problem.costs.push_back(MakeResidual<1, 2>({0, 1}, &ConstrainedNLSTest::Himmelblau2));
     problem.dimension = 2;
 
     // first test version bounded to [-5, 5]...
@@ -684,8 +668,8 @@ class ConstrainedNLSTest : public ::testing::Test {
   void TestHimmelblauQuadrantConstrained() {
     // break problem into 2 costs
     Problem problem{};
-    problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau1));
-    problem.costs.emplace_back(new Residual<1, 2>({{0, 1}}, &ConstrainedNLSTest::Himmelblau2));
+    problem.costs.push_back(MakeResidual<1, 2>({0, 1}, &ConstrainedNLSTest::Himmelblau1));
+    problem.costs.push_back(MakeResidual<1, 2>({0, 1}, &ConstrainedNLSTest::Himmelblau2));
     problem.dimension = 2;
 
     // Constrain to the top right quadrant.
@@ -764,13 +748,13 @@ class ConstrainedNLSTest : public ::testing::Test {
     std::iota(index.begin(), index.end(), 0);
 
     Problem problem{};
-    problem.costs.emplace_back(new Residual<N, N>(index, &ConstrainedNLSTest::SphereFunction<N>));
+    problem.costs.push_back(MakeResidual<N, N>(index, &ConstrainedNLSTest::SphereFunction<N>));
     problem.dimension = N;
 
-    problem.equality_constraints.emplace_back(new Residual<1, 2>(
-        {{0, 1}}, std::bind(&ConstrainedNLSTest::ProductExpression, _1, 4.0, _2)));
-    problem.equality_constraints.emplace_back(new Residual<1, 2>(
-        {{2, 3}}, std::bind(&ConstrainedNLSTest::ProductExpression, _1, 9.0, _2)));
+    problem.equality_constraints.push_back(
+        MakeResidual<1, 2>({0, 1}, std::bind(&ConstrainedNLSTest::ProductExpression, _1, 4.0, _2)));
+    problem.equality_constraints.push_back(
+        MakeResidual<1, 2>({2, 3}, std::bind(&ConstrainedNLSTest::ProductExpression, _1, 9.0, _2)));
 
     // add a nonlinear equality constraint
     ConstrainedNonlinearLeastSquares nls(&problem);
@@ -853,10 +837,8 @@ class ConstrainedNLSTest : public ::testing::Test {
                               std::array<uint8_t, 6>{{0, 0, 0, 0, 0, 0}} /* turn off for now */);
 
     // make a cost that we want to achieve a specific point vertically
-    Residual<1, Dynamic> y_residual;
-    y_residual.index = {0, 1};
-    y_residual.function = [&](const VectorXd& params,
-                              Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
+    auto y_res = [&](const VectorXd& params,
+                     Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
       chain->Update(params);
       const Vector3d effector_xyz = chain->translation();
       if (J_out) {
@@ -866,11 +848,8 @@ class ConstrainedNLSTest : public ::testing::Test {
     };
 
     // make an equality constraint on x
-    Residual<1, Dynamic> x_eq_constraint;
-    x_eq_constraint.index = {0, 1};
-    x_eq_constraint.function =
-        [&](const VectorXd& params,
-            Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
+    auto x_eq = [&](const VectorXd& params,
+                    Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
       chain->Update(params);
       const Vector3d effector_xyz = chain->translation();
       if (J_out) {
@@ -879,13 +858,12 @@ class ConstrainedNLSTest : public ::testing::Test {
       return Matrix<double, 1, 1>{effector_xyz.x() - 0.45};
     };
 
-    TestResidualFunctionDerivative<1, Dynamic>(y_residual.function, VectorXd{Vector2d(-0.5, 0.4)});
-    TestResidualFunctionDerivative<1, Dynamic>(x_eq_constraint.function,
-                                               VectorXd{Vector2d(0.3, -0.6)});
+    TestResidualFunctionDerivative<1, Dynamic>(y_res, VectorXd{Vector2d(-0.5, 0.4)});
+    TestResidualFunctionDerivative<1, Dynamic>(x_eq, VectorXd{Vector2d(0.3, -0.6)});
 
     Problem problem{};
-    problem.costs.emplace_back(new Residual<1, Dynamic>(y_residual));
-    problem.equality_constraints.emplace_back(new Residual<1, Dynamic>(x_eq_constraint));
+    problem.costs.push_back(MakeResidual<1, Dynamic>({0, 1}, y_res));
+    problem.equality_constraints.push_back(MakeResidual<1, Dynamic>({0, 1}, x_eq));
     problem.dimension = 2;
 
     ConstrainedNonlinearLeastSquares nls(
@@ -1017,8 +995,9 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
       return 0.1 * body_angle;
     };
-    problem.costs.emplace_back(new Residual<1, 1>({{0}}, level_cost));
     TestResidualFunctionDerivative<1, 1>(level_cost, Matrix<double, 1, 1>{0.4});
+
+    problem.costs.push_back(MakeResidual<1, 1>({0}, level_cost));
 
     // We want feet to contact the floor (y=0) and achieve a position of the body (which is
     // located on top of the first joint of rear leg) of y=0.4
@@ -1033,8 +1012,9 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
       return Matrix<double, 1, 1>{anchor_t_foot.y() - rear_foot_y};
     };
-    problem.equality_constraints.emplace_back(new Residual<1, 3>({{0, 1, 2}}, rear_foot_expr));
     TestResidualFunctionDerivative<1, 3>(rear_foot_expr, Vector3d{-0.4, 0.2, 0.5});
+
+    problem.equality_constraints.push_back(MakeResidual<1, 3>({0, 1, 2}, rear_foot_expr));
 
     // front foot has to end at y=0 as well
     const auto front_foot_expr = [&](const Matrix<double, 3, 1>& angles_front,
@@ -1045,8 +1025,9 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
       return Matrix<double, 1, 1>{chain_front->translation().y() - front_foot_y};
     };
-    problem.equality_constraints.emplace_back(new Residual<1, 3>({{0, 3, 4}}, front_foot_expr));
     TestResidualFunctionDerivative<1, 3>(front_foot_expr, Vector3d{0.4, 0.2221, -.8});
+
+    problem.equality_constraints.push_back(MakeResidual<1, 3>({0, 3, 4}, front_foot_expr));
 
     // We want the moments to cancel out.
     // We set mg = 1 (gravity force) and assume two different frictions, mu_rear and mu_front.
@@ -1084,7 +1065,7 @@ class ConstrainedNLSTest : public ::testing::Test {
       }
       return Matrix<double, 1, 1>{moments};
     };
-    problem.costs.emplace_back(new Residual<1, 5>({{0, 1, 2, 3, 4}}, moment_expression));
+    problem.costs.emplace_back(MakeResidual<1, 5>({0, 1, 2, 3, 4}, moment_expression));
     TestResidualFunctionDerivative<1, 5>(
         moment_expression, (Matrix<double, 5, 1>() << 0.22, -0.3, 0.45, 0.6, -0.1).finished());
 
@@ -1139,11 +1120,11 @@ class ConstrainedNLSTest : public ::testing::Test {
       counters.emplace_back(outputs);
 
       // check costs
-      for (const ResidualBase::unique_ptr& eq : problem.equality_constraints) {
-        ASSERT_NEAR(0.0, eq->QuadraticError(nls.variables()), 1.0e-8);
+      for (const Residual& eq : problem.equality_constraints) {
+        ASSERT_NEAR(0.0, eq.QuadraticError(nls.variables()), 1.0e-8);
       }
-      for (const ResidualBase::unique_ptr& eq : problem.costs) {
-        ASSERT_NEAR(0.0, eq->QuadraticError(nls.variables()), 1.0e-8);
+      for (const Residual& eq : problem.costs) {
+        ASSERT_NEAR(0.0, eq.QuadraticError(nls.variables()), 1.0e-8);
       }
 
       // No strong reason for 30, just place a max to track performance here.

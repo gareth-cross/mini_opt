@@ -253,14 +253,13 @@ class QPSolverTest : public ::testing::Test {
     using ScalarMatrix = Matrix<double, 1, 1>;
 
     // simple quadratic residual: f_0(x) = ||x - 5||^2, h(x) = x - 5
-    Residual<1, 1> res;
-    res.index = {{0}};
-    res.function = [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
-      if (J) {
-        J->setIdentity();
-      }
-      return x.array() - 5.0;
-    };
+    Residual res =
+        MakeResidual<1, 1>({0}, [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
+          if (J) {
+            J->setIdentity();
+          }
+          return x.array() - 5.0;
+        });
 
     // linearize at x=0
     const VectorXd initial_values = VectorXd::Constant(1, 0.0);
@@ -290,17 +289,16 @@ class QPSolverTest : public ::testing::Test {
   // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
   void TestWithInequalitiesActive() {
     // Quadratic in two variables. Has a PD diagonal hessian.
-    Residual<2, 2> res;
-    res.index = {{0, 1}};
-    res.function = [](const Matrix<double, 2, 1>& x,
-                      Matrix<double, 2, 2>* const J) -> Matrix<double, 2, 1> {
-      if (J) {
-        J->setZero();
-        J->diagonal() = Matrix<double, 2, 1>(1.0, -4.0);
-      }
-      // solution at (2, -4)
-      return Matrix<double, 2, 1>{x[0] - 2.0, -4 * x[1] - 16.0};
-    };
+    Residual res = MakeResidual<2, 2>(
+        {0, 1},
+        [](const Matrix<double, 2, 1>& x, Matrix<double, 2, 2>* const J) -> Matrix<double, 2, 1> {
+          if (J) {
+            J->setZero();
+            J->diagonal() = Matrix<double, 2, 1>(1.0, -4.0);
+          }
+          // solution at (2, -4)
+          return Matrix<double, 2, 1>{x[0] - 2.0, -4 * x[1] - 16.0};
+        });
 
     // linearize at x=0
     const VectorXd initial_values = VectorXd::Constant(2, .0);
@@ -335,17 +333,16 @@ class QPSolverTest : public ::testing::Test {
 
   // Quadratic in three variables, with one active and one inactive inequality.
   void TestWithInequalitiesPartiallyActive() {
-    Residual<3, 3> res;
-    res.index = {{0, 1, 2}};
-    res.function = [](const Matrix<double, 3, 1>& x,
-                      Matrix<double, 3, 3>* const J) -> Matrix<double, 3, 1> {
-      if (J) {
-        J->setZero();
-        J->diagonal() = Matrix<double, 3, 1>(1.0, -1.0, 0.5);
-      }
-      // solution at [1, -3, -10]
-      return Matrix<double, 3, 1>{x[0] - 1.0, -x[1] - 3.0, 0.5 * x[2] + -5.0};
-    };
+    Residual res = MakeResidual<3, 3>(
+        {0, 1, 2},
+        [](const Matrix<double, 3, 1>& x, Matrix<double, 3, 3>* const J) -> Matrix<double, 3, 1> {
+          if (J) {
+            J->setZero();
+            J->diagonal() = Matrix<double, 3, 1>(1.0, -1.0, 0.5);
+          }
+          // solution at [1, -3, -10]
+          return Matrix<double, 3, 1>{x[0] - 1.0, -x[1] - 3.0, 0.5 * x[2] + -5.0};
+        });
 
     // Set up problem w/ only one relevant constraint
     QP qp{3};
@@ -580,27 +577,25 @@ class QPSolverTest : public ::testing::Test {
     const Eigen::Matrix2d A = (Eigen::Matrix2d() << -2.0, 1.4, 2.2, -3.5).finished();
     const Eigen::Vector2d b{-0.8, 1.3};
 
-    Residual<2, 2> cost;
-    cost.index = {{0, 1}};
-    cost.function = [&](const Eigen::Vector2d& x,
-                        Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
-      if (J) {
-        *J = A;
-      }
-      return A * x - b;
-    };
+    Residual cost = MakeResidual<2, 2>(
+        {0, 1},
+        [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+          if (J) {
+            *J = A;
+          }
+          return A * x - b;
+        });
 
     constexpr double x1_pinned_value = 0.3;
-    Residual<1, 1> eq_constraint;
-    eq_constraint.index = {{1}};
-    eq_constraint.function =
+    Residual eq_constraint = MakeResidual<1, 1>(
+        {1},
         [&](const Eigen::Matrix<double, 1, 1>& x,
             Eigen::Matrix<double, 1, 1>* const J) -> Eigen::Matrix<double, 1, 1> {
-      if (J) {
-        J->setIdentity();
-      }
-      return Eigen::Matrix<double, 1, 1>{x[0] - x1_pinned_value};
-    };
+          if (J) {
+            J->setIdentity();
+          }
+          return Eigen::Matrix<double, 1, 1>{x[0] - x1_pinned_value};
+        });
 
     // "linearize" at x=0
     const VectorXd initial_values = VectorXd::Zero(2);
@@ -637,54 +632,50 @@ class QPSolverTest : public ::testing::Test {
 
   // A little problem with three quadratic costs and one equality constraint over two variables.
   void TestNullSpaceSolver2() {
-    Residual<2, 2> cost_1;
-    cost_1.index = {{0, 1}};
-    cost_1.function = [&](const Eigen::Vector2d& x,
-                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
-      const Eigen::Matrix2d A0 = (Eigen::Matrix2d() << 1.7, -0.2, 2.3, 1.2).finished();
-      const Eigen::Vector2d b0{5.4, -3.4};
-      if (J) {
-        *J = A0;
-      }
-      return A0 * x - b0;
-    };
+    Residual cost_1 = MakeResidual<2, 2>(
+        {0, 1},
+        [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+          const Eigen::Matrix2d A0 = (Eigen::Matrix2d() << 1.7, -0.2, 2.3, 1.2).finished();
+          const Eigen::Vector2d b0{5.4, -3.4};
+          if (J) {
+            *J = A0;
+          }
+          return A0 * x - b0;
+        });
 
-    Residual<2, 2> cost_2;
-    cost_2.index = {{1, 2}};
-    cost_2.function = [&](const Eigen::Vector2d& x,
-                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
-      const Eigen::Matrix2d A1 = (Eigen::Matrix2d() << -5.0, 3.3, 9.1, 1.9).finished();
-      const Eigen::Vector2d b1{-3.3, 4.4};
-      if (J) {
-        *J = A1;
-      }
-      return A1 * x - b1;
-    };
+    Residual cost_2 = MakeResidual<2, 2>(
+        {1, 2},
+        [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+          const Eigen::Matrix2d A1 = (Eigen::Matrix2d() << -5.0, 3.3, 9.1, 1.9).finished();
+          const Eigen::Vector2d b1{-3.3, 4.4};
+          if (J) {
+            *J = A1;
+          }
+          return A1 * x - b1;
+        });
 
-    Residual<2, 2> cost_3;
-    cost_3.index = {{0, 3}};
-    cost_3.function = [&](const Eigen::Vector2d& x,
-                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
-      const Eigen::Matrix2d A2 = (Eigen::Matrix2d() << 0.2, -0.5, 1.1, -3.1).finished();
-      const Eigen::Vector2d b2{0.5, 0.0};
-      if (J) {
-        *J = A2;
-      }
-      return A2 * x - b2;
-    };
+    Residual cost_3 = MakeResidual<2, 2>(
+        {0, 3},
+        [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+          const Eigen::Matrix2d A2 = (Eigen::Matrix2d() << 0.2, -0.5, 1.1, -3.1).finished();
+          const Eigen::Vector2d b2{0.5, 0.0};
+          if (J) {
+            *J = A2;
+          }
+          return A2 * x - b2;
+        });
 
-    Residual<2, 2> eq_constraint;
-    eq_constraint.index = {{1, 3}};
-    eq_constraint.function =
+    Residual eq_constraint = MakeResidual<2, 2>(
+        {1, 3},
         [&](const Eigen::Matrix<double, 2, 1>& x,
             Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Matrix<double, 2, 1> {
-      const Eigen::Matrix2d A_eq = (Eigen::Matrix2d() << 1.1, -1.1, 0.3, 0.6).finished();
-      const Eigen::Vector2d b_eq = (Eigen::Vector2d() << 1.3, -4.0).finished();
-      if (J) {
-        *J = A_eq;
-      }
-      return A_eq * x - b_eq;
-    };
+          const Eigen::Matrix2d A_eq = (Eigen::Matrix2d() << 1.1, -1.1, 0.3, 0.6).finished();
+          const Eigen::Vector2d b_eq = (Eigen::Vector2d() << 1.3, -4.0).finished();
+          if (J) {
+            *J = A_eq;
+          }
+          return A_eq * x - b_eq;
+        });
 
     const Eigen::VectorXd initial_values = Eigen::VectorXd::Zero(4);
 
