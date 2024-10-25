@@ -354,11 +354,11 @@ class ConstrainedNLSTest : public ::testing::Test {
     for (const auto stat_name :
          {StatCounterName::NUM_NLS_ITERATIONS, StatCounterName::NUM_QP_ITERATIONS,
           StatCounterName::NUM_FAILED_LINE_SEARCHES, StatCounterName::NUM_LINE_SEARCH_STEPS}) {
-      std::vector<int> sorted;
+      std::vector<std::size_t> sorted;
       std::transform(counters.begin(), counters.end(), std::back_inserter(sorted),
                      [&stat_name](const StatCounters& c) { return c.at(stat_name); });
       std::sort(sorted.begin(), sorted.end());
-      const auto total = std::accumulate(sorted.begin(), sorted.end(), 0);
+      const auto total = std::accumulate(sorted.begin(), sorted.end(), static_cast<std::size_t>(0));
       const std::size_t num = sorted.size();
       fmt::print(
           "Iteration counts for [{}], {}:\n"

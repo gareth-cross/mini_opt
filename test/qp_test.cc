@@ -552,7 +552,7 @@ class QPSolverTest : public ::testing::Test {
         params.initial_guess_method = method;
 
         const QPInteriorPointSolverOutputs outputs = solver.Solve(params);
-        iter_counts[method] += outputs.iterations.size();  //  total up # number of iterations
+        iter_counts[method] += static_cast<int>(outputs.iterations.size());  //  total up # number of iterations
 
         ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 5.0e-5)
             << fmt::format("Termination: {}\nProblem p = {}\nSummary:\n{}",
