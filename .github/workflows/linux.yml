@@ -41,7 +41,7 @@ jobs:
           CXX: g++-13
         working-directory: ${{runner.workspace}}/build
         run: |
-          cmake ${{github.workspace}} -DCMAKE_BUILD_TYPE=RelWithDebInfo -Wno-deprecated -G Ninja
+          cmake ${{github.workspace}} -DCMAKE_BUILD_TYPE=RelWithDebInfo -Wno-deprecated -G Ninja -DMINI_OPT_SERIALIZATION=ON -DMINI_OPT_TRACING=ON
 
       - name: Build
         working-directory: ${{runner.workspace}}/build
