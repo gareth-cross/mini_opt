@@ -1,23 +1,42 @@
-## mini_opt
+# mini_opt
 
-`mini_opt` is a small C++ implementation of interior point optimization. I implemented this as a hobby project, and used it to experiment with inverse kinematic problems in Unreal Engine. The solver itself accepts a nonlinear L2 cost function, nonlinear equality constraints, and linear inequality constraints. It operates by linearizing the problem, and solving a sequence of QP problems using the interior-point method. A simple line-search method (either polynomial approximation, or armijo backtracking) is used to select the step size. Both L1 and L2 norms are supported for the equality constraints.
+![Linux workflow status](https://github.com/gareth-cross/mini_opt/actions/workflows/linux.yml/badge.svg?branch=main)
+![Windows workflow status](https://github.com/gareth-cross/mini_opt/actions/workflows/windows.yml/badge.svg?branch=main)
 
-While I have endeavored to produce well-commented and unit-tested code, the solver behavior has primarily been evaluated in the context of one particular problem (IK). In practice, you would be unlikely to select interior point as a method of performing IK in games, owing to its complexity. My goal with the project was to learn more about the solver, and use Unreal Engine as a fun vehicle to visualize the problem. Note that this repository does not contain the UE4 project.
+`mini_opt` is a small C++ implementation of constrained non-linear least squares. I implemented this for fun, and use it to solve toy problems that interest me. The solver supports:
+- Non-linear cost functions and equality constraints.
+- Box inequality constraints via interior-point method.
+- Line search using polynomial approximation or armijo backtracking.
+- Levenberg marquardt.
 
-To build and run:
+## Building
+
+To build and run tests:
+
 ```
 git submodule update --init
 mkdir build
 cd build
-cmake .. -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build .
+ctest
 ```
 
-The reference used for this implementation is:
+Optional serialization of optimization outputs (using [nlohmann](https://github.com/nlohmann/json)) is enabled by passing `-DMINI_OPT_SERIALIZATION=ON`.
+
+## References
+
+The reference used for this project is:
+
 > "Numerical Optimization, Second Edition", Jorge Nocedal and Stephen J. Wright
 
-### Project TODOs:
-- [ ] Add support for non-linear inequality constraints. Only diagonal and linear constraints are supported at present.
+The implementation is mostly based on Chapters 18 and 19 of this book.
+
+## TODOs:
+
+- [ ] Add support for non-linear inequality constraints. Only diagonal box constraints are supported at the moment.
+- [ ] Add sparse versions of the solvers. For now I only support dense problems.
 
 ---
-Project is licensed under GPLv3. Copyright 2021 Gareth Cross.
+
+Project is licensed under MIT License.
