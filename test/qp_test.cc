@@ -621,6 +621,8 @@ class QPSolverTest : public ::testing::Test {
     QP qp{2};
     qp.A_eq.resize(1, 2);
     qp.b_eq.resize(1, 1);
+    qp.A_eq.setZero();
+    qp.b_eq.setZero();
     cost.UpdateHessian(initial_values, &qp.G, &qp.c);
     eq_constraint.UpdateJacobian(initial_values,
                                  qp.A_eq.block(0, 0, qp.A_eq.rows(), qp.A_eq.cols()),

@@ -59,7 +59,7 @@ struct LinearInequalityConstraint {
   }
 
   // Version of shift that takes vector.
-  constexpr LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
+  LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
     F_ASSERT_LT(variable, x.rows());
     return ShiftTo(x[variable]);
   }
