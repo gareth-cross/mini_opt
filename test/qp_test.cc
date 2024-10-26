@@ -552,7 +552,8 @@ class QPSolverTest : public ::testing::Test {
         params.initial_guess_method = method;
 
         const QPInteriorPointSolverOutputs outputs = solver.Solve(params);
-        iter_counts[method] += static_cast<int>(outputs.iterations.size());  //  total up # number of iterations
+        iter_counts[method] +=
+            static_cast<int>(outputs.iterations.size());  //  total up # number of iterations
 
         ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 5.0e-5)
             << fmt::format("Termination: {}\nProblem p = {}\nSummary:\n{}",
@@ -611,8 +612,7 @@ class QPSolverTest : public ::testing::Test {
                                  qp.b_eq.segment(0, qp.b_eq.rows()));
 
     QPNullSpaceSolver solver{};
-    solver.Setup(&qp);
-    const QPNullSpaceTerminationState term = solver.Solve();
+    const QPNullSpaceTerminationState term = solver.Solve(qp);
     ASSERT_EQ(QPNullSpaceTerminationState::SUCCESS, term);
 
     const Eigen::VectorXd x = solver.variables();
@@ -690,8 +690,7 @@ class QPSolverTest : public ::testing::Test {
                                  qp.b_eq.segment(0, qp.b_eq.rows()));
 
     QPNullSpaceSolver solver{};
-    solver.Setup(&qp);
-    const auto term = solver.Solve();
+    const auto term = solver.Solve(qp);
     ASSERT_EQ(QPNullSpaceTerminationState::SUCCESS, term);
 
     const Eigen::VectorXd x = solver.variables();

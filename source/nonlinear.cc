@@ -81,8 +81,10 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   state_ = OptimizerState::NOMINAL;
 
   if (p_->inequality_constraints.empty() && !p_->equality_constraints.empty()) {
-    solver_ = QPNullSpaceSolver();
-  } else {
+    if (!std::holds_alternative<QPNullSpaceSolver>(solver_)) {
+      solver_ = QPNullSpaceSolver();
+    }
+  } else if (!std::holds_alternative<QPInteriorPointSolver>(solver_)) {
     solver_ = QPInteriorPointSolver();
   }
 
@@ -247,8 +249,7 @@ ConstrainedNonlinearLeastSquares::ComputeStepDirection(const Params& params) {
   QPNullSpaceSolver* const null_solver = std::get_if<QPNullSpaceSolver>(&solver_);
   F_ASSERT(null_solver);
 
-  null_solver->Setup(&qp_);
-  const QPNullSpaceTerminationState term = null_solver->Solve();
+  const QPNullSpaceTerminationState term = null_solver->Solve(qp_);
   if (term == QPNullSpaceTerminationState::SUCCESS) {
     dx_ = null_solver->variables();
   } else {

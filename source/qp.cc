@@ -654,11 +654,6 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
   }
 }
 
-void QPNullSpaceSolver::Setup(const QP* problem) {
-  F_ASSERT(problem);
-  p_ = problem;
-}
-
 // min (1/2) * x^T * G * x + x^T * c
 //
 // Take derivative wrt `x`:
@@ -681,16 +676,15 @@ void QPNullSpaceSolver::Setup(const QP* problem) {
 //
 //  y = (Q2^T * G * Q2)^-1 * -Q2^T * (c + G * u)
 //
-QPNullSpaceTerminationState QPNullSpaceSolver::Solve() {
-  F_ASSERT(p_);
-  F_ASSERT_GT(p_->A_eq.rows(), 0, "Problem must have at least one equality constraint");
-  F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows());
+QPNullSpaceTerminationState QPNullSpaceSolver::Solve(const QP& p) {
+  F_ASSERT_GT(p.A_eq.rows(), 0, "Problem must have at least one equality constraint");
+  F_ASSERT_EQ(p.A_eq.rows(), p.b_eq.rows());
 
-  const int num_equality_constraints = static_cast<int>(p_->A_eq.rows());
-  const int num_params = static_cast<int>(p_->A_eq.cols());
+  const int num_equality_constraints = static_cast<int>(p.A_eq.rows());
+  const int num_params = static_cast<int>(p.A_eq.cols());
 
   // Compute [Q R] factorization of A_eq^T
-  const auto QR = p_->A_eq.transpose().colPivHouseholderQr();
+  const auto QR = p.A_eq.transpose().colPivHouseholderQr();
 
   Q_ = QR.matrixQ();
   const auto& R = QR.matrixR();
@@ -708,12 +702,12 @@ QPNullSpaceTerminationState QPNullSpaceSolver::Solve() {
 
   // Compute u = Q1 * (R1^T)^-1 * (P^-1) * b_eq
   // `u` is a particular solution to the equality constrained system: A_eq * x + b = 0
-  permuted_rhs_.noalias() = P.transpose() * -p_->b_eq;
+  permuted_rhs_.noalias() = P.transpose() * -p.b_eq;
   u_.noalias() = Q1 * R_upper.transpose().solve(permuted_rhs_);
   F_ASSERT_EQ(num_params, u_.rows());
 
   // Compute the reduced hessian by projecting `G` into null(A_eq)
-  G_reduced_.noalias() = Q2.transpose() * p_->G.template selfadjointView<Eigen::Lower>() * Q2;
+  G_reduced_.noalias() = Q2.transpose() * p.G.template selfadjointView<Eigen::Lower>() * Q2;
 
   // Factorize it with cholesky, which is only valid if `G_reduced` is PD.
   const auto llt = G_reduced_.selfadjointView<Eigen::Lower>().llt();
@@ -723,7 +717,7 @@ QPNullSpaceTerminationState QPNullSpaceSolver::Solve() {
 
   // Compute the rhs of:
   // (Q2^T * G * Q2) * y = -Q2^T * (c + G * u)
-  y_.noalias() = -(Q2.transpose() * (p_->c + p_->G.selfadjointView<Eigen::Lower>() * u_));
+  y_.noalias() = -(Q2.transpose() * (p.c + p.G.selfadjointView<Eigen::Lower>() * u_));
 
   // Solve for the vector `y` in:
   llt.solveInPlace(y_);

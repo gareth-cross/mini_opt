@@ -303,19 +303,13 @@ struct QPInteriorPointSolver {
  */
 class QPNullSpaceSolver {
  public:
-  // Setup with a problem. We allow setting a new problem so storage can be re-used.
-  void Setup(const QP* problem);
-
   // Solve the QP using the null-space method.
-  [[nodiscard]] QPNullSpaceTerminationState Solve();
+  [[nodiscard]] QPNullSpaceTerminationState Solve(const QP& p);
 
   // Access all variables.
   constexpr const Eigen::VectorXd& variables() const noexcept { return x_; }
 
  private:
-  // Current problem, initialized by `Setup`.
-  const QP* p_{nullptr};
-
   Eigen::MatrixXd Q_;
   Eigen::MatrixXd G_reduced_;
   Eigen::VectorXd permuted_rhs_;
