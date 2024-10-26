@@ -31,19 +31,24 @@ namespace mini_opt {
  * with diagonal inequality constraints on the decision variables.
  */
 struct Problem {
-  using unique_ptr = std::unique_ptr<Problem>;
-
   // Problem dimension. (ie. max variable index + 1)
   int dimension;
 
   // The errors that form the sum of squares part of the cost function.
-  std::vector<ResidualBase::unique_ptr> costs;
+  std::vector<Residual> costs;
 
   // Linear inequality constraints.
   std::vector<LinearInequalityConstraint> inequality_constraints;
 
   // Nonlinear inequality constraints.
-  std::vector<ResidualBase::unique_ptr> equality_constraints;
+  std::vector<Residual> equality_constraints;
+
+  // Clear all factors.
+  void clear() {
+    costs.clear();
+    inequality_constraints.clear();
+    equality_constraints.clear();
+  }
 };
 
 /*
@@ -85,8 +90,8 @@ struct ConstrainedNonlinearLeastSquares {
     // Value by which to decrease alpha for the backtracking line search.
     double armijo_search_tau{0.8};
 
-    // Initial value of the equality constraint penalty.
-    double equality_penalty_initial{0.01};
+    // Initial value of the equality constraint penalty, µ.
+    double equality_penalty_initial{1.0};
 
     // Scale factor when increasing the equality penalty.
     // If µ_new > µ_old, we increase the penalty to µ_new * equality_penalty_scale_factor.
@@ -102,20 +107,24 @@ struct ConstrainedNonlinearLeastSquares {
     // Initial lambda value on entering the ATTEMPTING_RESTORE_LM state.
     double lambda_failure_init{1.0e-2};
 
+    // Multiplicative amount to decrease lambda on a successful step.
+    double lambda_decrease_on_success{0.1};
+
+    // Multiplicative amount to decrease lambda when exiting the `ATTEMPTING_RESTORE_LM` state.
+    double lambda_decrease_on_restore{0.8};
+
     // Maximum lambda value.
     double max_lambda{1.};
 
     // Minimum lambda value.
     double min_lambda{0.};
+
+    // If true, compute and log summary stats of the eigenvalues from the QP hessian `G`.
+    bool log_qp_eigenvalues{false};
   };
 
   // Signature of custom retraction operator.
-  using Retraction =
-      std::function<void(Eigen::VectorXd* const x, const ConstVectorBlock& dx, const double alpha)>;
-
-  // Signature of custom logger.
-  using LoggingCallback =
-      std::function<bool(const ConstrainedNonlinearLeastSquares& self, const NLSLogInfo& info)>;
+  using Retraction = std::function<void(Eigen::VectorXd& x, ConstVectorBlock dx, double alpha)>;
 
   // Construct w/ const pointer to a problem definition.
   explicit ConstrainedNonlinearLeastSquares(const Problem* problem,
@@ -135,27 +144,17 @@ struct ConstrainedNonlinearLeastSquares {
    */
   NLSSolverOutputs Solve(const Params& params, const Eigen::VectorXd& variables);
 
-  // Set the callback which will be used for the QP solver.
-  template <typename T>
-  void SetQPLoggingCallback(T&& cb) {
-    // TODO: Get rid of the logging callback altogether. For now I maintain this path for existing
-    // unit tests.
-    if (QPInteriorPointSolver* ip_solver = std::get_if<QPInteriorPointSolver>(&solver_);
-        ip_solver != nullptr)
-      ip_solver->SetLoggerCallback(std::forward<T>(cb));
-  }
-
-  // Set the callback that will be used for the nonlinear solver.
-  template <typename T>
-  void SetLoggingCallback(T&& cb) {
-    logging_callback_ = std::forward<T>(cb);
-  }
-
   // Get the current linearization point.
   constexpr const Eigen::VectorXd& variables() const noexcept { return variables_; }
 
   // Evaluate the non-linear error.
   Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars);
+
+  // The user exit callback may return `false` to cause the optimization to terminate early.
+  template <typename T>
+  void SetUserExitCallback(T&& cb) {
+    user_exit_callback_ = std::forward<T>(cb);
+  }
 
  private:
   // Update candidate_vars w/ a step size of alpha.
@@ -166,15 +165,22 @@ struct ConstrainedNonlinearLeastSquares {
                                    const Problem& problem, QP* qp);
 
   // Solve the QP, and update the step direction `dx_`.
-  std::tuple<QPSolverOutputs, std::optional<QPLagrangeMultipliers>> ComputeStepDirection(
+  std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs> ComputeStepDirection(
       const Params& params);
+
+  // Extract lagrange multipliers from the QP solver outputs, if they were used.
+  static std::optional<QPLagrangeMultipliers> MaybeGetLagrangeMultipliers(
+      const std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs>& output);
+
+  // True if the QP was indefinite (in which case we will terminate optimization).
+  static bool QPWasIndefinite(
+      const std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs>& output);
 
   // Based on the outcome of the step selection, update lambda and check if
   // we should exit. Returns NONE if no exit is required.
-  NLSTerminationState UpdateLambdaAndCheckExitConditions(const Params& params,
-                                                         StepSizeSelectionResult step_result,
-                                                         const Errors& initial_errors,
-                                                         double penalty, double& lambda);
+  std::optional<NLSTerminationState> UpdateLambdaAndCheckExitConditions(
+      const Params& params, StepSizeSelectionResult step_result, const Errors& initial_errors,
+      double penalty, double& lambda);
 
   // Execute a back-tracking search until the cost decreases, or we hit
   // a max number of iterations
@@ -185,9 +191,9 @@ struct ConstrainedNonlinearLeastSquares {
                                          double backtrack_search_tau);
 
   // Repeatedly approximate the cost function as a polynomial, and find the minimum.
-  double ComputeAlphaPolynomialApproximation(int iteration, double alpha, const Errors& errors_pre,
-                                             const DirectionalDerivatives& derivatives,
-                                             double penalty) const;
+  std::optional<double> ComputeAlphaPolynomialApproximation(
+      int iteration, const Errors& errors_pre, const DirectionalDerivatives& derivatives,
+      double penalty) const;
 
   // Compute first derivative of the QP cost function.
   static DirectionalDerivatives ComputeQPCostDerivative(const QP& qp, const Eigen::VectorXd& dx);
@@ -199,8 +205,8 @@ struct ConstrainedNonlinearLeastSquares {
 
   // Solve the quadratic approximation of the cost function for best alpha.
   // Implements equation (3.57/3.58)
-  static double QuadraticApproxMinimum(double phi_0, double phi_prime_0, double alpha_0,
-                                       double phi_alpha_0);
+  static std::optional<double> QuadraticApproxMinimum(double phi_0, double phi_prime_0,
+                                                      double alpha_0, double phi_alpha_0);
 
   // Get the polynomial coefficients c0, c1 from the cubic approximation of the cost.
   // Implements equation after 3.58, returns [a, b]
@@ -208,15 +214,9 @@ struct ConstrainedNonlinearLeastSquares {
                                            double phi_alpha_0, double alpha_1, double phi_alpha_1);
 
   // Get the solution of the cubic approximation.
-  static double CubicApproxMinimum(double phi_prime_0, const Eigen::Vector2d& ab);
+  static std::optional<double> CubicApproxMinimum(double phi_prime_0, const Eigen::Vector2d& ab);
 
-  // Compute the second order correction to the equality constraints.
-  static void ComputeSecondOrderCorrection(
-      const Eigen::VectorXd& updated_x,
-      const std::vector<ResidualBase::unique_ptr>& equality_constraints, QP* qp,
-      Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver, Eigen::VectorXd* dx_out);
-
-  const Problem* const p_;
+  const Problem* p_;
 
   // Custom retraction operator, optional.
   Retraction custom_retraction_;
@@ -241,8 +241,8 @@ struct ConstrainedNonlinearLeastSquares {
   // Current state of the optimization
   OptimizerState state_{OptimizerState::NOMINAL};
 
-  // Logging callback.
-  LoggingCallback logging_callback_{};
+  // A user-specified callback that can opt to terminate the optimization early.
+  std::function<bool(const NLSIteration&)> user_exit_callback_{};
 
   friend class ConstrainedNLSTest;
 };

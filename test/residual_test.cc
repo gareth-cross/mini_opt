@@ -41,8 +41,7 @@ static Eigen::MatrixXd CreateRemapMatrix(const std::array<int, N>& index, const 
 }
 
 template <int ResidualDim, int NumParams>
-static double L2SquaredError(const Residual<ResidualDim, NumParams>& res,
-                             const Eigen::VectorXd& params) {
+static double L2SquaredError(const Residual& res, const Eigen::VectorXd& params) {
   Eigen::VectorXd out(res.Dimension());
   res.ErrorVector(params, out.head(out.rows()));
   return 0.5 * out.squaredNorm();
@@ -50,9 +49,7 @@ static double L2SquaredError(const Residual<ResidualDim, NumParams>& res,
 
 // Test the statically-sized residual struct.
 TEST(MiniOptTest, TestStaticResidualSimple) {
-  Residual<2, 3> res;
-  res.function = &DummyFunction;
-  res.index = {{0, 1, 2}};
+  Residual res = MakeResidual<2, 3>({0, 1, 2}, &DummyFunction);
 
   // pick some params for xyz
   const Vector3d params_xyz = {-0.5, 1.2, 0.3};
@@ -66,7 +63,7 @@ TEST(MiniOptTest, TestStaticResidualSimple) {
 
   // check error
   const VectorXd global_params = params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), 2 * L2SquaredError(res, global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.QuadraticError(global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -78,10 +75,9 @@ TEST(MiniOptTest, TestStaticResidualSimple) {
 
 // Test re-ordering the params.
 TEST(MiniOptTest, TestStaticResidualOutOfOrder) {
-  Residual<2, 3> res;
-  res.function = &DummyFunction;
-  res.index = {{2, 0, 1}};
-  const auto local_D_global = CreateRemapMatrix(res.index, 3);
+  Residual res = MakeResidual<2, 3>({2, 0, 1}, &DummyFunction);
+
+  const auto local_D_global = CreateRemapMatrix<3>({2, 0, 1}, 3);
 
   // pick some params for xyz
   const Vector3d params_xyz = {0.23, -0.9, 1.11};
@@ -95,7 +91,7 @@ TEST(MiniOptTest, TestStaticResidualOutOfOrder) {
 
   // check error
   const VectorXd global_params = local_D_global.transpose() * params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), 2 * L2SquaredError(res, global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.QuadraticError(global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -109,10 +105,8 @@ TEST(MiniOptTest, TestStaticResidualOutOfOrder) {
 
 // Test indexing into a larger matrix.
 TEST(MiniOptTest, TestStaticResidualSparseIndex) {
-  Residual<2, 3> res;
-  res.function = &DummyFunction;
-  res.index = {{5, 1, 3}};
-  const auto local_D_global = CreateRemapMatrix(res.index, 7);
+  Residual res = MakeResidual<2, 3>({5, 1, 3}, &DummyFunction);
+  const auto local_D_global = CreateRemapMatrix<3>({5, 1, 3}, 7);
 
   // pick some params for xyz
   const Vector3d params_xyz = {0.99, -0.23, 2.2};
@@ -126,7 +120,7 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
 
   // check error
   const VectorXd global_params = local_D_global.transpose() * params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), 2 * L2SquaredError(res, global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.QuadraticError(global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);
@@ -153,18 +147,17 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
 
 // Test with dynamic # of params.
 TEST(MiniOptTest, TestDynamicParameterVector) {
-  Residual<2, Dynamic> res;
-  res.index = {0, 1, 2};
-  res.function = [&](const VectorXd& p, Matrix<double, 2, Dynamic>* const J) -> Vector2d {
-    Matrix<double, 2, 3> J_static;
-    const auto r = DummyFunction(p, J ? &J_static : nullptr);
-    if (J) {
-      F_ASSERT(2 == J->rows());
-      F_ASSERT(3 == J->cols());
-      J->noalias() = J_static;
-    }
-    return r;
-  };
+  Residual res = MakeResidual<2, Dynamic>(
+      {0, 1, 2}, [&](const VectorXd& p, Matrix<double, 2, Dynamic>* const J) -> Vector2d {
+        Matrix<double, 2, 3> J_static;
+        const auto r = DummyFunction(p, J ? &J_static : nullptr);
+        if (J) {
+          F_ASSERT_EQ(2, J->rows());
+          F_ASSERT_EQ(3, J->cols());
+          J->noalias() = J_static;
+        }
+        return r;
+      });
 
   // pick some params for xyz
   const Vector3d params_xyz = {.099, -0.5, 0.76};
@@ -178,7 +171,7 @@ TEST(MiniOptTest, TestDynamicParameterVector) {
 
   // check error
   const VectorXd global_params = params_xyz;
-  ASSERT_EQ(expected_error.squaredNorm(), 2 * L2SquaredError(res, global_params));
+  ASSERT_EQ(expected_error.squaredNorm(), 2 * res.QuadraticError(global_params));
 
   // update
   res.UpdateHessian(global_params, &H, &b);

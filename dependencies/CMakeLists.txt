@@ -19,7 +19,21 @@ function(add_gtest)
     add_subdirectory(googletest)
   endif()
 endfunction()
-add_gtest()
+
+if(MINI_OPT_BUILD_TESTS)
+  add_gtest()
+endif()
+
+# Add nlohmann json
+function(add_json)
+  if(NOT TARGET nlohmann_json::nlohmann_json)
+    add_subdirectory(json)
+  endif()
+endfunction()
+
+if(MINI_OPT_SERIALIZATION)
+  add_json()
+endif()
 
 # Create a target for eigen.
 function(add_eigen)
@@ -40,4 +54,7 @@ function(add_geometry_utils)
     add_subdirectory(geometry_utils)
   endif()
 endfunction()
-add_geometry_utils()
+
+if(MINI_OPT_BUILD_TESTS)
+  add_geometry_utils()
+endif()

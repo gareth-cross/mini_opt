@@ -1,13 +1,12 @@
 // Copyright 2021 Gareth Cross
-#include "mini_opt/qp.hpp"
-
 #include <random>
 
 #include <fmt/ostream.h>
 #include <Eigen/Dense>
 
-#include "mini_opt/logging.hpp"
+#include "mini_opt/qp.hpp"
 #include "mini_opt/residual.hpp"
+
 #include "test_utils.hpp"
 
 #ifdef _MSC_VER
@@ -17,7 +16,13 @@
 
 namespace mini_opt {
 using namespace Eigen;
-using namespace std::placeholders;
+
+std::ostream& operator<<(std::ostream& s, const QPInteriorPointSolverOutputs& outputs) {
+  for (const auto& iter : outputs.iterations) {
+    s << iter.ToString();
+  }
+  return s;
+}
 
 TEST(LinearInequalityConstraintTest, Test) {
   const LinearInequalityConstraint c1(3, 2.0, -4.0);
@@ -248,14 +253,13 @@ class QPSolverTest : public ::testing::Test {
     using ScalarMatrix = Matrix<double, 1, 1>;
 
     // simple quadratic residual: f_0(x) = ||x - 5||^2, h(x) = x - 5
-    Residual<1, 1> res;
-    res.index = {{0}};
-    res.function = [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
-      if (J) {
-        J->setIdentity();
-      }
-      return x.array() - 5.0;
-    };
+    Residual res =
+        MakeResidual<1, 1>({0}, [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
+          if (J) {
+            J->setIdentity();
+          }
+          return x.array() - 5.0;
+        });
 
     // linearize at x=0
     const VectorXd initial_values = VectorXd::Constant(1, 0.0);
@@ -266,38 +270,35 @@ class QPSolverTest : public ::testing::Test {
     qp.constraints.emplace_back(Var(0) <= 4);
 
     QPInteriorPointSolver solver(&qp);
-    Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     QPInteriorPointSolver::Params params{};
     params.termination_kkt_tol = tol::kNano;
     params.sigma = 0.1;
     params.initial_mu = 0.1;
-    const QPSolverOutputs outputs = solver.Solve(params);
+    const QPInteriorPointSolverOutputs outputs = solver.Solve(params);
 
     // check the solution
-    ASSERT_EQ(outputs.termination_state, QPTerminationState::SATISFIED_KKT_TOL)
+    ASSERT_EQ(QPInteriorPointTerminationState::SATISFIED_KKT_TOL, outputs.termination_state)
         << "\nSummary:\n"
-        << logger.GetString();
-    ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
-    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
-    ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]) << "Summary:\n" << logger.GetString();
+        << outputs;
+    ASSERT_NEAR(4.0, solver.x_block()[0], tol::kMicro) << "Summary:\n" << outputs;
+    ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << outputs;
+    ASSERT_LT(1.0 - tol::kMicro, solver.z_block()[0]) << "Summary:\n" << outputs;
   }
 
   // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
   void TestWithInequalitiesActive() {
     // Quadratic in two variables. Has a PD diagonal hessian.
-    Residual<2, 2> res;
-    res.index = {{0, 1}};
-    res.function = [](const Matrix<double, 2, 1>& x,
-                      Matrix<double, 2, 2>* const J) -> Matrix<double, 2, 1> {
-      if (J) {
-        J->setZero();
-        J->diagonal() = Matrix<double, 2, 1>(1.0, -4.0);
-      }
-      // solution at (2, -4)
-      return Matrix<double, 2, 1>{x[0] - 2.0, -4 * x[1] - 16.0};
-    };
+    Residual res = MakeResidual<2, 2>(
+        {0, 1},
+        [](const Matrix<double, 2, 1>& x, Matrix<double, 2, 2>* const J) -> Matrix<double, 2, 1> {
+          if (J) {
+            J->setZero();
+            J->diagonal() = Matrix<double, 2, 1>(1.0, -4.0);
+          }
+          // solution at (2, -4)
+          return Matrix<double, 2, 1>{x[0] - 2.0, -4 * x[1] - 16.0};
+        });
 
     // linearize at x=0
     const VectorXd initial_values = VectorXd::Constant(2, .0);
@@ -312,9 +313,6 @@ class QPSolverTest : public ::testing::Test {
 
     for (InitialGuessMethod method :
          {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
-      Logger logger{true};
-      solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
       // solve it
       QPInteriorPointSolver::Params params{};
       params.termination_kkt_tol = tol::kPico;
@@ -324,29 +322,27 @@ class QPSolverTest : public ::testing::Test {
       const auto outputs = solver.Solve(params);
 
       // check the solution
-      ASSERT_EQ(outputs.termination_state, QPTerminationState::SATISFIED_KKT_TOL)
+      ASSERT_EQ(QPInteriorPointTerminationState::SATISFIED_KKT_TOL, outputs.termination_state)
           << "\nSummary:\n"
-          << logger.GetString();
+          << outputs;
       ASSERT_EIGEN_NEAR(Vector2d(1.0, -3.0), solver.x_block(), tol::kMicro) << "Summary:\n"
-                                                                            << logger.GetString();
-      ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), tol::kMicro) << "Summary:\n"
-                                                                         << logger.GetString();
+                                                                            << outputs;
+      ASSERT_EIGEN_NEAR(Vector2d::Zero(), solver.s_block(), tol::kMicro) << "Summary:\n" << outputs;
     }
   }
 
   // Quadratic in three variables, with one active and one inactive inequality.
   void TestWithInequalitiesPartiallyActive() {
-    Residual<3, 3> res;
-    res.index = {{0, 1, 2}};
-    res.function = [](const Matrix<double, 3, 1>& x,
-                      Matrix<double, 3, 3>* const J) -> Matrix<double, 3, 1> {
-      if (J) {
-        J->setZero();
-        J->diagonal() = Matrix<double, 3, 1>(1.0, -1.0, 0.5);
-      }
-      // solution at [1, -3, -10]
-      return Matrix<double, 3, 1>{x[0] - 1.0, -x[1] - 3.0, 0.5 * x[2] + -5.0};
-    };
+    Residual res = MakeResidual<3, 3>(
+        {0, 1, 2},
+        [](const Matrix<double, 3, 1>& x, Matrix<double, 3, 3>* const J) -> Matrix<double, 3, 1> {
+          if (J) {
+            J->setZero();
+            J->diagonal() = Matrix<double, 3, 1>(1.0, -1.0, 0.5);
+          }
+          // solution at [1, -3, -10]
+          return Matrix<double, 3, 1>{x[0] - 1.0, -x[1] - 3.0, 0.5 * x[2] + -5.0};
+        });
 
     // Set up problem w/ only one relevant constraint
     QP qp{3};
@@ -358,9 +354,6 @@ class QPSolverTest : public ::testing::Test {
 
     for (InitialGuessMethod method :
          {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
-      Logger logger{true};
-      solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
       // solve it
       QPInteriorPointSolver::Params params{};
       params.termination_kkt_tol = tol::kPico;
@@ -368,16 +361,16 @@ class QPSolverTest : public ::testing::Test {
       params.sigma = 0.1;
       params.initial_mu = 0.1;
       params.initial_guess_method = method;
-      const auto term_state = solver.Solve(params).termination_state;
+      const auto outputs = solver.Solve(params);
 
       // check the solution
-      ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                   << logger.GetString();
-      ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro)
+      ASSERT_EQ(QPInteriorPointTerminationState::SATISFIED_KKT_TOL, outputs.termination_state)
           << "\nSummary:\n"
-          << logger.GetString();
-      ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << logger.GetString();
-      ASSERT_NEAR(0.0, solver.z_block()[1], tol::kMicro) << "Summary:\n" << logger.GetString();
+          << outputs;
+      ASSERT_EIGEN_NEAR(Vector3d(1.0, -2.0, 10.0), solver.x_block(), tol::kMicro) << "\nSummary:\n"
+                                                                                  << outputs;
+      ASSERT_NEAR(0.0, solver.s_block()[0], tol::kMicro) << "Summary:\n" << outputs;
+      ASSERT_NEAR(0.0, solver.z_block()[1], tol::kMicro) << "Summary:\n" << outputs;
     }
   }
 
@@ -402,21 +395,19 @@ class QPSolverTest : public ::testing::Test {
 
     QPInteriorPointSolver solver(&qp);
 
-    Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
     // solve it
     QPInteriorPointSolver::Params params{};
     params.termination_kkt_tol = tol::kMicro;
     params.max_iterations = 1;  //  should only need one
-    const auto term_state = solver.Solve(params).termination_state;
+    const auto outputs = solver.Solve(params);
 
     // should be able to satisfy immediately
-    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                 << logger.GetString();
+    ASSERT_EQ(QPInteriorPointTerminationState::SATISFIED_KKT_TOL, outputs.termination_state)
+        << "\nSummary:\n"
+        << outputs;
     ASSERT_EIGEN_NEAR(Vector2d::Zero(), qp.A_eq * solver.x_block() + qp.b_eq, tol::kNano)
         << "Summary:\n"
-        << logger.GetString();
+        << outputs;
   }
 
   // Test a problem where all the variables are locked with equality constraints.
@@ -429,21 +420,19 @@ class QPSolverTest : public ::testing::Test {
     qp.b_eq = -Vector3d{1., 2., 3.};
 
     QPInteriorPointSolver solver(&qp);
-    Logger logger{};
-    solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
 
     // solve it in a single step
     QPInteriorPointSolver::Params params{};
     params.termination_kkt_tol = tol::kMicro;
     params.max_iterations = 1;
-    const auto term_state = solver.Solve(params).termination_state;
+    const auto outputs = solver.Solve(params);
 
     // should be able to satisfy immediately
-    ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                 << logger.GetString();
-    ASSERT_EIGEN_NEAR(-qp.b_eq, solver.x_block(), tol::kNano) << "Summary:\n" << logger.GetString();
-    ASSERT_TRUE((solver.y_block().array() > tol::kCenti).all()) << "Summary:\n"
-                                                                << logger.GetString();
+    ASSERT_EQ(QPInteriorPointTerminationState::SATISFIED_KKT_TOL, outputs.termination_state)
+        << "\nSummary:\n"
+        << outputs;
+    ASSERT_EIGEN_NEAR(-qp.b_eq, solver.x_block(), tol::kNano) << "Summary:\n" << outputs;
+    ASSERT_TRUE((solver.y_block().array() > tol::kCenti).all()) << "Summary:\n" << outputs;
   }
 
   // Test with both types of constraint.
@@ -462,25 +451,22 @@ class QPSolverTest : public ::testing::Test {
     QPInteriorPointSolver solver(&qp);
     for (InitialGuessMethod method :
          {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
-      Logger logger{};
-      solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
       QPInteriorPointSolver::Params params{};
       params.termination_kkt_tol = tol::kPico;
       params.initial_mu = 0.1;
       params.sigma = 0.1;
       params.initial_guess_method = method;
 
-      const auto term_state = solver.Solve(params).termination_state;
+      const auto outputs = solver.Solve(params);
 
       // both inequalities should be active
-      ASSERT_EQ(term_state, QPTerminationState::SATISFIED_KKT_TOL) << "\nSummary:\n"
-                                                                   << logger.GetString();
-      ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro)
+      ASSERT_EQ(QPInteriorPointTerminationState::SATISFIED_KKT_TOL, outputs.termination_state)
           << "\nSummary:\n"
-          << logger.GetString();
+          << outputs;
+      ASSERT_EIGEN_NEAR(Vector3d(0.5, -1.0, 2.0), solver.x_block(), tol::kMicro) << "\nSummary:\n"
+                                                                                 << outputs;
       ASSERT_EIGEN_NEAR(Vector2d(0.0, 0.0), solver.s_block(), tol::kMicro) << "Summary:\n"
-                                                                           << logger.GetString();
+                                                                           << outputs;
     }
   }
 
@@ -563,21 +549,20 @@ class QPSolverTest : public ::testing::Test {
 
       for (InitialGuessMethod method :
            {InitialGuessMethod::NAIVE, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED}) {
-        Logger logger{};
-        solver.SetLoggerCallback(std::bind(&Logger::QPSolverCallback, &logger, _1, _2, _3, _4));
-
         params.initial_guess_method = method;
-        const QPSolverOutputs outputs = solver.Solve(params);
-        iter_counts[method] += outputs.num_iterations;  //  total up # number of iterations
+
+        const QPInteriorPointSolverOutputs outputs = solver.Solve(params);
+        iter_counts[method] +=
+            static_cast<int>(outputs.iterations.size());  //  total up # number of iterations
 
         ASSERT_EIGEN_NEAR(x_solution, solver.x_block(), 5.0e-5)
             << fmt::format("Termination: {}\nProblem p = {}\nSummary:\n{}",
-                           fmt::streamed(outputs.termination_state), p, logger.GetString());
+                           fmt::streamed(outputs.termination_state), p, fmt::streamed(outputs));
 
         // check the variables that are constrained
         ASSERT_EIGEN_NEAR(Eigen::VectorXd::Zero(qp.constraints.size()), solver.s_block(), 5.0e-5)
             << fmt::format("Termination: {}\nProblem p = {}\nSummary:\n{}",
-                           fmt::streamed(outputs.termination_state), p, logger.GetString());
+                           fmt::streamed(outputs.termination_state), p, fmt::streamed(outputs));
       }
     }
     PRINT(iter_counts[InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED]);
@@ -593,27 +578,25 @@ class QPSolverTest : public ::testing::Test {
     const Eigen::Matrix2d A = (Eigen::Matrix2d() << -2.0, 1.4, 2.2, -3.5).finished();
     const Eigen::Vector2d b{-0.8, 1.3};
 
-    Residual<2, 2> cost;
-    cost.index = {{0, 1}};
-    cost.function = [&](const Eigen::Vector2d& x,
-                        Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
-      if (J) {
-        *J = A;
-      }
-      return A * x - b;
-    };
+    Residual cost = MakeResidual<2, 2>(
+        {0, 1},
+        [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+          if (J) {
+            *J = A;
+          }
+          return A * x - b;
+        });
 
     constexpr double x1_pinned_value = 0.3;
-    Residual<1, 1> eq_constraint;
-    eq_constraint.index = {{1}};
-    eq_constraint.function =
+    Residual eq_constraint = MakeResidual<1, 1>(
+        {1},
         [&](const Eigen::Matrix<double, 1, 1>& x,
             Eigen::Matrix<double, 1, 1>* const J) -> Eigen::Matrix<double, 1, 1> {
-      if (J) {
-        J->setIdentity();
-      }
-      return Eigen::Matrix<double, 1, 1>{x[0] - x1_pinned_value};
-    };
+          if (J) {
+            J->setIdentity();
+          }
+          return Eigen::Matrix<double, 1, 1>{x[0] - x1_pinned_value};
+        });
 
     // "linearize" at x=0
     const VectorXd initial_values = VectorXd::Zero(2);
@@ -629,8 +612,8 @@ class QPSolverTest : public ::testing::Test {
                                  qp.b_eq.segment(0, qp.b_eq.rows()));
 
     QPNullSpaceSolver solver{};
-    solver.Setup(&qp);
-    solver.Solve();
+    const QPNullSpaceTerminationState term = solver.Solve(qp);
+    ASSERT_EQ(QPNullSpaceTerminationState::SUCCESS, term);
 
     const Eigen::VectorXd x = solver.variables();
 
@@ -649,54 +632,50 @@ class QPSolverTest : public ::testing::Test {
 
   // A little problem with three quadratic costs and one equality constraint over two variables.
   void TestNullSpaceSolver2() {
-    Residual<2, 2> cost_1;
-    cost_1.index = {{0, 1}};
-    cost_1.function = [&](const Eigen::Vector2d& x,
-                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
-      const Eigen::Matrix2d A0 = (Eigen::Matrix2d() << 1.7, -0.2, 2.3, 1.2).finished();
-      const Eigen::Vector2d b0{5.4, -3.4};
-      if (J) {
-        *J = A0;
-      }
-      return A0 * x - b0;
-    };
+    Residual cost_1 = MakeResidual<2, 2>(
+        {0, 1},
+        [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+          const Eigen::Matrix2d A0 = (Eigen::Matrix2d() << 1.7, -0.2, 2.3, 1.2).finished();
+          const Eigen::Vector2d b0{5.4, -3.4};
+          if (J) {
+            *J = A0;
+          }
+          return A0 * x - b0;
+        });
 
-    Residual<2, 2> cost_2;
-    cost_2.index = {{1, 2}};
-    cost_2.function = [&](const Eigen::Vector2d& x,
-                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
-      const Eigen::Matrix2d A1 = (Eigen::Matrix2d() << -5.0, 3.3, 9.1, 1.9).finished();
-      const Eigen::Vector2d b1{-3.3, 4.4};
-      if (J) {
-        *J = A1;
-      }
-      return A1 * x - b1;
-    };
+    Residual cost_2 = MakeResidual<2, 2>(
+        {1, 2},
+        [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+          const Eigen::Matrix2d A1 = (Eigen::Matrix2d() << -5.0, 3.3, 9.1, 1.9).finished();
+          const Eigen::Vector2d b1{-3.3, 4.4};
+          if (J) {
+            *J = A1;
+          }
+          return A1 * x - b1;
+        });
 
-    Residual<2, 2> cost_3;
-    cost_3.index = {{0, 3}};
-    cost_3.function = [&](const Eigen::Vector2d& x,
-                          Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
-      const Eigen::Matrix2d A2 = (Eigen::Matrix2d() << 0.2, -0.5, 1.1, -3.1).finished();
-      const Eigen::Vector2d b2{0.5, 0.0};
-      if (J) {
-        *J = A2;
-      }
-      return A2 * x - b2;
-    };
+    Residual cost_3 = MakeResidual<2, 2>(
+        {0, 3},
+        [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
+          const Eigen::Matrix2d A2 = (Eigen::Matrix2d() << 0.2, -0.5, 1.1, -3.1).finished();
+          const Eigen::Vector2d b2{0.5, 0.0};
+          if (J) {
+            *J = A2;
+          }
+          return A2 * x - b2;
+        });
 
-    Residual<2, 2> eq_constraint;
-    eq_constraint.index = {{1, 3}};
-    eq_constraint.function =
+    Residual eq_constraint = MakeResidual<2, 2>(
+        {1, 3},
         [&](const Eigen::Matrix<double, 2, 1>& x,
             Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Matrix<double, 2, 1> {
-      const Eigen::Matrix2d A_eq = (Eigen::Matrix2d() << 1.1, -1.1, 0.3, 0.6).finished();
-      const Eigen::Vector2d b_eq = (Eigen::Vector2d() << 1.3, -4.0).finished();
-      if (J) {
-        *J = A_eq;
-      }
-      return A_eq * x - b_eq;
-    };
+          const Eigen::Matrix2d A_eq = (Eigen::Matrix2d() << 1.1, -1.1, 0.3, 0.6).finished();
+          const Eigen::Vector2d b_eq = (Eigen::Vector2d() << 1.3, -4.0).finished();
+          if (J) {
+            *J = A_eq;
+          }
+          return A_eq * x - b_eq;
+        });
 
     const Eigen::VectorXd initial_values = Eigen::VectorXd::Zero(4);
 
@@ -711,8 +690,8 @@ class QPSolverTest : public ::testing::Test {
                                  qp.b_eq.segment(0, qp.b_eq.rows()));
 
     QPNullSpaceSolver solver{};
-    solver.Setup(&qp);
-    solver.Solve();
+    const auto term = solver.Solve(qp);
+    ASSERT_EQ(QPNullSpaceTerminationState::SUCCESS, term);
 
     const Eigen::VectorXd x = solver.variables();
     static const Eigen::IOFormat kMatrixFmt(Eigen::FullPrecision, 0, ", ", ",\n", "[", "]", "[",

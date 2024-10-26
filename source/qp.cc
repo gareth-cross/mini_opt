@@ -9,6 +9,12 @@ namespace mini_opt {
 
 static const IOFormat kMatrixFmt(FullPrecision, 0, ", ", ",\n", "[", "]", "[", "]");
 
+QPEigenvalues QP::ComputeEigenvalueStats() const {
+  const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(G);
+  return {solver.eigenvalues().minCoeff(), solver.eigenvalues().maxCoeff(),
+          solver.eigenvalues().cwiseAbs().minCoeff()};
+}
+
 QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem) { Setup(problem); }
 
 void QPInteriorPointSolver::Setup(const QP* const problem) {
@@ -91,7 +97,8 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
  * far the simpler strategy of just scaling `mu` with complementarity seems better, but there
  * may be an implementation issue.
  */
-QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params& params) {
+QPInteriorPointSolverOutputs QPInteriorPointSolver::Solve(
+    const QPInteriorPointSolver::Params& params) {
   F_ASSERT(p_, "Must have a valid problem");
   CheckParams(params);
 
@@ -101,6 +108,9 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
   // on the first iteration, the residual needs to be filled first
   // TODO(gareth): this is superfluous, just get it as the output of Iterate()
   EvaluateKKTConditions();
+
+  std::vector<QPInteriorPointIteration> iterations{};
+  iterations.reserve(5);
 
   double mu{params.initialize_mu_with_complementarity ? ComputeMu() : params.initial_mu};
   for (int iter = 0; iter < params.max_iterations; ++iter) {
@@ -115,16 +125,15 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
     EvaluateKKTConditions();
 
     const KKTError kkt_after = ComputeErrors(mu);
-    if (logger_callback_) {
-      // pass progress to the logger callback for printing in the test
-      logger_callback_(const_cast<const QPInteriorPointSolver&>(*this), kkt_prev, kkt_after,
-                       iteration_outputs);
-    }
+
+    // Record progress and check if we can terminate because the KKT conditions were satisfied.
+    iterations.emplace_back(kkt_prev, kkt_after, iteration_outputs);
 
     if (kkt_after.Max() < params.termination_kkt_tol &&
         ComputeMu() < params.termination_complementarity_tol) {
       // error is low enough, stop
-      return {QPTerminationState::SATISFIED_KKT_TOL, iter + 1};
+      return {QPInteriorPointTerminationState::SATISFIED_KKT_TOL, std::move(iterations),
+              ComputeLagrangeMultiplierSummary()};
     }
 
     // adjust the barrier parameter
@@ -136,7 +145,9 @@ QPSolverOutputs QPInteriorPointSolver::Solve(const QPInteriorPointSolver::Params
       }
     }
   }
-  return {QPTerminationState::MAX_ITERATIONS, params.max_iterations};
+
+  return {QPInteriorPointTerminationState::MAX_ITERATIONS, std::move(iterations),
+          ComputeLagrangeMultiplierSummary()};
 }
 
 IPIterationOutputs QPInteriorPointSolver::Iterate(const double mu_input,
@@ -271,11 +282,8 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   const auto z = ConstZBlock(dims_, variables_);
 
   // shouldn't happen due to selection of alpha, but double check
-  const bool any_non_positive_s = (s.array() <= 0.0).any();
-  if (include_inequalities && any_non_positive_s) {
-    throw std::runtime_error(fmt::format("Some slack variables s <= 0: {}",
-                                         fmt::streamed(s.transpose().format(kMatrixFmt))));
-  }
+  F_ASSERT(!include_inequalities || (s.array() > 0.0).all(), "Some slack variables s <= 0: [{}]",
+           fmt::streamed(s.transpose().format(kMatrixFmt)));
 
   // build the left-hand side (we only need lower triangular)
   H_.topLeftCorner(N, N).triangularView<Eigen::Lower>() = p_->G.triangularView<Eigen::Lower>();
@@ -290,6 +298,7 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   }
 
   // factorize, TODO(gareth): preallocate ldlt...
+  // TODO: when this happens, return an enum value indicating failure
   const LDLT<MatrixXd, Eigen::Lower> ldlt(H_);
   if (ldlt.info() != Eigen::ComputationInfo::Success) {
     throw FailedFactorization(fmt::format(
@@ -441,7 +450,7 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
     // we can sometimes guess zero for `x`. This is fairly simple, but I keep it around
     // to compare to.
   } else {
-    F_ASSERT(params.initial_guess_method == InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
+    F_ASSERT_EQ(params.initial_guess_method, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
     // Formulate the problem without inequalities.
     ComputeLDLT(false);
     EvaluateKKTConditions(false);
@@ -525,6 +534,15 @@ double QPInteriorPointSolver::ComputePredictorCorrectorMuAffine(
   //  z + dz * ad >= 0
   // Catch small numerical errors anyways.
   return std::max(mu_affine, 0.0);
+}
+
+std::optional<QPLagrangeMultipliers> QPInteriorPointSolver::ComputeLagrangeMultiplierSummary()
+    const {
+  if (const auto y = y_block(); y.rows() > 0) {
+    return QPLagrangeMultipliers{y.minCoeff(), y.lpNorm<Eigen::Infinity>()};
+  } else {
+    return std::nullopt;
+  }
 }
 
 ConstVectorBlock QPInteriorPointSolver::ConstXBlock(const ProblemDims& dims,
@@ -636,11 +654,6 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
   }
 }
 
-void QPNullSpaceSolver::Setup(const QP* problem) {
-  F_ASSERT(problem);
-  p_ = problem;
-}
-
 // min (1/2) * x^T * G * x + x^T * c
 //
 // Take derivative wrt `x`:
@@ -663,16 +676,15 @@ void QPNullSpaceSolver::Setup(const QP* problem) {
 //
 //  y = (Q2^T * G * Q2)^-1 * -Q2^T * (c + G * u)
 //
-QPSolverOutputs QPNullSpaceSolver::Solve() {
-  F_ASSERT(p_);
-  F_ASSERT_GT(p_->A_eq.rows(), 0, "Problem must have at least one equality constraint");
-  F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows());
+QPNullSpaceTerminationState QPNullSpaceSolver::Solve(const QP& p) {
+  F_ASSERT_GT(p.A_eq.rows(), 0, "Problem must have at least one equality constraint");
+  F_ASSERT_EQ(p.A_eq.rows(), p.b_eq.rows());
 
-  const int num_equality_constraints = static_cast<int>(p_->A_eq.rows());
-  const int num_params = static_cast<int>(p_->A_eq.cols());
+  const int num_equality_constraints = static_cast<int>(p.A_eq.rows());
+  const int num_params = static_cast<int>(p.A_eq.cols());
 
   // Compute [Q R] factorization of A_eq^T
-  const auto QR = p_->A_eq.transpose().colPivHouseholderQr();
+  const auto QR = p.A_eq.transpose().colPivHouseholderQr();
 
   Q_ = QR.matrixQ();
   const auto& R = QR.matrixR();
@@ -690,30 +702,30 @@ QPSolverOutputs QPNullSpaceSolver::Solve() {
 
   // Compute u = Q1 * (R1^T)^-1 * (P^-1) * b_eq
   // `u` is a particular solution to the equality constrained system: A_eq * x + b = 0
-  permuted_rhs_ = P.transpose() * -p_->b_eq;
-  u_ = Q1 * R_upper.transpose().solve(permuted_rhs_);
+  permuted_rhs_.noalias() = P.transpose() * -p.b_eq;
+  u_.noalias() = Q1 * R_upper.transpose().solve(permuted_rhs_);
   F_ASSERT_EQ(num_params, u_.rows());
 
   // Compute the reduced hessian by projecting `G` into null(A_eq)
-  G_reduced_ = Q2.transpose() * p_->G.template selfadjointView<Eigen::Lower>() * Q2;
+  G_reduced_.noalias() = Q2.transpose() * p.G.template selfadjointView<Eigen::Lower>() * Q2;
 
   // Factorize it with cholesky, which is only valid if `G_reduced` is PD.
   const auto llt = G_reduced_.selfadjointView<Eigen::Lower>().llt();
-  F_ASSERT(llt.info() == Eigen::ComputationInfo::Success,
-           "Not PD (TODO: return something here instead of asserting)");
+  if (llt.info() != Eigen::ComputationInfo::Success) {
+    return QPNullSpaceTerminationState::NOT_POSITIVE_DEFINITE;
+  }
 
   // Compute the rhs of:
   // (Q2^T * G * Q2) * y = -Q2^T * (c + G * u)
-  y_ = -(Q2.transpose() * (p_->c + p_->G.selfadjointView<Eigen::Lower>() * u_));
+  y_.noalias() = -(Q2.transpose() * (p.c + p.G.selfadjointView<Eigen::Lower>() * u_));
 
   // Solve for the vector `y` in:
   llt.solveInPlace(y_);
   F_ASSERT_EQ(Q_.cols() - rank, y_.rows());
 
   // Construct the final solution:
-  x_ = u_ + Q2 * y_;
-
-  return QPSolverOutputs{QPTerminationState::NULL_SPACE_SOLVER, 1};
+  x_.noalias() = u_ + Q2 * y_;
+  return QPNullSpaceTerminationState::SUCCESS;
 }
 
 }  // namespace mini_opt
