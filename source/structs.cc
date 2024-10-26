@@ -280,7 +280,12 @@ struct fmt::formatter<mini_opt::ColorFmt> {
         return fmt::format_to(ctx.out(), "\u001b[38;5;{}m", static_cast<int>(c.code));
       } else {
         constexpr std::string_view terminator = "\u001b[0m";
-        return std::copy(terminator.begin(), terminator.end(), ctx.out());
+        auto output = ctx.out();
+        for (const char character : terminator) {
+          *output = character;
+          ++output;
+        }
+        return output;
       }
     }
     return ctx.out();
