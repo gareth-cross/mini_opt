@@ -13,7 +13,7 @@ function(add_gtest)
   set(BUILD_GMOCK OFF)
   set(INSTALL_GTEST OFF)
   if(NOT TARGET gtest)
-    add_subdirectory(gtest)
+    add_subdirectory(googletest)
   endif()
 endfunction()
 

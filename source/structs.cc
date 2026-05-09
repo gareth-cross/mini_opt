@@ -4,6 +4,40 @@
 #include <ostream>
 
 namespace mini_opt {
+enum class ColorCode : int { GREEN = 112, RED = 160, ORANGE = 202, NONE = -1 };
+
+struct ColorFmt {
+  constexpr ColorFmt(ColorCode code, bool enabled) noexcept : code(code), enabled(enabled) {}
+
+  ColorCode code;
+  bool enabled;
+};
+}  // namespace mini_opt
+
+template <>
+struct fmt::formatter<mini_opt::ColorFmt> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
+
+  template <typename FormatContext>
+  auto format(const mini_opt::ColorFmt c, FormatContext& ctx) const -> decltype(ctx.out()) {
+    if (c.enabled) {
+      if (c.code != mini_opt::ColorCode::NONE) {
+        return fmt::format_to(ctx.out(), "\u001b[38;5;{}m", static_cast<int>(c.code));
+      } else {
+        constexpr std::string_view terminator = "\u001b[0m";
+        auto output = ctx.out();
+        for (const char character : terminator) {
+          *output = character;
+          ++output;
+        }
+        return output;
+      }
+    }
+    return ctx.out();
+  }
+};
+
+namespace mini_opt {
 
 std::ostream& operator<<(std::ostream& stream, InitialGuessMethod method) {
   switch (method) {
@@ -147,15 +181,6 @@ std::string QPInteriorPointIteration::ToString() const {
   return result;
 }
 
-enum class ColorCode : int { GREEN = 112, RED = 160, ORANGE = 202, NONE = -1 };
-
-struct ColorFmt {
-  constexpr ColorFmt(ColorCode code, bool enabled) noexcept : code(code), enabled(enabled) {}
-
-  ColorCode code;
-  bool enabled;
-};
-
 std::string NLSIteration::ToString(const bool use_color, const bool include_qp) const {
   std::string result;
   result.reserve(100);
@@ -268,26 +293,3 @@ std::string NLSSolverOutputs::ToString(bool use_color, bool include_qp) const {
 }
 
 }  // namespace mini_opt
-
-template <>
-struct fmt::formatter<mini_opt::ColorFmt> {
-  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
-
-  template <typename FormatContext>
-  auto format(const mini_opt::ColorFmt c, FormatContext& ctx) const -> decltype(ctx.out()) {
-    if (c.enabled) {
-      if (c.code != mini_opt::ColorCode::NONE) {
-        return fmt::format_to(ctx.out(), "\u001b[38;5;{}m", static_cast<int>(c.code));
-      } else {
-        constexpr std::string_view terminator = "\u001b[0m";
-        auto output = ctx.out();
-        for (const char character : terminator) {
-          *output = character;
-          ++output;
-        }
-        return output;
-      }
-    }
-    return ctx.out();
-  }
-};

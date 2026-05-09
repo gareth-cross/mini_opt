@@ -58,14 +58,14 @@ auto numerical_jacobian(const XExpr& x, Function func, const double h = 0.01) {
 
   // Possibly allocate for the result, since dimensions may be dynamic.
   Eigen::Matrix<Scalar, DimY, DimX> J;
-  if (DimX == Eigen::Dynamic || DimY == Eigen::Dynamic) {
+  if constexpr (DimX == Eigen::Dynamic || DimY == Eigen::Dynamic) {
     J.resize(mini_opt::manifold_trait<YExpr>::TangentDimension(y_0),
              mini_opt::manifold_trait<XExpr>::TangentDimension(x));
   }
 
   // Pre-allocate `delta` once and re-use it.
   Eigen::Matrix<Scalar, DimX, 1> delta;
-  if (DimX == Eigen::Dynamic) {
+  if constexpr (DimX == Eigen::Dynamic) {
     delta.resize(mini_opt::manifold_trait<XExpr>::TangentDimension(x));
   }
 
