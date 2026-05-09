@@ -9,28 +9,46 @@ namespace mini_opt {
 template <typename T, typename = void>
 struct manifold_trait;
 
-// Operations on quaternions.
+// Quaternion from rotation vector.
+template <typename Derived,
+          typename = enable_if_is_vector3_at_compile_time_t<Eigen::MatrixBase<Derived>>>
+Eigen::Quaternion<scalar_type_t<Derived>> quaternion_exp(const Eigen::MatrixBase<Derived>& w_xpr) {
+  using Scalar = scalar_type_t<Derived>;
+  const Scalar angle = w_xpr.norm();
+  // Fill out the quaternion.
+  Eigen::Quaternion<Scalar> q;
+  q.w() = std::cos(angle / 2);
+  if (angle < static_cast<Scalar>(1.0e-9)) {
+    q.vec() = w_xpr / 2;
+    q.normalize();
+  } else {
+    const Scalar sinc_ha_2 = std::sin(angle / 2) / angle;
+    q.vec() = w_xpr * sinc_ha_2;
+  }
+  return q;
+}
+
+// Operations on quaternions. Quaternions are optimized on so(3).
 template <typename T>
 struct manifold_trait<T, enable_if_inherits_quaternion_base_t<T>> {
-  // Quaternions are convertible to so(3).
   static constexpr int tangent_dim = 3;
-  using Scalar = typename T::Scalar;
-  using VectorType = Eigen::Matrix<Scalar, tangent_dim, 1>;
+  using self_type = T;
+  using scalar_type = typename T::Scalar;
+  using tangent_vector = Eigen::Matrix<scalar_type, tangent_dim, 1>;
+
+  // y [-] x
+  static tangent_vector local_coordinates(const self_type& y, const self_type& x) {
+    const Eigen::AngleAxis<scalar_type> angle_axis(x.conjugate() * y);
+    return angle_axis.angle() * angle_axis.axis();
+  }
 
   // Map from the manifold to a vector in the tangent space of `x`.
-  static VectorType From(const T& x, const T& y) { return RotationLog(x.conjugate() * y); }
-
-  // Map a vector to the manifold in the tangent space of `x`.
-  template <typename Derived>
-  static T To(const T& x, const Eigen::MatrixBase<Derived>& v) {
-    return x * QuaternionExp(v);
+  // x [+] dx
+  static self_type retract(const self_type& x, const tangent_vector& dx) {
+    return (x * quaternion_exp(dx)).normalized();
   }
 
-  // Get runtime dimension of the tangent space of an object.
-  static constexpr int TangentDimension(const T& x) {
-    (void)x;  //  silence un-referenced parameter in MSVC
-    return tangent_dim;
-  }
+  static constexpr int tangent_dimension(const T&) { return tangent_dim; }
 };
 
 // Traits on vector types.
@@ -38,37 +56,36 @@ template <typename T>
 struct manifold_trait<T, enable_if_inherits_matrix_base_t<T>> {
   static_assert(Eigen::MatrixBase<T>::ColsAtCompileTime == 1, "Must be a vector");
 
-  // Inherit dimensionality from the vector itself.
   static constexpr int tangent_dim = Eigen::MatrixBase<T>::RowsAtCompileTime;
-  using Scalar = typename T::Scalar;
-  using VectorType = Eigen::Matrix<Scalar, tangent_dim, 1>;
+  using self_type = T;
+  using scalar_type = typename T::Scalar;
+  using tangent_vector = Eigen::Matrix<scalar_type, tangent_dim, 1>;
 
-  // Defined so numericalDerivative works.
-  static VectorType From(const VectorType& x, const VectorType& y) { return y - x; }
+  static tangent_vector local_coordinates(const self_type& y, const self_type& x) { return y - x; }
 
-  // Defined so numericalDerivative works.
   template <typename Derived>
-  static VectorType To(const T& x, const Eigen::MatrixBase<Derived>& v) {
-    return x + v;
+  static tangent_vector retract(const T& x, const Eigen::MatrixBase<Derived>& dx) {
+    return x + dx;
   }
 
   // Runtime dimension of vector.
-  static int TangentDimension(const T& x) { return static_cast<int>(x.rows()); }
+  static int tangent_dimension(const T& x) { return static_cast<int>(x.rows()); }
 };
 
 // Traits on floats/doubles.
 template <typename T>
 struct manifold_trait<T, typename std::enable_if<std::is_floating_point<T>::value>::type> {
   static constexpr int tangent_dim = 1;
-  using Scalar = T;
-  using VectorType = Eigen::Matrix<Scalar, tangent_dim, 1>;
+  using self_type = T;
+  using scalar_type = T;
+  using tangent_vector = Eigen::Matrix<scalar_type, tangent_dim, 1>;
 
   // Defined so numericalDerivative works.
-  static VectorType From(const T& x, const T& y) { return VectorType{y - x}; }
+  static tangent_vector local_coordinates(const T& y, const T& x) { return tangent_vector{y - x}; }
 
   // Defined so numericalDerivative works.
   template <typename Derived>
-  static T To(const T& x, const Eigen::MatrixBase<Derived>& v) {
+  static T retract(const T& x, const Eigen::MatrixBase<Derived>& dx) {
     // If we can check at compile time, enforce this is a 1x1 matrix.
     static_assert(Eigen::MatrixBase<Derived>::RowsAtCompileTime == Eigen::Dynamic ||
                       Eigen::MatrixBase<Derived>::RowsAtCompileTime == 1,
@@ -76,14 +93,10 @@ struct manifold_trait<T, typename std::enable_if<std::is_floating_point<T>::valu
     static_assert(Eigen::MatrixBase<Derived>::ColsAtCompileTime == Eigen::Dynamic ||
                       Eigen::MatrixBase<Derived>::ColsAtCompileTime == 1,
                   "Must be a scalar");
-    return x + static_cast<T>(v[0]);
+    return x + static_cast<T>(dx[0]);
   }
 
-  // Runtime dimension of vector.
-  static constexpr int TangentDimension(const T& x) {
-    (void)x;
-    return tangent_dim;
-  }
+  static constexpr int tangent_dimension(const T&) { return tangent_dim; }
 };
 
 }  // namespace mini_opt

@@ -49,38 +49,37 @@ auto numerical_derivative(const Scalar x, const Scalar h, Function func) -> decl
 template <typename XExpr, typename Function>
 auto numerical_jacobian(const XExpr& x, Function func, const double h = 0.01) {
   using YExpr = typename std::decay<decltype(func(x))>::type;
-  constexpr int DimX = mini_opt::manifold_trait<XExpr>::tangent_dim;
-  constexpr int DimY = mini_opt::manifold_trait<YExpr>::tangent_dim;
-  using Scalar = typename mini_opt::manifold_trait<XExpr>::Scalar;
+  constexpr int dim_x = mini_opt::manifold_trait<XExpr>::tangent_dim;
+  constexpr int dim_y = mini_opt::manifold_trait<YExpr>::tangent_dim;
+  using Scalar = typename mini_opt::manifold_trait<XExpr>::scalar_type;
 
   // Compute the output expression at the linearization point.
   const YExpr y_0 = func(x);
 
   // Possibly allocate for the result, since dimensions may be dynamic.
-  Eigen::Matrix<Scalar, DimY, DimX> J;
-  if constexpr (DimX == Eigen::Dynamic || DimY == Eigen::Dynamic) {
-    J.resize(mini_opt::manifold_trait<YExpr>::TangentDimension(y_0),
-             mini_opt::manifold_trait<XExpr>::TangentDimension(x));
+  Eigen::Matrix<Scalar, dim_y, dim_x> J;
+  if constexpr (dim_x == Eigen::Dynamic || dim_y == Eigen::Dynamic) {
+    J.resize(mini_opt::manifold_trait<YExpr>::tangent_dimension(y_0),
+             mini_opt::manifold_trait<XExpr>::tangent_dimension(x));
   }
 
   // Pre-allocate `delta` once and re-use it.
-  Eigen::Matrix<Scalar, DimX, 1> delta;
-  if constexpr (DimX == Eigen::Dynamic) {
-    delta.resize(mini_opt::manifold_trait<XExpr>::TangentDimension(x));
+  Eigen::Matrix<Scalar, dim_x, 1> delta;
+  if constexpr (dim_x == Eigen::Dynamic) {
+    delta.resize(mini_opt::manifold_trait<XExpr>::tangent_dimension(x));
   }
 
-  for (int j = 0; j < mini_opt::manifold_trait<XExpr>::TangentDimension(x); ++j) {
+  for (int j = 0; j < mini_opt::manifold_trait<XExpr>::tangent_dimension(x); ++j) {
     // Take derivative wrt dimension `j` of X
     const auto wrapped = [&](const Scalar dx) {
       // apply perturbation in the tangent space
       delta.setZero();
       delta[j] = dx;
-      // Perform the operation: x [+] f(dx), where [+] is the manifold composition.
-      const auto x_oplus_dx = mini_opt::manifold_trait<XExpr>::To(x, delta);
+      // Perform the operation: x [+] dx
+      const auto x_oplus_dx = mini_opt::manifold_trait<XExpr>::retract(x, delta);
       const auto y = func(x_oplus_dx);
-      // determine the perturbation in y: dy = f^-1(y^-1 [+] y)
-      // where f() maps to and from the manifold
-      return mini_opt::manifold_trait<YExpr>::From(y_0, y);
+      // determine the perturbation in y: dy = y [-] y_0
+      return mini_opt::manifold_trait<YExpr>::local_coordinates(y, y_0);
     };
     J.col(j) = numerical_derivative2(static_cast<Scalar>(h), wrapped);
   }
