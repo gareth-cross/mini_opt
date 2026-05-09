@@ -4,14 +4,12 @@
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
-
-#include "geometry_utils/angle_utils.hpp"
-#include "geometry_utils/numerical_derivative.hpp"
+#include <Eigen/Dense>
 
 #include "mini_opt/nonlinear.hpp"
+#include "mini_opt/numerical_jacobian.hpp"
 
 #include "test_utils.hpp"
-#include "transform_chains.hpp"
 
 // TODO(gareth): Split up this file a bit.
 namespace mini_opt {
@@ -32,7 +30,7 @@ static void TestResidualFunctionDerivative(
   function(params, &J);
 
   // evaluate numerically
-  const Eigen::Matrix<double, ResidualDim, NumParams> J_numerical = math::NumericalJacobian(
+  const Eigen::Matrix<double, ResidualDim, NumParams> J_numerical = numerical_jacobian(
       params, [&](const Eigen::Matrix<double, NumParams, 1>& x) { return function(x, nullptr); });
 
   ASSERT_EIGEN_NEAR(J_numerical, J, tol);
@@ -157,7 +155,7 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     // test with L1
     // compute the derivative of the sum cost function
-    const Matrix<double, 1, 1> J_numerical = math::NumericalJacobian(0.0, [&](const double alpha) {
+    const Matrix<double, 1, 1> J_numerical = numerical_jacobian(0.0, [&](const double alpha) {
       Eigen::VectorXd cost_out(3);
       Eigen::VectorXd equality_out(2);
       cost.ErrorVector(params + dx * alpha, cost_out.head(3));
@@ -320,12 +318,12 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     // should be the min norm solution (ie. step in any other valid direction increases |x|^2)
     const auto norm_func = [&](double alpha) { return (dx_original + null_space * alpha).norm(); };
-    ASSERT_NEAR(0.0, math::NumericalDerivative(0.0, 0.01, norm_func), tol::kPico);
+    ASSERT_NEAR(0.0, numerical_derivative(0.0, 0.01, norm_func), tol::kPico);
 
     const auto der_func = [&](double alpha) {
-      return math::NumericalDerivative(alpha, 0.01, norm_func);
+      return numerical_derivative(alpha, 0.01, norm_func);
     };
-    ASSERT_GT(math::NumericalDerivative(0.0, 0.01, der_func), 0.0);
+    ASSERT_GT(numerical_derivative(0.0, 0.01, der_func), 0.0);
 
     // shift by that step and re-evaluate the nonlinear constraint
     Eigen::VectorXd dx_in(3);
@@ -406,9 +404,9 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     // Solve it from a few different initial guesses.
     // These guesses aren't that principled, I kind of picked at random.
-    const AlignedVector<Vector2d> initial_guesses = {{-5, -3},  {10, 8},     {-20, 3},
-                                                     {0, -5},   {4, 0},      {100, 50},
-                                                     {-35, 40}, {1000, -50}, {0.8, -0.3}};
+    const std::vector<Vector2d> initial_guesses = {{-5, -3},  {10, 8},     {-20, 3},
+                                                   {0, -5},   {4, 0},      {100, 50},
+                                                   {-35, 40}, {1000, -50}, {0.8, -0.3}};
     for (const Vector2d& guess : initial_guesses) {
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
@@ -442,9 +440,9 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.max_line_search_iterations = 0;
 
     // Solve it from a few different initial guesses
-    const AlignedVector<Vector2d> initial_guesses = {{-5, -3},  {10, 8},     {-20, 3},
-                                                     {0, -5},   {4, 0},      {100, 50},
-                                                     {-35, 40}, {1000, -50}, {0.8, -0.3}};
+    const std::vector<Vector2d> initial_guesses = {{-5, -3},  {10, 8},     {-20, 3},
+                                                   {0, -5},   {4, 0},      {100, 50},
+                                                   {-35, 40}, {1000, -50}, {0.8, -0.3}};
     for (const Vector2d& guess : initial_guesses) {
       // solve it
       const NLSSolverOutputs outputs = nls.Solve(p, guess);
@@ -475,8 +473,8 @@ class ConstrainedNLSTest : public ::testing::Test {
 
     // Solve it from a few different initial guesses
     // The last three are actually infeasible to begin with.
-    const AlignedVector<Vector2d> initial_guesses = {
-        {12, -5}, {100.0, -20.0}, {1423.0, -400.0}, {-20.0, 10.0}, {-120.0, 35.0}, {-50.0, 0.5}};
+    const std::vector<Vector2d> initial_guesses = {{12, -5},      {100.0, -20.0}, {1423.0, -400.0},
+                                                   {-20.0, 10.0}, {-120.0, 35.0}, {-50.0, 0.5}};
     std::vector<StatCounters> counters;
     for (const Vector2d& guess : initial_guesses) {
       // solve it
@@ -615,7 +613,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     ConstrainedNonlinearLeastSquares nls(&problem);
 
     // From wikipedia, should get more accurate values for these
-    AlignedVector<Vector2d> valid_solutions;
+    std::vector<Vector2d> valid_solutions;
     valid_solutions.emplace_back(3.0, 2.0);
     valid_solutions.emplace_back(-2.805118, 3.131312);
     valid_solutions.emplace_back(-3.779310, -3.283186);
@@ -632,7 +630,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.termination_kkt_tolerance = tol::kMicro;
 
     // generate a bunch of initial guesses
-    AlignedVector<Vector2d> initial_guesses;
+    std::vector<Vector2d> initial_guesses;
     for (double x = -4.5; x <= 4.5; x += 0.3) {    // NOLINT(cert-flp30-c)
       for (double y = -4.5; y <= 4.5; y += 0.3) {  // NOLINT(cert-flp30-c)
         initial_guesses.emplace_back(x, y);
@@ -689,7 +687,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.termination_kkt_tolerance = tol::kMicro;
 
     // generate a bunch of initial guesses
-    AlignedVector<Vector2d> initial_guesses;
+    std::vector<Vector2d> initial_guesses;
     for (double x = 0.2; x <= 4.8; x += 0.2) {    // NOLINT(cert-flp30-c)
       for (double y = 0.2; y <= 4.8; y += 0.2) {  // NOLINT(cert-flp30-c)
         initial_guesses.emplace_back(x, y);
@@ -769,7 +767,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     p.lambda_initial = 0.001;
 
     // generate a bunch of random initial guesses
-    AlignedVector<Matrix<double, N, 1>> guesses;
+    std::vector<Matrix<double, N, 1>> guesses;
     std::default_random_engine engine{7};  // NOLINT(cert-msc51-cpp)
     std::uniform_real_distribution<double> dist{-30.0, 30.0};
     for (int i = 0; i < 100; ++i) {
@@ -781,7 +779,7 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
 
     // viable solutions
-    AlignedVector<Matrix<double, N, 1>> solutions;
+    std::vector<Matrix<double, N, 1>> solutions;
     for (double x0 : {-2.0, 2.0}) {
       for (double x2 : {-3.0, 3.0}) {
         Matrix<double, N, 1> sol;
@@ -823,316 +821,6 @@ class ConstrainedNLSTest : public ::testing::Test {
     }
     SummarizeCounts("Sphere With Nonlinear Equalities", counters);
   }
-
-  // Test a simple non-linear least squares problem.
-  void TestTwoAngleActuatorChain() {
-    // We have a chain of three rotational actuators, at the end of which we have an effector.
-    // Two actuators can effectuate translation, whereas the last one can only rotate the
-    // effector.
-    std::unique_ptr<ActuatorChain> chain = std::make_unique<ActuatorChain>();
-    const std::array<uint8_t, 6> mask = {{0, 0, 1, 0, 0, 0}};
-    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.0, 0.0, 0.0}), mask);
-    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.4, 0.0, 0.0}), mask);
-    chain->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.4, 0.0, 0.0}),
-                              std::array<uint8_t, 6>{{0, 0, 0, 0, 0, 0}} /* turn off for now */);
-
-    // make a cost that we want to achieve a specific point vertically
-    auto y_res = [&](const VectorXd& params,
-                     Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
-      chain->Update(params);
-      const Vector3d effector_xyz = chain->translation();
-      if (J_out) {
-        *J_out = chain->translation_D_params().middleRows<1>(1);
-      }
-      return Matrix<double, 1, 1>{effector_xyz.y() - 0.6};
-    };
-
-    // make an equality constraint on x
-    auto x_eq = [&](const VectorXd& params,
-                    Matrix<double, 1, Dynamic>* const J_out) -> Matrix<double, 1, 1> {
-      chain->Update(params);
-      const Vector3d effector_xyz = chain->translation();
-      if (J_out) {
-        *J_out = chain->translation_D_params().topRows<1>();
-      }
-      return Matrix<double, 1, 1>{effector_xyz.x() - 0.45};
-    };
-
-    TestResidualFunctionDerivative<1, Dynamic>(y_res, VectorXd{Vector2d(-0.5, 0.4)});
-    TestResidualFunctionDerivative<1, Dynamic>(x_eq, VectorXd{Vector2d(0.3, -0.6)});
-
-    Problem problem{};
-    problem.costs.push_back(MakeResidual<1, Dynamic>({0, 1}, y_res));
-    problem.equality_constraints.push_back(MakeResidual<1, Dynamic>({0, 1}, x_eq));
-    problem.dimension = 2;
-
-    ConstrainedNonlinearLeastSquares nls(
-        &problem, [](Eigen::VectorXd& x, const ConstVectorBlock& dx, const double alpha) {
-          for (int i = 0; i < x.rows(); ++i) {
-            // These are angles, so clamp them in range of [-pi, pi]
-            x[i] = math::ModPi(x[i] + dx[i] * alpha);
-          }
-        });
-
-    // These tolerances are pretty tight - we're likely prompting more iterations than are really
-    // useful in practice, but it helps for testing.
-    ConstrainedNonlinearLeastSquares::Params p{};
-    p.max_iterations = 50;
-    p.max_qp_iterations = 1;
-    p.relative_exit_tol = tol::kPico;
-    p.absolute_first_derivative_tol = 1.0e-10;
-    p.absolute_exit_tol = tol::kNano;
-    p.termination_kkt_tolerance = tol::kMicro;
-    p.max_line_search_iterations = 10;
-    p.equality_penalty_initial = 0.01;
-
-    // The polynomial approximation does very poorly on this problem near the minimum. Perhaps
-    // the quadratic approximation is just really unsuitable?
-    p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
-    p.lambda_failure_init = 0.001;
-    p.armijo_search_tau = 0.5;  //  backtrack more aggressively
-
-    // We add some non-zero lambda because this problem technically does not have
-    // a positive semi-definite hessian (since there is only one nonlinear cost
-    // on the effector position).
-    p.lambda_initial = 0.001;
-    p.min_lambda = 1.0e-9;
-
-    // generate a bunch of initial guesses
-    AlignedVector<Vector2d> initial_guesses;
-    for (double theta0 = tol::kDeci; theta0 <= M_PI / 2; theta0 += 0.1) {   // NOLINT(cert-flp30-c)
-      for (double theta1 = -M_PI / 3; theta1 <= M_PI / 3; theta1 += 0.1) {  // NOLINT(cert-flp30-c)
-        initial_guesses.emplace_back(theta0, theta1);
-      }
-    }
-
-    std::vector<StatCounters> counters;
-    for (const auto& guess : initial_guesses) {
-      // solve it
-      const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.emplace_back(outputs);
-
-      // check that we reached the desired position
-      const VectorXd& angles_out = nls.variables();
-      chain->Update(angles_out);
-      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->translation().head(2), 5.0e-5)
-          << fmt::format("Termination: {}\nInitial guess: {}\nSummary:\n{}\n",
-                         fmt::streamed(outputs.termination_state),
-                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
-                         outputs.ToString(true));
-    }
-    SummarizeCounts("Only Equality Constrained (NLS)", counters);
-
-    // Now add an inequality constraint and solve it again.
-    // force angle 1 to be positive.
-    problem.inequality_constraints.push_back(Var(1) >= 0);
-    problem.inequality_constraints.push_back(Var(1) <= M_PI);
-    initial_guesses.clear();
-    for (double theta0 = tol::kDeci; theta0 <= M_PI / 2; theta0 += 0.1) {  // NOLINT(cert-flp30-c)
-      for (double theta1 = tol::kMilli; theta1 <= M_PI / 2 - tol::kMilli;
-           theta1 += 0.1) {  // NOLINT(cert-flp30-c)
-        initial_guesses.emplace_back(theta0, theta1);
-      }
-    }
-
-    // Need multiple iterations on the QP now.
-    p.max_qp_iterations = 10;
-
-    counters.clear();
-    for (const auto& guess : initial_guesses) {
-      // solve it
-      const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      counters.emplace_back(outputs);
-
-      // check that we reached the desired position
-      const VectorXd& angles_out = nls.variables();
-      chain->Update(angles_out);
-      ASSERT_EIGEN_NEAR(Vector2d(0.45, 0.6), chain->translation().head(2), tol::kMilli)
-          << fmt::format("Termination: {}\nInitial guess: {}\nSummary:\n{}\n",
-                         fmt::streamed(outputs.termination_state),
-                         fmt::streamed(guess.transpose().format(test_utils::kNumPyMatrixFmt)),
-                         outputs.ToString(true));
-
-      ASSERT_LT(counters.back().at(StatCounterName::NUM_LINE_SEARCH_STEPS), 100)
-          << outputs.ToString(true);
-    }
-    SummarizeCounts("Inequality constrained (NLS)", counters);
-  }
-
-  // Simple two-legged robot. We apply equality constraints that the feet must contact
-  // the floor. We apply a soft cost that the moments must sum to zero (ie. the robot
-  // is statically stable).
-  // TODO(gareth): This test is a bit gnarly, could do with some cleanup.
-  void TestDualActuatorBalancing() {
-    const std::array<uint8_t, 6> mask = {{0, 0, 1, 0, 0, 0}};
-    const std::array<uint8_t, 6> mask_off = {{0, 0, 0, 0, 0, 0}};
-
-    // front leg
-    const Vector3d robot_origin{0, 0.4, 0};
-    std::unique_ptr<ActuatorChain> chain_front = std::make_unique<ActuatorChain>();
-    chain_front->links.emplace_back(Pose(Quaterniond::Identity(), robot_origin), mask);
-    chain_front->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.25, 0.0, 0.0}), mask);
-    chain_front->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}), mask);
-    chain_front->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}),
-                                    mask_off);
-
-    // rear leg
-    std::unique_ptr<ActuatorChain> chain_rear = std::make_unique<ActuatorChain>();
-    chain_rear->links.emplace_back(Pose(Quaterniond::Identity(), robot_origin), mask);
-    chain_rear->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.0, 0.0, 0.0}), mask);
-    chain_rear->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}), mask);
-    chain_rear->links.emplace_back(Pose(Quaterniond::Identity(), Vector3d{0.3, 0.0, 0.0}),
-                                   mask_off);
-
-    Problem problem{};
-    problem.dimension = 5;
-
-    // Try to keep the body orientation close to level.
-    const auto level_cost = [](const Matrix<double, 1, 1>& body_angle,
-                               Matrix<double, 1, 1>* const J_out) -> Matrix<double, 1, 1> {
-      if (J_out) {
-        J_out->setConstant(0.1);
-      }
-      return 0.1 * body_angle;
-    };
-    TestResidualFunctionDerivative<1, 1>(level_cost, Matrix<double, 1, 1>{0.4});
-
-    problem.costs.push_back(MakeResidual<1, 1>({0}, level_cost));
-
-    // We want feet to contact the floor (y=0) and achieve a position of the body (which is
-    // located on top of the first joint of rear leg) of y=0.4
-    const double rear_foot_y = 0.0;
-    const double front_foot_y = 0.05;
-    const auto rear_foot_expr = [&](const Matrix<double, 3, 1>& angles_rear,
-                                    Matrix<double, 1, 3>* const J_out) -> Matrix<double, 1, 1> {
-      chain_rear->Update(angles_rear);
-      const Vector3d anchor_t_foot = chain_rear->translation();
-      if (J_out) {
-        *J_out = chain_rear->translation_D_params().middleRows<1>(1);
-      }
-      return Matrix<double, 1, 1>{anchor_t_foot.y() - rear_foot_y};
-    };
-    TestResidualFunctionDerivative<1, 3>(rear_foot_expr, Vector3d{-0.4, 0.2, 0.5});
-
-    problem.equality_constraints.push_back(MakeResidual<1, 3>({0, 1, 2}, rear_foot_expr));
-
-    // front foot has to end at y=0 as well
-    const auto front_foot_expr = [&](const Matrix<double, 3, 1>& angles_front,
-                                     Matrix<double, 1, 3>* const J_out) -> Matrix<double, 1, 1> {
-      chain_front->Update(angles_front);
-      if (J_out) {
-        *J_out = chain_front->translation_D_params().middleRows<1>(1);
-      }
-      return Matrix<double, 1, 1>{chain_front->translation().y() - front_foot_y};
-    };
-    TestResidualFunctionDerivative<1, 3>(front_foot_expr, Vector3d{0.4, 0.2221, -.8});
-
-    problem.equality_constraints.push_back(MakeResidual<1, 3>({0, 3, 4}, front_foot_expr));
-
-    // We want the moments to cancel out.
-    // We set mg = 1 (gravity force) and assume two different frictions, mu_rear and mu_front.
-    // For simplicity, we assume friction on the rear foot acts to the left (negative x).
-    const double mu1 = 1.;
-    const double mu2 = 2.;
-    const Vector2d com_wrt_anchor{0.15, 0.0};
-    const auto moment_expression = [&](const Matrix<double, 5, 1>& all_angles,
-                                       Matrix<double, 1, 5>* J_out) -> Matrix<double, 1, 1> {
-      chain_rear->Update(all_angles.head<3>());
-      chain_front->Update(Vector3d{all_angles[0], all_angles[3], all_angles[4]});
-
-      const Vector3d anchor_t_foot_rear = chain_rear->translation();
-      const Vector3d anchor_t_foot_front = chain_front->translation();
-
-      // sum of moments must equal zero
-      const double moments = mu1 * (anchor_t_foot_rear.y() - anchor_t_foot_front.y()) +
-                             (anchor_t_foot_rear.x() - com_wrt_anchor.x()) +
-                             (anchor_t_foot_front.x() - com_wrt_anchor.x()) * mu1 / mu2;
-      if (J_out) {
-        J_out->setZero();
-        // rear
-        J_out->leftCols<3>() = mu1 * chain_rear->translation_D_params().middleRows<1>(1);
-        J_out->leftCols<3>() += chain_rear->translation_D_params().topRows<1>();
-        // front
-        // TODO(gareth): Gross, add utilities for this.
-        J_out->leftCols<1>() -=
-            mu1 * chain_front->translation_D_params().middleRows<1>(1).leftCols<1>();
-        J_out->leftCols<1>() +=
-            (mu1 / mu2) * chain_front->translation_D_params().topRows<1>().leftCols<1>();
-        J_out->rightCols<2>() -=
-            mu1 * chain_front->translation_D_params().middleRows<1>(1).rightCols<2>();
-        J_out->rightCols<2>() +=
-            (mu1 / mu2) * chain_front->translation_D_params().topRows<1>().rightCols<2>();
-      }
-      return Matrix<double, 1, 1>{moments};
-    };
-    problem.costs.emplace_back(MakeResidual<1, 5>({0, 1, 2, 3, 4}, moment_expression));
-    TestResidualFunctionDerivative<1, 5>(
-        moment_expression, (Matrix<double, 5, 1>() << 0.22, -0.3, 0.45, 0.6, -0.1).finished());
-
-    // inequality constraint on the knee of the rear leg
-    problem.inequality_constraints.push_back(Var(2) >= 0.0);
-    problem.inequality_constraints.push_back(Var(2) <= M_PI);
-
-    // everything is an angle, so retract in the range [-pi, pi]
-    ConstrainedNonlinearLeastSquares nls(
-        &problem, [](Eigen::VectorXd& x, const ConstVectorBlock& dx, const double alpha) {
-          for (int i = 0; i < x.rows(); ++i) {
-            // These are angles, so clamp them in range of [-pi, pi]
-            x[i] = math::ModPi(x[i] + dx[i] * alpha);
-          }
-        });
-
-    // set up optimizer params
-    ConstrainedNonlinearLeastSquares::Params p{};
-    p.max_iterations = 100;
-    p.max_qp_iterations = 5;
-    p.relative_exit_tol = tol::kPico;
-    p.absolute_first_derivative_tol = 1.0e-10;
-    p.absolute_exit_tol = 1.0e-8;
-    p.termination_kkt_tolerance = tol::kMicro;
-    p.max_line_search_iterations = 5;
-    p.line_search_strategy = LineSearchStrategy::ARMIJO_BACKTRACK;
-    p.lambda_failure_init = 0.01;
-    p.armijo_search_tau = 0.5;  //  backtrack more aggressively
-
-    // We add some non-zero lambda because this problem technically does not have
-    // a positive semi-definite hessian (since there is only one nonlinear cost
-    // on the effector position).
-    p.lambda_initial = 0.001;
-    p.min_lambda = 1.0e-9;
-
-    // create a guess
-    AlignedVector<Matrix<double, 5, 1>> guesses;
-    guesses.push_back(
-        (Matrix<double, 5, 1>() << M_PI / 6, -M_PI / 2, M_PI / 6, -M_PI / 2, M_PI / 4).finished());
-    guesses.push_back(
-        (Matrix<double, 5, 1>() << -M_PI / 4, -M_PI / 4, M_PI / 6, -M_PI / 3, -M_PI / 4)
-            .finished());
-    guesses.push_back(
-        (Matrix<double, 5, 1>() << -M_PI / 3, -M_PI / 2, 0.001, -M_PI / 2, 0.0).finished());
-
-    // solve it
-    std::vector<StatCounters> counters{};
-    for (const auto& guess : guesses) {
-      const NLSSolverOutputs outputs = nls.Solve(p, guess);
-      ASSERT_EQ(outputs.termination_state, NLSTerminationState::SATISFIED_ABSOLUTE_TOL)
-          << outputs.ToString(true);
-      counters.emplace_back(outputs);
-
-      // check costs
-      for (const Residual& eq : problem.equality_constraints) {
-        ASSERT_NEAR(0.0, eq.QuadraticError(nls.variables()), 1.0e-8);
-      }
-      for (const Residual& eq : problem.costs) {
-        ASSERT_NEAR(0.0, eq.QuadraticError(nls.variables()), 1.0e-8);
-      }
-
-      // No strong reason for 30, just place a max to track performance here.
-      ASSERT_LT(counters.back().at(StatCounterName::NUM_LINE_SEARCH_STEPS), 36)
-          << outputs.ToString(true);
-    }
-    SummarizeCounts("Dual Actuator Balancing", counters);
-  }
 };
 
 TEST_FIXTURE(ConstrainedNLSTest, TestComputeQPCostDerivative)
@@ -1146,7 +834,5 @@ TEST_FIXTURE(ConstrainedNLSTest, TestInequalityConstrainedRosenbrock6D)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblau)
 TEST_FIXTURE(ConstrainedNLSTest, TestHimmelblauQuadrantConstrained)
 TEST_FIXTURE(ConstrainedNLSTest, TestSphereWithNonlinearEqualityConstraints)
-TEST_FIXTURE(ConstrainedNLSTest, TestTwoAngleActuatorChain)
-TEST_FIXTURE(ConstrainedNLSTest, TestDualActuatorBalancing)
 
 }  // namespace mini_opt

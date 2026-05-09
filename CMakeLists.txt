@@ -30,6 +30,9 @@ add_library(
   include/mini_opt/structs.hpp
   include/mini_opt/serialization.hpp
   include/mini_opt/tracing.hpp
+  include/mini_opt/eigen_traits.hpp
+  include/mini_opt/manifold.hpp
+  include/mini_opt/numerical_jacobian.hpp
   source/nonlinear.cc
   source/qp.cc
   source/residual.cc

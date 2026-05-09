@@ -1,22 +1,19 @@
+cmake_policy(SET CMP0077 NEW)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
 function(add_libfmt)
-  if(NOT TARGET fmt::fmt)
-    set(FMT_TEST
-        OFF
-        CACHE BOOL "" FORCE)
+  set(FMT_TEST OFF)
+  if(NOT TARGET fmt::fmt-header-only)
     add_subdirectory(fmt EXCLUDE_FROM_ALL)
   endif()
 endfunction()
 add_libfmt()
 
 function(add_gtest)
+  set(BUILD_GMOCK OFF)
+  set(INSTALL_GTEST OFF)
   if(NOT TARGET gtest)
-    set(BUILD_GMOCK
-        OFF
-        CACHE BOOL "" FORCE)
-    set(INSTALL_GTEST
-        OFF
-        CACHE BOOL "" FORCE)
-    add_subdirectory(googletest)
+    add_subdirectory(gtest)
   endif()
 endfunction()
 
@@ -42,19 +39,7 @@ function(add_eigen)
     add_library(eigen INTERFACE IMPORTED GLOBAL)
     set_target_properties(eigen PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
                                            "${EIGEN_INCLUDE_DIRS}")
+    add_library(Eigen3::Eigen ALIAS eigen)
   endif()
 endfunction()
 add_eigen()
-
-function(add_geometry_utils)
-  if(NOT TARGET geometry_utils)
-    set(GEO_UTILS_BUILD_TESTING
-        OFF
-        CACHE BOOL "" FORCE)
-    add_subdirectory(geometry_utils)
-  endif()
-endfunction()
-
-if(MINI_OPT_BUILD_TESTS)
-  add_geometry_utils()
-endif()
