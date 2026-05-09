@@ -59,7 +59,7 @@ class default_error : public std::exception {
 #endif  // __clang__
 
 // Assertion macros.
-#define _F_ASSERT_IMPL(cond, file, line, handler, ...)                                  \
+#define _MINI_OPT_ASSERT_IMPL(cond, file, line, handler, ...)                           \
   do {                                                                                  \
     if (!static_cast<bool>(cond)) {                                                     \
       throw mini_opt::assert::default_error(handler(#cond, file, line, ##__VA_ARGS__)); \
@@ -67,32 +67,32 @@ class default_error : public std::exception {
   } while (false)
 
 // Macro to use when defining an assertion.
-#define F_ASSERT(cond, ...) \
-  _F_ASSERT_IMPL(cond, __FILE__, __LINE__, assert::format_assert, ##__VA_ARGS__)
+#define MINI_OPT_ASSERT(cond, ...) \
+  _MINI_OPT_ASSERT_IMPL(cond, __FILE__, __LINE__, assert::format_assert, ##__VA_ARGS__)
 
-#define F_ASSERT_EQ(a, b, ...)                                                               \
-  _F_ASSERT_IMPL((a) == (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, b, \
-                 ##__VA_ARGS__)
+#define MINI_OPT_ASSERT_EQ(a, b, ...)                                                            \
+  _MINI_OPT_ASSERT_IMPL((a) == (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, \
+                        b, ##__VA_ARGS__)
 
-#define F_ASSERT_NE(a, b, ...)                                                               \
-  _F_ASSERT_IMPL((a) != (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, b, \
-                 ##__VA_ARGS__)
+#define MINI_OPT_ASSERT_NE(a, b, ...)                                                            \
+  _MINI_OPT_ASSERT_IMPL((a) != (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, \
+                        b, ##__VA_ARGS__)
 
-#define F_ASSERT_LT(a, b, ...)                                                              \
-  _F_ASSERT_IMPL((a) < (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, b, \
-                 ##__VA_ARGS__)
+#define MINI_OPT_ASSERT_LT(a, b, ...)                                                              \
+  _MINI_OPT_ASSERT_IMPL((a) < (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, b, \
+                        ##__VA_ARGS__)
 
-#define F_ASSERT_GT(a, b, ...)                                                              \
-  _F_ASSERT_IMPL((a) > (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, b, \
-                 ##__VA_ARGS__)
+#define MINI_OPT_ASSERT_GT(a, b, ...)                                                              \
+  _MINI_OPT_ASSERT_IMPL((a) > (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, b, \
+                        ##__VA_ARGS__)
 
-#define F_ASSERT_LE(a, b, ...)                                                               \
-  _F_ASSERT_IMPL((a) <= (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, b, \
-                 ##__VA_ARGS__)
+#define MINI_OPT_ASSERT_LE(a, b, ...)                                                            \
+  _MINI_OPT_ASSERT_IMPL((a) <= (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, \
+                        b, ##__VA_ARGS__)
 
-#define F_ASSERT_GE(a, b, ...)                                                               \
-  _F_ASSERT_IMPL((a) >= (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, b, \
-                 ##__VA_ARGS__)
+#define MINI_OPT_ASSERT_GE(a, b, ...)                                                            \
+  _MINI_OPT_ASSERT_IMPL((a) >= (b), __FILE__, __LINE__, assert::format_assert_binary, #a, a, #b, \
+                        b, ##__VA_ARGS__)
 
 #ifdef __clang__
 #pragma clang diagnostic pop

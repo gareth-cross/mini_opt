@@ -251,15 +251,15 @@ class ConstrainedNLSTest : public ::testing::Test {
                                     const std::vector<Residual>& equality_constraints, QP* qp,
                                     Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixXd>* solver,
                                     Eigen::VectorXd* dx_out) {
-    F_ASSERT(qp);
-    F_ASSERT(solver);
-    F_ASSERT(dx_out);
+    MINI_OPT_ASSERT(qp);
+    MINI_OPT_ASSERT(solver);
+    MINI_OPT_ASSERT(dx_out);
 
     // we use the QP `b` vector as storage for this operation
     int row = 0;
     for (const Residual& eq : equality_constraints) {
       const int dim = eq.Dimension();
-      F_ASSERT_LE(row + dim, qp->b_eq.rows(), "Insufficient rows in vector b");
+      MINI_OPT_ASSERT_LE(row + dim, qp->b_eq.rows(), "Insufficient rows in vector b");
       eq.ErrorVector(updated_x, qp->b_eq.segment(row, dim));
       row += dim;
     }

@@ -41,7 +41,7 @@ struct LinearInequalityConstraint {
 
   // Clamp a variable x to satisfy the inequality constraint.
   constexpr double ClampX(double x) const {
-    F_ASSERT_NE(a, 0, "`a` cannot be zero");
+    MINI_OPT_ASSERT_NE(a, 0, "`a` cannot be zero");
     // a * x + b >= 0 ---> a * x >= -b
     if (a < 0) {
       // x <= b/a
@@ -60,7 +60,7 @@ struct LinearInequalityConstraint {
 
   // Version of shift that takes vector.
   LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
-    F_ASSERT_LT(variable, x.rows());
+    MINI_OPT_ASSERT_LT(variable, x.rows());
     return ShiftTo(x[variable]);
   }
 

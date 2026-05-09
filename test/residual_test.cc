@@ -34,7 +34,7 @@ static Eigen::MatrixXd CreateRemapMatrix(const std::array<int, N>& index, const 
   Eigen::MatrixXd small_D_large(N, full_size);
   small_D_large.setZero();
   for (int row = 0; row < static_cast<int>(N); ++row) {
-    F_ASSERT_LT(index[row], full_size);
+    MINI_OPT_ASSERT_LT(index[row], full_size);
     small_D_large(row, index[row]) = 1;
   }
   return small_D_large;
@@ -152,8 +152,8 @@ TEST(MiniOptTest, TestDynamicParameterVector) {
         Matrix<double, 2, 3> J_static;
         const auto r = DummyFunction(p, J ? &J_static : nullptr);
         if (J) {
-          F_ASSERT_EQ(2, J->rows());
-          F_ASSERT_EQ(3, J->cols());
+          MINI_OPT_ASSERT_EQ(2, J->rows());
+          MINI_OPT_ASSERT_EQ(3, J->cols());
           J->noalias() = J_static;
         }
         return r;

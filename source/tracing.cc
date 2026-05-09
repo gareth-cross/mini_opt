@@ -89,7 +89,7 @@ inline constexpr std::string_view json_object_template = R"json(
 )json";
 
 trace_collector::trace_collector() : impl_(std::make_unique<trace_collector_impl>()) {
-  F_ASSERT(impl_);
+  MINI_OPT_ASSERT(impl_);
 }
 
 void trace_collector::submit_event(trace_event event) {

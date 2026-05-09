@@ -18,19 +18,19 @@ QPEigenvalues QP::ComputeEigenvalueStats() const {
 QPInteriorPointSolver::QPInteriorPointSolver(const QP* const problem) { Setup(problem); }
 
 void QPInteriorPointSolver::Setup(const QP* const problem) {
-  F_ASSERT(problem != nullptr, "Must pass a non-null problem");
+  MINI_OPT_ASSERT(problem != nullptr, "Must pass a non-null problem");
 
   p_ = problem;
-  F_ASSERT_EQ(p_->G.rows(), p_->G.cols(), "G must be square");
-  F_ASSERT_EQ(p_->G.rows(), p_->c.rows(), "Dims of G and c must match");
-  F_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows(), "Rows of A_e and b_e must match");
+  MINI_OPT_ASSERT_EQ(p_->G.rows(), p_->G.cols(), "G must be square");
+  MINI_OPT_ASSERT_EQ(p_->G.rows(), p_->c.rows(), "Dims of G and c must match");
+  MINI_OPT_ASSERT_EQ(p_->A_eq.rows(), p_->b_eq.rows(), "Rows of A_e and b_e must match");
 
   // If equality constraints were specified, we must be able to multiply A*x
   if (p_->A_eq.size() > 0) {
-    F_ASSERT_EQ(p_->A_eq.cols(), p_->G.rows());
+    MINI_OPT_ASSERT_EQ(p_->A_eq.cols(), p_->G.rows());
   } else {
-    F_ASSERT_EQ(p_->A_eq.rows(), 0);
-    F_ASSERT_EQ(p_->b_eq.rows(), 0);
+    MINI_OPT_ASSERT_EQ(p_->A_eq.rows(), 0);
+    MINI_OPT_ASSERT_EQ(p_->b_eq.rows(), 0);
   }
 
   // Order is [slacks (s), equality multipliers(y), inequality multipliers (lambda)]
@@ -68,17 +68,17 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
 
   // check indices up front
   for (const LinearInequalityConstraint& c : p_->constraints) {
-    F_ASSERT_LT(c.variable, static_cast<int>(dims_.N), "Constraint index is out of bounds");
+    MINI_OPT_ASSERT_LT(c.variable, static_cast<int>(dims_.N), "Constraint index is out of bounds");
   }
 }
 
 // Assert params are in valid range.
 static void CheckParams(const QPInteriorPointSolver::Params& params) {
-  F_ASSERT_GT(params.initial_mu, 0);
-  F_ASSERT_GT(params.sigma, 0);
-  F_ASSERT_LE(params.sigma, 1.0);
-  F_ASSERT_GT(params.termination_kkt_tol, 0);
-  F_ASSERT_GT(params.max_iterations, 0);
+  MINI_OPT_ASSERT_GT(params.initial_mu, 0);
+  MINI_OPT_ASSERT_GT(params.sigma, 0);
+  MINI_OPT_ASSERT_LE(params.sigma, 1.0);
+  MINI_OPT_ASSERT_GT(params.termination_kkt_tol, 0);
+  MINI_OPT_ASSERT_GT(params.max_iterations, 0);
 }
 
 /*
@@ -99,7 +99,7 @@ static void CheckParams(const QPInteriorPointSolver::Params& params) {
  */
 QPInteriorPointSolverOutputs QPInteriorPointSolver::Solve(
     const QPInteriorPointSolver::Params& params) {
-  F_ASSERT(p_, "Must have a valid problem");
+  MINI_OPT_ASSERT(p_, "Must have a valid problem");
   CheckParams(params);
 
   // compute initial guess
@@ -221,7 +221,7 @@ VectorBlock QPInteriorPointSolver::z_block() { return ZBlock(dims_, variables_);
 void QPInteriorPointSolver::SetVariables(const Eigen::VectorXd& v) { variables_ = v; }
 
 const QP& QPInteriorPointSolver::problem() const {
-  F_ASSERT(p_, "Cannot call unless initialized");
+  MINI_OPT_ASSERT(p_, "Cannot call unless initialized");
   return *p_;
 }
 
@@ -282,8 +282,9 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   const auto z = ConstZBlock(dims_, variables_);
 
   // shouldn't happen due to selection of alpha, but double check
-  F_ASSERT(!include_inequalities || (s.array() > 0.0).all(), "Some slack variables s <= 0: [{}]",
-           fmt::streamed(s.transpose().format(kMatrixFmt)));
+  MINI_OPT_ASSERT(!include_inequalities || (s.array() > 0.0).all(),
+                  "Some slack variables s <= 0: [{}]",
+                  fmt::streamed(s.transpose().format(kMatrixFmt)));
 
   // build the left-hand side (we only need lower triangular)
   H_.topLeftCorner(N, N).triangularView<Eigen::Lower>() = p_->G.triangularView<Eigen::Lower>();
@@ -450,7 +451,7 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
     // we can sometimes guess zero for `x`. This is fairly simple, but I keep it around
     // to compare to.
   } else {
-    F_ASSERT_EQ(params.initial_guess_method, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
+    MINI_OPT_ASSERT_EQ(params.initial_guess_method, InitialGuessMethod::SOLVE_EQUALITY_CONSTRAINED);
     // Formulate the problem without inequalities.
     ComputeLDLT(false);
     EvaluateKKTConditions(false);
@@ -483,16 +484,16 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
 
 // Formula 19.9
 void QPInteriorPointSolver::ComputeAlpha(AlphaValues* const output, const double tau) const {
-  F_ASSERT(output != nullptr);
+  MINI_OPT_ASSERT(output != nullptr);
   output->primal = ComputeAlpha(ConstSBlock(dims_, variables_), ConstSBlock(dims_, delta_), tau);
   output->dual = ComputeAlpha(ConstZBlock(dims_, variables_), ConstZBlock(dims_, delta_), tau);
 }
 
 double QPInteriorPointSolver::ComputeAlpha(const ConstVectorBlock& val,
                                            const ConstVectorBlock& d_val, const double tau) {
-  F_ASSERT_EQ(val.rows(), d_val.rows());
-  F_ASSERT_GT(tau, 0);
-  F_ASSERT_LE(tau, 1);
+  MINI_OPT_ASSERT_EQ(val.rows(), d_val.rows());
+  MINI_OPT_ASSERT_GT(tau, 0);
+  MINI_OPT_ASSERT_LE(tau, 1);
   double alpha = 1.0;
   for (int i = 0; i < val.rows(); ++i) {
     const double updated_val = val[i] + d_val[i];
@@ -594,8 +595,8 @@ VectorBlock QPInteriorPointSolver::ZBlock(const ProblemDims& dims, Eigen::Vector
  */
 void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
                                             Eigen::VectorXd* const r) const {
-  F_ASSERT(H != nullptr);
-  F_ASSERT(r != nullptr);
+  MINI_OPT_ASSERT(H != nullptr);
+  MINI_OPT_ASSERT(r != nullptr);
   const int N = dims_.N;
   const int M = dims_.M;
   const int K = dims_.K;
@@ -677,8 +678,8 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
 //  y = (Q2^T * G * Q2)^-1 * -Q2^T * (c + G * u)
 //
 QPNullSpaceTerminationState QPNullSpaceSolver::Solve(const QP& p) {
-  F_ASSERT_GT(p.A_eq.rows(), 0, "Problem must have at least one equality constraint");
-  F_ASSERT_EQ(p.A_eq.rows(), p.b_eq.rows());
+  MINI_OPT_ASSERT_GT(p.A_eq.rows(), 0, "Problem must have at least one equality constraint");
+  MINI_OPT_ASSERT_EQ(p.A_eq.rows(), p.b_eq.rows());
 
   const int num_equality_constraints = static_cast<int>(p.A_eq.rows());
   const int num_params = static_cast<int>(p.A_eq.cols());
@@ -689,7 +690,7 @@ QPNullSpaceTerminationState QPNullSpaceSolver::Solve(const QP& p) {
   Q_ = QR.matrixQ();
   const auto& R = QR.matrixR();
   const auto& P = QR.colsPermutation();
-  F_ASSERT_EQ(P.rows(), num_equality_constraints, "P = [{}, {}]", P.rows(), P.cols());
+  MINI_OPT_ASSERT_EQ(P.rows(), num_equality_constraints, "P = [{}, {}]", P.rows(), P.cols());
 
   // The left and right parts of Q (Q2 is the null space basis of A_eq)
   // [Q1 Q2] * R = A_eq^T
@@ -704,7 +705,7 @@ QPNullSpaceTerminationState QPNullSpaceSolver::Solve(const QP& p) {
   // `u` is a particular solution to the equality constrained system: A_eq * x + b = 0
   permuted_rhs_.noalias() = P.transpose() * -p.b_eq;
   u_.noalias() = Q1 * R_upper.transpose().solve(permuted_rhs_);
-  F_ASSERT_EQ(num_params, u_.rows());
+  MINI_OPT_ASSERT_EQ(num_params, u_.rows());
 
   // Compute the reduced hessian by projecting `G` into null(A_eq)
   G_reduced_.noalias() = Q2.transpose() * p.G.template selfadjointView<Eigen::Lower>() * Q2;
@@ -721,7 +722,7 @@ QPNullSpaceTerminationState QPNullSpaceSolver::Solve(const QP& p) {
 
   // Solve for the vector `y` in:
   llt.solveInPlace(y_);
-  F_ASSERT_EQ(Q_.cols() - rank, y_.rows());
+  MINI_OPT_ASSERT_EQ(Q_.cols() - rank, y_.rows());
 
   // Construct the final solution:
   x_.noalias() = u_ + Q2 * y_;
