@@ -25,11 +25,11 @@ std::ostream& operator<<(std::ostream& s, const QPInteriorPointSolverOutputs& ou
 }
 
 TEST(LinearInequalityConstraintTest, Test) {
-  const LinearInequalityConstraint c1(3, 2.0, -4.0);
+  const linear_inequality_flat_index c1(3, 2.0, -4.0);
   ASSERT_TRUE(c1.IsFeasible(2.1));
   ASSERT_FALSE(c1.IsFeasible(1.9));
 
-  const LinearInequalityConstraint shifted = c1.ShiftTo(1.0);
+  const linear_inequality_flat_index shifted = c1.ShiftTo(1.0);
   ASSERT_TRUE(shifted.IsFeasible(1.1));
   ASSERT_FALSE(shifted.IsFeasible(0.9));
 
@@ -253,8 +253,8 @@ class QPSolverTest : public ::testing::Test {
     using ScalarMatrix = Matrix<double, 1, 1>;
 
     // simple quadratic residual: f_0(x) = ||x - 5||^2, h(x) = x - 5
-    Residual res =
-        MakeResidual<1, 1>({0}, [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
+    residual res =
+        make_residual<1, 1>({0}, [](const ScalarMatrix& x, ScalarMatrix* const J) -> ScalarMatrix {
           if (J) {
             J->setIdentity();
           }
@@ -266,7 +266,7 @@ class QPSolverTest : public ::testing::Test {
 
     // Set up problem
     QP qp{1};
-    res.UpdateHessian(initial_values, &qp.G, &qp.c);
+    res.update_hessian(initial_values, &qp.G, &qp.c);
     qp.constraints.emplace_back(Var(0) <= 4);
 
     QPInteriorPointSolver solver(&qp);
@@ -289,7 +289,7 @@ class QPSolverTest : public ::testing::Test {
   // Quadratic in two variables w/ two inequalities keep them both from their optimal values.
   void TestWithInequalitiesActive() {
     // Quadratic in two variables. Has a PD diagonal hessian.
-    Residual res = MakeResidual<2, 2>(
+    residual res = make_residual<2, 2>(
         {0, 1},
         [](const Matrix<double, 2, 1>& x, Matrix<double, 2, 2>* const J) -> Matrix<double, 2, 1> {
           if (J) {
@@ -305,7 +305,7 @@ class QPSolverTest : public ::testing::Test {
 
     // Set up problem
     QP qp{2};
-    res.UpdateHessian(initial_values, &qp.G, &qp.c);
+    res.update_hessian(initial_values, &qp.G, &qp.c);
     qp.constraints.emplace_back(Var(0) <= 1.0);
     qp.constraints.emplace_back(Var(1) >= -3.0);
 
@@ -333,7 +333,7 @@ class QPSolverTest : public ::testing::Test {
 
   // Quadratic in three variables, with one active and one inactive inequality.
   void TestWithInequalitiesPartiallyActive() {
-    Residual res = MakeResidual<3, 3>(
+    residual res = make_residual<3, 3>(
         {0, 1, 2},
         [](const Matrix<double, 3, 1>& x, Matrix<double, 3, 3>* const J) -> Matrix<double, 3, 1> {
           if (J) {
@@ -346,7 +346,7 @@ class QPSolverTest : public ::testing::Test {
 
     // Set up problem w/ only one relevant constraint
     QP qp{3};
-    res.UpdateHessian(Vector3d::Zero(), &qp.G, &qp.c);
+    res.update_hessian(Vector3d::Zero(), &qp.G, &qp.c);
     qp.constraints.emplace_back(Var(1) >= -2.0);
     qp.constraints.emplace_back(Var(0) >= -3.5);  //  irrelevant
 
@@ -578,7 +578,7 @@ class QPSolverTest : public ::testing::Test {
     const Eigen::Matrix2d A = (Eigen::Matrix2d() << -2.0, 1.4, 2.2, -3.5).finished();
     const Eigen::Vector2d b{-0.8, 1.3};
 
-    Residual cost = MakeResidual<2, 2>(
+    residual cost = make_residual<2, 2>(
         {0, 1},
         [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
           if (J) {
@@ -588,7 +588,7 @@ class QPSolverTest : public ::testing::Test {
         });
 
     constexpr double x1_pinned_value = 0.3;
-    Residual eq_constraint = MakeResidual<1, 1>(
+    residual eq_constraint = make_residual<1, 1>(
         {1},
         [&](const Eigen::Matrix<double, 1, 1>& x,
             Eigen::Matrix<double, 1, 1>* const J) -> Eigen::Matrix<double, 1, 1> {
@@ -606,10 +606,10 @@ class QPSolverTest : public ::testing::Test {
     qp.b_eq.resize(1, 1);
     qp.A_eq.setZero();
     qp.b_eq.setZero();
-    cost.UpdateHessian(initial_values, &qp.G, &qp.c);
-    eq_constraint.UpdateJacobian(initial_values,
-                                 qp.A_eq.block(0, 0, qp.A_eq.rows(), qp.A_eq.cols()),
-                                 qp.b_eq.segment(0, qp.b_eq.rows()));
+    cost.update_hessian(initial_values, &qp.G, &qp.c);
+    eq_constraint.update_jacobian(initial_values,
+                                  qp.A_eq.block(0, 0, qp.A_eq.rows(), qp.A_eq.cols()),
+                                  qp.b_eq.segment(0, qp.b_eq.rows()));
 
     QPNullSpaceSolver solver{};
     const QPNullSpaceTerminationState term = solver.Solve(qp);
@@ -632,7 +632,7 @@ class QPSolverTest : public ::testing::Test {
 
   // A little problem with three quadratic costs and one equality constraint over two variables.
   void TestNullSpaceSolver2() {
-    Residual cost_1 = MakeResidual<2, 2>(
+    residual cost_1 = make_residual<2, 2>(
         {0, 1},
         [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
           const Eigen::Matrix2d A0 = (Eigen::Matrix2d() << 1.7, -0.2, 2.3, 1.2).finished();
@@ -643,7 +643,7 @@ class QPSolverTest : public ::testing::Test {
           return A0 * x - b0;
         });
 
-    Residual cost_2 = MakeResidual<2, 2>(
+    residual cost_2 = make_residual<2, 2>(
         {1, 2},
         [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
           const Eigen::Matrix2d A1 = (Eigen::Matrix2d() << -5.0, 3.3, 9.1, 1.9).finished();
@@ -654,7 +654,7 @@ class QPSolverTest : public ::testing::Test {
           return A1 * x - b1;
         });
 
-    Residual cost_3 = MakeResidual<2, 2>(
+    residual cost_3 = make_residual<2, 2>(
         {0, 3},
         [&](const Eigen::Vector2d& x, Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Vector2d {
           const Eigen::Matrix2d A2 = (Eigen::Matrix2d() << 0.2, -0.5, 1.1, -3.1).finished();
@@ -665,7 +665,7 @@ class QPSolverTest : public ::testing::Test {
           return A2 * x - b2;
         });
 
-    Residual eq_constraint = MakeResidual<2, 2>(
+    residual eq_constraint = make_residual<2, 2>(
         {1, 3},
         [&](const Eigen::Matrix<double, 2, 1>& x,
             Eigen::Matrix<double, 2, 2>* const J) -> Eigen::Matrix<double, 2, 1> {
@@ -682,12 +682,12 @@ class QPSolverTest : public ::testing::Test {
     QP qp{4};
     qp.A_eq = Eigen::Matrix<double, 2, 4>::Zero();
     qp.b_eq = Eigen::Matrix<double, 2, 1>::Zero();
-    cost_1.UpdateHessian(initial_values, &qp.G, &qp.c);
-    cost_2.UpdateHessian(initial_values, &qp.G, &qp.c);
-    cost_3.UpdateHessian(initial_values, &qp.G, &qp.c);
-    eq_constraint.UpdateJacobian(initial_values,
-                                 qp.A_eq.block(0, 0, qp.A_eq.rows(), qp.A_eq.cols()),
-                                 qp.b_eq.segment(0, qp.b_eq.rows()));
+    cost_1.update_hessian(initial_values, &qp.G, &qp.c);
+    cost_2.update_hessian(initial_values, &qp.G, &qp.c);
+    cost_3.update_hessian(initial_values, &qp.G, &qp.c);
+    eq_constraint.update_jacobian(initial_values,
+                                  qp.A_eq.block(0, 0, qp.A_eq.rows(), qp.A_eq.cols()),
+                                  qp.b_eq.segment(0, qp.b_eq.rows()));
 
     QPNullSpaceSolver solver{};
     const auto term = solver.Solve(qp);

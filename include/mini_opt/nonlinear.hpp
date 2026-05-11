@@ -3,6 +3,7 @@
 #include <optional>
 #include <variant>
 
+#include "mini_opt/linear_inequality_constraint.hpp"
 #include "mini_opt/qp.hpp"
 #include "mini_opt/residual.hpp"
 
@@ -35,13 +36,13 @@ struct Problem {
   int dimension;
 
   // The errors that form the sum of squares part of the cost function.
-  std::vector<Residual> costs;
+  std::vector<residual> costs;
 
   // Linear inequality constraints.
-  std::vector<LinearInequalityConstraint> inequality_constraints;
+  std::vector<linear_inequality> inequality_constraints;
 
   // Nonlinear inequality constraints.
-  std::vector<Residual> equality_constraints;
+  std::vector<residual> equality_constraints;
 
   // Clear all factors.
   void clear() {
@@ -142,13 +143,13 @@ struct ConstrainedNonlinearLeastSquares {
    * The solver can also damp the approximated hessian (LM/trust-region) if the optimizer fails to
    * make progress.
    */
-  NLSSolverOutputs Solve(const Params& params, const Eigen::VectorXd& variables);
+  NLSSolverOutputs Solve(const Params& params, const values& variables);
 
   // Get the current linearization point.
-  constexpr const Eigen::VectorXd& variables() const noexcept { return variables_; }
+  constexpr const auto& variables() const noexcept { return variables_; }
 
   // Evaluate the non-linear error.
-  Errors EvaluateNonlinearErrors(const Eigen::VectorXd& vars);
+  Errors evaluate_nonlinear_error(const values& vars);
 
   // The user exit callback may return `false` to cause the optimization to terminate early.
   template <typename T>
@@ -158,11 +159,11 @@ struct ConstrainedNonlinearLeastSquares {
 
  private:
   // Update candidate_vars w/ a step size of alpha.
-  void RetractCandidateVars(double alpha);
+  void retract_candidate_vars(double alpha);
 
   // Linearize and fill the QP w/ the problem definition.
-  static Errors LinearizeAndFillQP(const Eigen::VectorXd& variables, double lambda,
-                                   const Problem& problem, QP* qp);
+  static Errors LinearizeAndFillQP(const values& v, const values& initial_v, const scatter& s,
+                                   double lambda, const Problem& problem, QP* qp);
 
   // Solve the QP, and update the step direction `dx_`.
   std::variant<QPNullSpaceTerminationState, QPInteriorPointSolverOutputs> ComputeStepDirection(
@@ -227,9 +228,12 @@ struct ConstrainedNonlinearLeastSquares {
   // The QP solver itself, which we re-use at each iteration.
   std::variant<QPInteriorPointSolver, QPNullSpaceSolver> solver_{};
 
+  // Initial set of variables.
+  values initial_vars_;
+
   // Parameters (the current linearization point)
-  Eigen::VectorXd variables_;
-  Eigen::VectorXd candidate_vars_;
+  values variables_;
+  values candidate_vars_;
   Eigen::VectorXd dx_;
 
   // Storage for computing errors.

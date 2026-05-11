@@ -12,7 +12,6 @@
  *
  * Any equation numbers you see refer to this book, unless otherwise stated.
  *
- * TODO(gareth): Template everything for double or float? For now double suits me.
  */
 namespace mini_opt {
 
@@ -23,21 +22,14 @@ namespace mini_opt {
  *
  *    a * x[variable] + b >= 0
  *
- * TODO(gareth): Generalize beyond diagonal A-matrix?
  */
-struct LinearInequalityConstraint {
+struct linear_inequality_flat_index {
   // Index of the variable this refers to.
   int variable;
 
   // Constraint coefficients.
   double a;
   double b;
-
-  // True if x is feasible.
-  constexpr bool IsFeasible(double x) const noexcept {
-    // There might be an argument to be made we should tolerate some epsilon > 0 here?
-    return a * x + b >= 0.0;
-  }
 
   // Clamp a variable x to satisfy the inequality constraint.
   constexpr double ClampX(double x) const {
@@ -52,43 +44,9 @@ struct LinearInequalityConstraint {
     }
   }
 
-  // Shift to a new linearization point.
-  // a*(x + dx) + b >= 0  -->  a*dx + (ax + b) >= 0
-  constexpr LinearInequalityConstraint ShiftTo(double x) const noexcept {
-    return {variable, a, a * x + b};
-  }
-
-  // Version of shift that takes vector.
-  LinearInequalityConstraint ShiftTo(const Eigen::VectorXd& x) const {
-    MINI_OPT_ASSERT_LT(variable, x.rows());
-    return ShiftTo(x[variable]);
-  }
-
   // Construct with index and coefficients.
-  constexpr LinearInequalityConstraint(int variable, double a, double b) noexcept
+  constexpr linear_inequality_flat_index(int variable, double a, double b) noexcept
       : variable(variable), a(a), b(b) {}
-};
-
-/*
- * Helper for specifying constraints in a more legible way.
- *
- * Allows you to write Var(index) >= alpha to specify the appropriate LinearInequalityConstraint.
- */
-struct Var {
-  explicit constexpr Var(int variable) noexcept : variable_(variable) {}
-
-  // Specify constraint as <=
-  constexpr LinearInequalityConstraint operator<=(double value) const noexcept {
-    return LinearInequalityConstraint(variable_, -1.0, value);
-  }
-
-  // Specify constraint as >=
-  constexpr LinearInequalityConstraint operator>=(double value) const noexcept {
-    return LinearInequalityConstraint(variable_, 1.0, -value);
-  }
-
- private:
-  int variable_;
 };
 
 /*
@@ -117,7 +75,7 @@ struct QP {
   Eigen::VectorXd b_eq;
 
   // Diagonal inequality constraints.
-  std::vector<LinearInequalityConstraint> constraints;
+  std::vector<linear_inequality_flat_index> constraints;
 
   // Compute and return the `QPEigenvalues` struct, which summarizes eigenvalues of `G`.
   QPEigenvalues ComputeEigenvalueStats() const;

@@ -67,7 +67,7 @@ void QPInteriorPointSolver::Setup(const QP* const problem) {
 #endif
 
   // check indices up front
-  for (const LinearInequalityConstraint& c : p_->constraints) {
+  for (const linear_inequality_flat_index& c : p_->constraints) {
     MINI_OPT_ASSERT_LT(c.variable, static_cast<int>(dims_.N), "Constraint index is out of bounds");
   }
 }
@@ -293,7 +293,7 @@ void QPInteriorPointSolver::ComputeLDLT(const bool include_inequalities) {
   }
   if (include_inequalities) {
     for (int i = 0; i < M; ++i) {
-      const LinearInequalityConstraint& c = p_->constraints[i];
+      const linear_inequality_flat_index& c = p_->constraints[i];
       H_(c.variable, c.variable) += c.a * (z[i] / s[i]) * c.a;
     }
   }
@@ -337,7 +337,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
   // apply the variable elimination, which updates r_d (make a copy to save the original)
   r_dual_aug_.noalias() = r_d;
   for (int i = 0; i < M; ++i) {
-    const LinearInequalityConstraint& c = p_->constraints[i];
+    const linear_inequality_flat_index& c = p_->constraints[i];
     r_dual_aug_[c.variable] += c.a * (z[i] / s[i]) * r_pi[i];
     r_dual_aug_[c.variable] += c.a * (r_comp[i] + (ds_aff[i] * dz_aff[i]) - mu) / s[i];
   }
@@ -358,7 +358,7 @@ void QPInteriorPointSolver::SolveForUpdate(const double mu) {
 
   // Go back and solve for dz and ds
   for (int i = 0; i < M; ++i) {
-    const LinearInequalityConstraint& c = p_->constraints[i];
+    const linear_inequality_flat_index& c = p_->constraints[i];
     ds[i] = c.a * dx[c.variable] + r_pi[i];
     dz[i] = -(z[i] / s[i]) * ds[i] - (1 / s[i]) * (r_comp[i] + (ds_aff[i] * dz_aff[i]) - mu);
   }
@@ -412,7 +412,7 @@ void QPInteriorPointSolver::EvaluateKKTConditions(const bool include_inequalitie
   // contributions from inequality constraints
   if (include_inequalities) {
     for (int i = 0; i < dims_.M; ++i) {
-      const LinearInequalityConstraint& c = p_->constraints[i];
+      const linear_inequality_flat_index& c = p_->constraints[i];
       r_d[c.variable] -= c.a * z[i];
       r_pi[i] = c.a * x[c.variable] + c.b - s[i];
       r_comp[i] = s[i] * z[i];
@@ -463,7 +463,7 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
 
   // Clamp x-values into feasible region.
   auto x = XBlock(dims_, variables_);
-  for (const LinearInequalityConstraint& c : p_->constraints) {
+  for (const linear_inequality_flat_index& c : p_->constraints) {
     x[c.variable] = c.ClampX(x[c.variable]);
   }
 
@@ -471,7 +471,7 @@ void QPInteriorPointSolver::ComputeInitialGuess(const Params& params) {
   auto s = SBlock(dims_, variables_);
   auto z = ZBlock(dims_, variables_);
   for (int i = 0; i < dims_.M; ++i) {
-    const LinearInequalityConstraint& c = p_->constraints[i];
+    const linear_inequality_flat_index& c = p_->constraints[i];
     const double s_val = c.a * x[c.variable] + c.b;
     s[i] = std::max(1.0e-9, s_val);
     // TODO(gareth): This value for z is a totally made up heuristic. I set it this way so
@@ -623,7 +623,7 @@ void QPInteriorPointSolver::BuildFullSystem(Eigen::MatrixXd* const H,
     A_i.setZero();
     // create sparse A_i for simplicity
     for (int i = 0; i < M; ++i) {
-      const LinearInequalityConstraint& c = p_->constraints[i];
+      const linear_inequality_flat_index& c = p_->constraints[i];
       A_i(i, c.variable) = c.a;
       b_i[i] = c.b;
     }

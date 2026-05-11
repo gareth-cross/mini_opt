@@ -1,5 +1,6 @@
 // Copyright 2020 Gareth Cross
 #pragma once
+#include <Eigen/Geometry>
 #include <type_traits>
 #include "mini_opt/eigen_traits.hpp"
 
@@ -8,6 +9,23 @@ namespace mini_opt {
 // Unspecified manifold traits.
 template <typename T, typename = void>
 struct manifold_trait;
+
+template <typename T, typename = void>
+struct implements_manifold_t : std::false_type {};
+template <typename T>
+struct implements_manifold_t<
+    T,
+    std::void_t<decltype(manifold_trait<T>::tangent_dim), typename manifold_trait<T>::scalar_type,
+                typename manifold_trait<T>::tangent_vector,
+                decltype(manifold_trait<T>::local_coordinates(std::declval<const T&>(),
+                                                              std::declval<const T&>())),
+                decltype(manifold_trait<T>::retract(
+                    std::declval<const T&>(),
+                    std::declval<const typename manifold_trait<T>::tangent_vector&>()))>>
+    : std::true_type {};
+
+template <typename T>
+constexpr bool implements_manifold_v = implements_manifold_t<T>::value;
 
 // Quaternion from rotation vector.
 template <typename Derived,
@@ -98,5 +116,8 @@ struct manifold_trait<T, typename std::enable_if<std::is_floating_point<T>::valu
 
   static constexpr int tangent_dimension(const T&) { return tangent_dim; }
 };
+
+static_assert(implements_manifold_v<Eigen::Quaterniond>);
+static_assert(implements_manifold_v<Eigen::Vector3d>);
 
 }  // namespace mini_opt

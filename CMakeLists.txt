@@ -33,12 +33,15 @@ add_library(
   include/mini_opt/eigen_traits.hpp
   include/mini_opt/manifold.hpp
   include/mini_opt/numerical_jacobian.hpp
+  include/mini_opt/key.hpp
+  include/mini_opt/hashing.hpp
   source/nonlinear.cc
   source/qp.cc
   source/residual.cc
   source/structs.cc
   source/serialization.cc
-  source/tracing.cc)
+  source/tracing.cc
+  source/values.cc)
 target_link_libraries(${LIBRARY_NAME} PUBLIC fmt::fmt-header-only eigen)
 if(MINI_OPT_SERIALIZATION)
   target_link_libraries(${LIBRARY_NAME} PUBLIC nlohmann_json::nlohmann_json)

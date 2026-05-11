@@ -6,6 +6,7 @@
 #include <fmt/ostream.h>
 #include <Eigen/Dense>  //  for inverse()
 
+#include "mini_opt/eigen_fmt.hpp"
 #include "mini_opt/tracing.hpp"
 
 namespace mini_opt {
@@ -23,9 +24,9 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   // determine the size of the equality constraint matrix
   int total_eq_size = 0;
   int max_error_size = 0;
-  for (const Residual& constraint : p_->equality_constraints) {
-    total_eq_size += constraint.Dimension();
-    max_error_size = std::max(max_error_size, constraint.Dimension());
+  for (const residual& constraint : p_->equality_constraints) {
+    total_eq_size += constraint.residual_dimension();
+    max_error_size = std::max(max_error_size, constraint.residual_dimension());
   }
   qp_.A_eq.resize(total_eq_size, p_->dimension);
   qp_.b_eq.resize(total_eq_size);
@@ -33,15 +34,9 @@ ConstrainedNonlinearLeastSquares::ConstrainedNonlinearLeastSquares(const Problem
   // we'll fill these out later
   qp_.constraints.reserve(p_->inequality_constraints.size());
 
-  // leave uninitialized, we'll fill this in later
-  variables_.resize(p_->dimension);
-  candidate_vars_.resizeLike(variables_);
-  dx_.resizeLike(variables_);
-  dx_.setZero();
-
   // also compute max error size for the soft costs too
-  for (const Residual& cost : p_->costs) {
-    max_error_size = std::max(max_error_size, cost.Dimension());
+  for (const residual& cost : p_->costs) {
+    max_error_size = std::max(max_error_size, cost.residual_dimension());
   }
   error_buffer_.resize(max_error_size);
 }
@@ -73,10 +68,11 @@ static void CheckParams(const ConstrainedNonlinearLeastSquares::Params& params) 
 }
 
 NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
-                                                         const Eigen::VectorXd& variables) {
+                                                         const values& variables) {
   MINI_OPT_FUNCTION_TRACE();
   MINI_OPT_ASSERT(p_ != nullptr, "Must have a valid problem");
   CheckParams(params);
+  initial_vars_ = variables;
   variables_ = variables;
   state_ = OptimizerState::NOMINAL;
 
@@ -88,6 +84,8 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
     solver_ = QPInteriorPointSolver();
   }
 
+  const scatter s(variables_);
+
   // Iterate until max.
   double lambda{params.lambda_initial};
   double penalty{params.equality_penalty_initial};
@@ -95,7 +93,7 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   iterations.reserve(10);
   for (int iter = 0; iter < params.max_iterations; ++iter) {
     // Fill out the QP and compute current errors.
-    const Errors errors_pre = LinearizeAndFillQP(variables_, lambda, *p_, &qp_);
+    const Errors errors_pre = LinearizeAndFillQP(variables_, initial_vars_, s, lambda, *p_, &qp_);
 
     // Compute the descent direction, `dx`.
     auto qp_outputs = ComputeStepDirection(params);
@@ -157,18 +155,14 @@ NLSSolverOutputs ConstrainedNonlinearLeastSquares::Solve(const Params& params,
   return {NLSTerminationState::MAX_ITERATIONS, std::move(iterations)};
 }
 
-void ConstrainedNonlinearLeastSquares::RetractCandidateVars(const double alpha) {
-  candidate_vars_ = variables_;
-  if (custom_retraction_) {
-    custom_retraction_(candidate_vars_, const_cast<const Eigen::VectorXd&>(dx_).head(p_->dimension),
-                       alpha);
-  } else {
-    candidate_vars_ += dx_ * alpha;
-  }
+void ConstrainedNonlinearLeastSquares::retract_candidate_vars(const double alpha) {
+  const Eigen::VectorXd dx_scaled = dx_ * alpha;
+  candidate_vars_ = variables_.retract(dx_scaled);
 }
 
-Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorXd& variables,
-                                                            const double lambda,
+Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const values& v,
+                                                            const values& initial_v,
+                                                            const scatter& s, const double lambda,
                                                             const Problem& problem, QP* const qp) {
   MINI_OPT_FUNCTION_TRACE();
   MINI_OPT_ASSERT(qp != nullptr);
@@ -181,34 +175,44 @@ Errors ConstrainedNonlinearLeastSquares::LinearizeAndFillQP(const Eigen::VectorX
   // zero out the linear system before adding all the costs to it
   qp->G.setZero();
   qp->c.setZero();
-  for (const Residual& cost : problem.costs) {
-    output_errors.f += cost.UpdateHessian(variables, &qp->G, &qp->c);
+  for (const residual& cost : problem.costs) {
+    output_errors.f += cost.update_hessian(v, s, &qp->G, &qp->c);
   }
   if (lambda > 0) {
     qp->G.diagonal().array() += lambda;
   }
 
+  fmt::print("QP G matrix:\n{}\n", qp->G);
+
   // linearize equality constraints
   qp->A_eq.setZero();
   qp->b_eq.setZero();
   int row = 0;
-  for (const Residual& eq : problem.equality_constraints) {
-    const int dim = eq.Dimension();
+  for (const residual& eq : problem.equality_constraints) {
+    const int dim = eq.residual_dimension();
     MINI_OPT_ASSERT_LE(row + dim, qp->A_eq.rows());
 
     // block we write the error into
     auto b_seg = qp->b_eq.segment(row, dim);
-    eq.UpdateJacobian(variables, qp->A_eq.middleRows(row, dim), b_seg);
+    eq.update_jacobian(v, s, qp->A_eq.middleRows(row, dim), b_seg);
 
     // total L1 norm in the equality constraints
     output_errors.equality += b_seg.lpNorm<1>();
     row += dim;
   }
 
+  // dx = v [-] initial_v
+  const Eigen::VectorXd dx = v.local_coordinates(initial_v, s);
+
   // shift constraints to the new linearization point:
   qp->constraints.clear();
-  for (const LinearInequalityConstraint& c : problem.inequality_constraints) {
-    qp->constraints.push_back(c.ShiftTo(variables));
+  for (const linear_inequality& c : problem.inequality_constraints) {
+    const int offset = s.at(c.variable) + c.index;
+    const auto shifted = c.shift_to(dx[offset]);
+    fmt::print("Adding shifted constraint: a = {}, b = {}, dx = {}, original = [a: {}, b: {}]\n",
+               shifted.a, shifted.b, dx[offset], c.a, c.b);
+    // qp->constraints.emplace_back(offset, shifted.a, shifted.b);
+    qp->constraints.emplace_back(offset, c.a, c.b);
   }
   return output_errors;
 }
@@ -276,17 +280,17 @@ bool ConstrainedNonlinearLeastSquares::QPWasIndefinite(
   return false;  // TODO: Return a "non-SPD" condition from the interior point solver.
 }
 
-Errors ConstrainedNonlinearLeastSquares::EvaluateNonlinearErrors(const Eigen::VectorXd& vars) {
+Errors ConstrainedNonlinearLeastSquares::evaluate_nonlinear_error(const values& vars) {
   MINI_OPT_FUNCTION_TRACE();
   Errors output_errors{};
-  for (const Residual& cost : p_->costs) {
-    const auto err_out = error_buffer_.head(cost.Dimension());
-    cost.ErrorVector(vars, err_out);
+  for (const residual& cost : p_->costs) {
+    const auto err_out = error_buffer_.head(cost.residual_dimension());
+    cost.error_vector(vars, err_out);
     output_errors.f += 0.5 * err_out.squaredNorm();
   }
-  for (const Residual& eq : p_->equality_constraints) {
-    const auto err_out = error_buffer_.head(eq.Dimension());
-    eq.ErrorVector(vars, err_out);
+  for (const residual& eq : p_->equality_constraints) {
+    const auto err_out = error_buffer_.head(eq.residual_dimension());
+    eq.error_vector(vars, err_out);
     output_errors.equality += err_out.lpNorm<1>();
   }
   return output_errors;
@@ -386,10 +390,10 @@ StepSizeSelectionResult ConstrainedNonlinearLeastSquares::SelectStepSize(
     }
 
     // Update our candidate state.
-    RetractCandidateVars(alpha);
+    retract_candidate_vars(alpha);
 
     // Compute errors, and double check that they were numerically valid.
-    const Errors errors_step = EvaluateNonlinearErrors(candidate_vars_);
+    const Errors errors_step = evaluate_nonlinear_error(candidate_vars_);
     steps_.push_back(LineSearchStep{alpha, errors_step});
 
     if (errors_step.ContainsInvalidValues()) {

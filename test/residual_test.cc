@@ -41,15 +41,15 @@ static Eigen::MatrixXd CreateRemapMatrix(const std::array<int, N>& index, const 
 }
 
 template <int ResidualDim, int NumParams>
-static double L2SquaredError(const Residual& res, const Eigen::VectorXd& params) {
-  Eigen::VectorXd out(res.Dimension());
+static double L2SquaredError(const residual& res, const Eigen::VectorXd& params) {
+  Eigen::VectorXd out(res.residual_dimension());
   res.ErrorVector(params, out.head(out.rows()));
   return 0.5 * out.squaredNorm();
 }
 
 // Test the statically-sized residual struct.
 TEST(MiniOptTest, TestStaticResidualSimple) {
-  Residual res = MakeResidual<2, 3>({0, 1, 2}, &DummyFunction);
+  residual res = MakeResidual<2, 3>({0, 1, 2}, &DummyFunction);
 
   // pick some params for xyz
   const Vector3d params_xyz = {-0.5, 1.2, 0.3};
@@ -75,7 +75,7 @@ TEST(MiniOptTest, TestStaticResidualSimple) {
 
 // Test re-ordering the params.
 TEST(MiniOptTest, TestStaticResidualOutOfOrder) {
-  Residual res = MakeResidual<2, 3>({2, 0, 1}, &DummyFunction);
+  residual res = MakeResidual<2, 3>({2, 0, 1}, &DummyFunction);
 
   const auto local_D_global = CreateRemapMatrix<3>({2, 0, 1}, 3);
 
@@ -105,7 +105,7 @@ TEST(MiniOptTest, TestStaticResidualOutOfOrder) {
 
 // Test indexing into a larger matrix.
 TEST(MiniOptTest, TestStaticResidualSparseIndex) {
-  Residual res = MakeResidual<2, 3>({5, 1, 3}, &DummyFunction);
+  residual res = MakeResidual<2, 3>({5, 1, 3}, &DummyFunction);
   const auto local_D_global = CreateRemapMatrix<3>({5, 1, 3}, 7);
 
   // pick some params for xyz
@@ -147,7 +147,7 @@ TEST(MiniOptTest, TestStaticResidualSparseIndex) {
 
 // Test with dynamic # of params.
 TEST(MiniOptTest, TestDynamicParameterVector) {
-  Residual res = MakeResidual<2, Dynamic>(
+  residual res = MakeResidual<2, Dynamic>(
       {0, 1, 2}, [&](const VectorXd& p, Matrix<double, 2, Dynamic>* const J) -> Vector2d {
         Matrix<double, 2, 3> J_static;
         const auto r = DummyFunction(p, J ? &J_static : nullptr);
